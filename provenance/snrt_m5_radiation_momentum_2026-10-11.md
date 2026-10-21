@@ -717,3 +717,40 @@ The data can be regenerated only by rerunning the recorded inputs. This is
 same-MPI, static-64-cell integration evidence using reference-control source,
 SED and dust contracts; it does not qualify the unapproved physical-input
 package, cosmological production, or the project's production-release gate.
+
+#### Manual Ada hybrid M5 + dust + CHIMES restart runner recheck — 2026-10-21
+
+After correcting the restart-leg acceptance rule, reran the complete runner
+manually on lageunha's RTX 5000 Ada (no Slurm allocation), MPI2/OMP4, using the
+same verified executable SHA256
+`bc03f86c4fcf889daf17a6e84b459c3c97920f068c340443ac2d299abfab28b9` and the
+committed runner SHA256
+`0748c280d5929883009ff8921df7cd505b2d55173a80ca0d79cce1caf459c26f`. Run ID:
+`lageunha-20261021-hybrid-restart-runnerfix`. Both effective namelists are
+retained; their hashes match the earlier run exactly. The audited clocks are
+`noutput=1`, future `aout=2.0`, `tout=1e30`, `nstepmax=4`, `foutput=2`, and
+`fbackup=1000000`, yielding three full HDF5 dumps (about 289.7 MiB total).
+
+The fixed runner exited 0 end-to-end. The continuous leg completed in 49.176 s;
+each MPI rank reported hybrid mode, respectively 2536 and 2871 successful GPU
+RHS calls, nonzero CPU fallback work, one stream, and zero device errors. The
+resumed leg completed in 32.047 s and restored radiation from HDF5. It safely
+used CPU fallback (32316/32307 calls) with zero GPU calls and zero device
+errors; this reaffirms that restored-state fallback is allowed, not a GPU
+execution claim for the restart leg.
+
+The existing comparator returned `M5_COUPLED_RESTART_PASS`: 449 datasets, 446
+bitwise, and three sink-angular-momentum floating differences no larger than
+`1.9721522630525295e-31`; `rtol=1e-12`, `atol=1e-25`. All 39 contract
+attributes and six clocks match exactly; grid identity is exact and no new-star
+ID relabellings occurred. The result is retained in
+`.m5-effective-restart-lageunha-20261021-hybrid-restart-runnerfix/restart-comparison.json`.
+
+After driver evaluation, only the three hash-verified HDF5 dumps and their three
+128-byte `cooling_*.out` files were removed (303846544 bytes total). Their
+original sizes and SHA256 values are recorded in that run directory's
+`raw-cleanup.json`; effective inputs, logs, HDF5 checksums, metadata and
+comparison remain. This rechecks runner behavior and coupled restart
+consistency for the same-MPI static-64-cell reference-control case; it is not a
+performance measurement, cosmological qualification, or production-physics
+approval.
