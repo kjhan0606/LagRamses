@@ -22,8 +22,8 @@ readonly AMR_INTERFACE=${M5_AMR_INTERFACE_CHECK:-0}
 readonly A40_SMOKE=${M5_ALLOW_A40_SMOKE:-0}
 readonly MANUAL_LAUNCH=${M5_MANUAL_LAUNCH:-0}
 readonly RUN_ID=${M5_RUN_ID:-${SLURM_JOB_ID:-}}
-readonly OMP_THREADS=${M5_OMP_THREADS:-${SLURM_CPUS_PER_TASK:-8}}
-readonly MPI_RANKS=${SLURM_NTASKS:-1}
+readonly OMP_THREADS=${SLURM_CPUS_PER_TASK:-${M5_OMP_THREADS:-8}}
+readonly MPI_RANKS=${SLURM_NTASKS:-${M5_MPI_RANKS:-1}}
 readonly CHIMES_BACKEND=${M5_CHIMES_BACKEND:-cpu}
 readonly TRANSPORT_BACKEND=${M5_TRANSPORT_BACKEND:-auto}
 readonly MATERIAL_BACKEND=${M5_MATERIAL_BACKEND:-auto}
@@ -40,7 +40,10 @@ case "$MANUAL_LAUNCH" in
     test "$CHIMES_BACKEND" = hybrid
     test "$M5_ALLOW_ADA_MANUAL" = 1
     test -n "$RUN_ID"
-    test "$MPI_RANKS" -eq 1
+    case "$MPI_RANKS" in
+      1|2) ;;
+      *) echo 'Manual Ada smoke supports one or two MPI ranks' >&2; exit 2 ;;
+    esac
     ;;
   *) echo 'M5_MANUAL_LAUNCH must be 0 or 1' >&2; exit 2 ;;
 esac
@@ -322,7 +325,8 @@ run_m5_case() {
   (
     cd "$directory"
     if [[ "$MANUAL_LAUNCH" == 1 ]]; then
-      mpiexec -genv LD_PRELOAD "$CHIMES_REPORTER" -n "$MPI_RANKS" \
+      mpiexec -genv I_MPI_PIN 1 -genv I_MPI_PIN_DOMAIN omp \
+        -genv LD_PRELOAD "$CHIMES_REPORTER" -n "$MPI_RANKS" \
         "$BINARY" effective.nml > run.log 2>&1
     else
       srun --export=ALL,LD_PRELOAD="$CHIMES_REPORTER" --mpi=pmi2 \
@@ -420,14 +424,16 @@ fi
 if [[ "$AMR_INTERFACE" == 1 ]]; then
   if [[ "$CHIMES_BACKEND" == hybrid ]]; then
     grep -Fq 'CHIMES integrated compute backend: hybrid (host CVODE/LU, asynchronous device RHS/cooling)' run.log
-    grep -Eq 'CHIMES_RHS_COUNTS gpu_calls=[1-9][0-9]* .*device_errors=0 .*streams_used=[1-9][0-9]*' run.log || {
-      echo 'FAIL: CHIMES hybrid was selected but no successful GPU RHS calls were reported' >&2
+    gpu_count_ranks=$(grep -Ec 'CHIMES_RHS_COUNTS gpu_calls=[1-9][0-9]* .*device_errors=0 .*streams_used=[1-9][0-9]*' run.log || true)
+    if [[ "$gpu_count_ranks" -ne "$MPI_RANKS" ]]; then
+      echo "FAIL: successful CHIMES GPU RHS counters from $gpu_count_ranks/$MPI_RANKS ranks" >&2
       exit 6
-    }
-    grep -Eq 'CHIMES_GPU_WORKER_MASK value=[1-9][0-9]*' run.log || {
-      echo 'FAIL: CHIMES hybrid reported no GPU worker use' >&2
+    fi
+    gpu_mask_ranks=$(grep -Ec 'CHIMES_GPU_WORKER_MASK value=[1-9][0-9]*' run.log || true)
+    if [[ "$gpu_mask_ranks" -ne "$MPI_RANKS" ]]; then
+      echo "FAIL: CHIMES GPU worker mask reported from $gpu_mask_ranks/$MPI_RANKS ranks" >&2
       exit 6
-    }
+    fi
   fi
   grep -Eq 'Level[[:space:]]+3 has[[:space:]]+8 grids' run.log
   grep -Eq 'SNRT_MN_COMMIT level/order/substeps=[[:space:]]+2[[:space:]]+5' run.log
