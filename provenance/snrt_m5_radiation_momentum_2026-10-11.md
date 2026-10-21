@@ -670,3 +670,50 @@ data or a claim of universal source accuracy. It does not resolve upstream
 data terms, provide a committed clean source identity, or satisfy the full
 physical-production preflight by itself. The former candidate-use approval
 blocker is closed; the remaining release conditions stay explicit.
+
+#### Manual Ada hybrid M5 + dust + CHIMES restart — 2026-10-21
+
+On lageunha's RTX 5000 Ada, the selected `effective_population` profile ran
+MPI2/OMP4 as a continuous four-step trajectory and as a step-2 HDF5 restart to
+step4. Effective inputs are retained under
+`.m5-effective-restart-lageunha-20261021-hybrid-restart/`; continuous and
+resumed namelist SHA256 values are
+`f3c7e4bb8f51f60895e3136be12911aa88678aa80417de9795916c1d19f859a4` and
+`b367b29be16a95cf79e27501795b054634cf1f40ac8ce18a5123abc297f48e18`.
+The executable is `ramses_m5_ramses_momentum_closure_v13d`, SHA256
+`bc03f86c4fcf889daf17a6e84b459c3c97920f068c340443ac2d299abfab28b9`.
+
+The audited output policy was `noutput=1`, future `aout=2.0`, `tout=1e30`,
+`nstepmax=4`, `foutput=2`, `fbackup=1000000`: exactly three full HDF5 dumps,
+measured at 101272496, 101286832 and 101286832 bytes (289.7 MiB total).
+`SNRT_HDF5_RADIATION_RESTORE_PASS` is present. The existing coupled comparator
+reports `M5_COUPLED_RESTART_PASS`: 449 datasets compared, 448 bitwise, the
+remaining sink value differs by only `1.6023737137301802e-31`; all 39
+contract attributes and all six clocks match exactly, with the unchanged
+`rtol=1e-12`, `atol=1e-25`. Exact grid identity matched and there were no new
+star-ID relabellings. The compact comparison JSON is retained at
+`.m5-effective-restart-lageunha-20261021-hybrid-restart/restart-comparison.json`.
+
+Both processes selected the hybrid backend and mapped to the Ada. During the
+continuous half, each rank reported 10144 successful GPU RHS calls, zero
+device errors, one stream and worker mask15. During the resumed half, each
+reported zero GPU calls and respectively 32316/32307 CPU fallbacks, also with
+zero device errors; thus the runtime automatically stayed on CPU for that
+portion. We do not claim GPU execution after restore or infer an unlogged
+fallback reason. The first runner attempt exited6 because its then-current
+acceptance helper incorrectly required nonzero GPU calls from every resumed
+rank. It was corrected to require complete, error-free per-process reports,
+GPU activity in the continuous leg, and to permit automatic CPU fallback in
+the resumed leg; the corrected check passes against these retained logs and
+the prior two-rank AMR smoke. No hydro/source/solver change or tolerance
+relaxation was made for this test.
+
+After evaluating the restart comparison, the three HDF5 snapshots and their
+three 128-byte cooling outputs were removed (six files, 303846544 bytes).
+Per-file original paths, sizes, checksums and `removed=true` are retained in
+`.m5-effective-restart-lageunha-20261021-hybrid-restart/raw-cleanup.json`;
+effective inputs, logs, executable/data hashes and compact comparison remain.
+The data can be regenerated only by rerunning the recorded inputs. This is
+same-MPI, static-64-cell integration evidence using reference-control source,
+SED and dust contracts; it does not qualify the unapproved physical-input
+package, cosmological production, or the project's production-release gate.

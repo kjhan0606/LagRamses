@@ -35,11 +35,13 @@ case "$MANUAL_LAUNCH" in
   0) ;;
   1)
     test "$PROFILE" = effective_population
-    test "$VERIFY_RESTART" = 0
-    test "$AMR_INTERFACE" = 1
     test "$CHIMES_BACKEND" = hybrid
     test "$M5_ALLOW_ADA_MANUAL" = 1
     test -n "$RUN_ID"
+    case "$VERIFY_RESTART:$AMR_INTERFACE" in
+      0:1|1:0) ;;
+      *) echo 'Manual Ada mode requires exactly one of AMR interface or restart verification' >&2; exit 2 ;;
+    esac
     case "$MPI_RANKS" in
       1|2) ;;
       *) echo 'Manual Ada smoke supports one or two MPI ranks' >&2; exit 2 ;;
@@ -136,11 +138,14 @@ case "$gpu_name" in
   *A100*|*H100*) ;;
   *RTX*5000*Ada*)
     if [[ "$MANUAL_LAUNCH" != 1 || "$PROFILE" != effective_population || \
-          "$VERIFY_RESTART" != 0 || "$AMR_INTERFACE" != 1 || \
           "$CHIMES_BACKEND" != hybrid ]]; then
-      echo 'Ada is allowed only for the explicit manual effective-population hybrid AMR smoke' >&2
+      echo 'Ada is allowed only for an explicit manual effective-population hybrid smoke' >&2
       exit 2
     fi
+    case "$VERIFY_RESTART:$AMR_INTERFACE" in
+      0:1|1:0) ;;
+      *) echo 'Ada smoke must select either AMR interface or restart verification, not both' >&2; exit 2 ;;
+    esac
     ;;
   *A40*)
     if [[ "$A40_SMOKE" != 1 || "$PROFILE" != effective_population || \
@@ -230,6 +235,13 @@ awk -v dust_ic="$dust_ic_settings" \
 mv -- "$WORK/effective.nml.tmp" "$WORK/effective.nml"
 grep -Fq "radiation_transport='snrt_mn', snrt_moment_order=5" "$WORK/effective.nml"
 grep -Fq "dust_cooling='chimes_neq_v1'" "$WORK/effective.nml"
+test "$(grep -Ec '^[[:space:]]*noutput=1$' "$WORK/effective.nml")" -eq 1
+grep -Eq '^[[:space:]]*aout=2\.0d0$' "$WORK/effective.nml"
+grep -Eq '^[[:space:]]*tout=1\.0d30$' "$WORK/effective.nml"
+case "$PROFILE" in
+  effective_population) grep -Eq '^[[:space:]]*nstepmax=4$' "$WORK/effective.nml" ;;
+  agn_reference) grep -Eq '^[[:space:]]*nstepmax=3$' "$WORK/effective.nml" ;;
+esac
 grep -Eq '^[[:space:]]*foutput=1000000$' "$WORK/effective.nml"
 grep -Fq "feedback_mode='channel_resolved'" "$WORK/effective.nml"
 grep -Fq "population_model='single_star_ssp'" "$WORK/effective.nml"
@@ -335,6 +347,26 @@ run_m5_case() {
     fi
   )
 }
+check_hybrid_process_reports() {
+  local logfile=$1 minimum_gpu_reports=$2
+  local report_ranks gpu_count_ranks gpu_mask_ranks
+  grep -Fq 'CHIMES integrated compute backend: hybrid (host CVODE/LU, asynchronous device RHS/cooling)' "$logfile"
+  report_ranks=$(grep -Ec 'CHIMES_RHS_COUNTS gpu_calls=[0-9]+ .*device_errors=0 .*streams_used=[0-9]+' "$logfile" || true)
+  if [[ "$report_ranks" -ne "$MPI_RANKS" ]]; then
+    echo "FAIL: CHIMES RHS counters from $report_ranks/$MPI_RANKS ranks in $logfile" >&2
+    return 6
+  fi
+  gpu_mask_ranks=$(grep -Ec 'CHIMES_GPU_WORKER_MASK value=[0-9]+' "$logfile" || true)
+  if [[ "$gpu_mask_ranks" -ne "$MPI_RANKS" ]]; then
+    echo "FAIL: CHIMES GPU worker mask reported from $gpu_mask_ranks/$MPI_RANKS ranks in $logfile" >&2
+    return 6
+  fi
+  gpu_count_ranks=$(grep -Ec 'CHIMES_RHS_COUNTS gpu_calls=[1-9][0-9]* .*device_errors=0 .*streams_used=[1-9][0-9]*' "$logfile" || true)
+  if [[ "$gpu_count_ranks" -lt "$minimum_gpu_reports" ]]; then
+    echo "FAIL: successful CHIMES GPU RHS reports from $gpu_count_ranks ranks; need at least $minimum_gpu_reports in $logfile" >&2
+    return 6
+  fi
+}
 if [[ "$VERIFY_RESTART" == 1 ]]; then
   mkdir "$WORK/continuous" "$WORK/resumed"
   cp "$WORK/ic_sink" "$WORK/continuous/ic_sink"
@@ -343,17 +375,22 @@ if [[ "$VERIFY_RESTART" == 1 ]]; then
   sed -e 's/^[[:space:]]*foutput=1000000$/  foutput=2/' \
       -e 's/^[[:space:]]*nrestart=0$/  nrestart=1/' \
       "$WORK/effective.nml" > "$WORK/resumed/effective.nml"
+  grep -Eq '^[[:space:]]*nrestart=0$' "$WORK/continuous/effective.nml"
   grep -Eq '^[[:space:]]*nrestart=1$' "$WORK/resumed/effective.nml"
+  grep -Eq '^[[:space:]]*foutput=2$' "$WORK/continuous/effective.nml"
+  grep -Eq '^[[:space:]]*foutput=2$' "$WORK/resumed/effective.nml"
   sha256sum "$WORK/continuous/effective.nml" "$WORK/resumed/effective.nml" >> "$WORK/inputs.sha256"
-  printf 'OUTPUT_POLICY=noutput1 aout2 tout1e30 foutput2 fbackup1000000; 3 raw dumps <=312MiB estimated (measured ~97MiB/dump), retained until evaluation\nCONTINUOUS_NML=%s\nRESTART_NML=%s\n' \
+  printf 'OUTPUT_POLICY=noutput1 aout2.0d0(future) tout1.0d30 nstepmax4 foutput2 fbackup1000000; 3 raw dumps <=312MiB estimated (measured ~97MiB/dump), retained until evaluation\nCONTINUOUS_NML=%s\nRESTART_NML=%s\n' \
     "$WORK/continuous/effective.nml" "$WORK/resumed/effective.nml" | tee -a "$WORK/launch.txt"
   run_m5_case "$WORK/continuous"
   grep -q 'Run completed' "$WORK/continuous/run.log"
+  if [[ "$CHIMES_BACKEND" == hybrid ]]; then check_hybrid_process_reports "$WORK/continuous/run.log" 1; fi
   test -f "$WORK/continuous/output_00001/COMPLETE"
   test -f "$WORK/continuous/output_00002/COMPLETE"
   ln -s "$WORK/continuous/output_00001" "$WORK/resumed/output_00001"
   run_m5_case "$WORK/resumed"
   grep -q 'Run completed' "$WORK/resumed/run.log"
+  if [[ "$CHIMES_BACKEND" == hybrid ]]; then check_hybrid_process_reports "$WORK/resumed/run.log" 0; fi
   grep -Fq 'SNRT_HDF5_RADIATION_RESTORE_PASS' "$WORK/resumed/run.log"
   if grep -Eiq 'ERROR:|Aborting|forrtl:|failed to converge|nonfinite|NaN_CHK.*=[[:space:]]*[1-9]|M_N.*(rejected|failed)' "$WORK/resumed/run.log"; then
     echo 'FAIL: restarted runtime rejected; all evidence retained' >&2; exit 3
@@ -413,7 +450,7 @@ if [[ "$VERIFY_RESTART" == 1 ]]; then
   stat -c '%s %n' "$WORK/continuous/output_00001/data_00001.h5" \
     "$WORK/continuous/output_00002/data_00002.h5" \
     "$WORK/resumed/output_00002/data_00002.h5" > "$WORK/raw-bytes.txt"
-  printf 'M5_COUPLED_RESTART_EXECUTION_PASS profile=effective_population raw_dumps_retained=3 pending_driver_evaluation=true\n' \
+  printf 'M5_COUPLED_RESTART_EXECUTION_PASS profile=effective_population CHIMES_backend=%s raw_dumps_retained=3 pending_driver_evaluation=true\n' "$CHIMES_BACKEND" \
     | tee "$WORK/result.txt"
   exit 0
 fi
@@ -423,17 +460,7 @@ if ((${#raw_outputs[@]})); then
 fi
 if [[ "$AMR_INTERFACE" == 1 ]]; then
   if [[ "$CHIMES_BACKEND" == hybrid ]]; then
-    grep -Fq 'CHIMES integrated compute backend: hybrid (host CVODE/LU, asynchronous device RHS/cooling)' run.log
-    gpu_count_ranks=$(grep -Ec 'CHIMES_RHS_COUNTS gpu_calls=[1-9][0-9]* .*device_errors=0 .*streams_used=[1-9][0-9]*' run.log || true)
-    if [[ "$gpu_count_ranks" -ne "$MPI_RANKS" ]]; then
-      echo "FAIL: successful CHIMES GPU RHS counters from $gpu_count_ranks/$MPI_RANKS ranks" >&2
-      exit 6
-    fi
-    gpu_mask_ranks=$(grep -Ec 'CHIMES_GPU_WORKER_MASK value=[1-9][0-9]*' run.log || true)
-    if [[ "$gpu_mask_ranks" -ne "$MPI_RANKS" ]]; then
-      echo "FAIL: CHIMES GPU worker mask reported from $gpu_mask_ranks/$MPI_RANKS ranks" >&2
-      exit 6
-    fi
+    check_hybrid_process_reports run.log "$MPI_RANKS"
   fi
   grep -Eq 'Level[[:space:]]+3 has[[:space:]]+8 grids' run.log
   grep -Eq 'SNRT_MN_COMMIT level/order/substeps=[[:space:]]+2[[:space:]]+5' run.log
