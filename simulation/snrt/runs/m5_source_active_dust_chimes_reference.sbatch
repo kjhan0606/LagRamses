@@ -469,6 +469,34 @@ if [[ "$AMR_INTERFACE" == 1 ]]; then
     "$MPI_RANKS" "$OMP_NUM_THREADS" | tee "$WORK/result.txt"
   exit 0
 fi
-printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS profile=%s M5_order=5 actual_AGN_source=nonzero dust_mass=enabled CHIMES=cpu momentum_assert_cells=%s reference_controls=NONPRODUCTION raw_outputs=0\n' \
-  "$PROFILE" "$momentum_assert_cells" \
+agn_evidence=not_requested
+if [[ "$PROFILE" == agn_reference ]]; then
+  python3 -B - "$WORK/agn_coarse_state_v1.jsonl" <<'PY'
+import json
+import math
+import sys
+
+records = [
+    json.loads(line)
+    for line in open(sys.argv[1], encoding="utf-8")
+    if line.strip()
+]
+if not any(
+    row.get("record_type") == "agn_coarse_state"
+    and row.get("feedback_mode") == "THERMAL"
+    and math.isfinite(float(row.get("bolometric_luminosity_erg_s", 0.0)))
+    and float(row["bolometric_luminosity_erg_s"]) > 0.0
+    and math.isfinite(float(row.get("coarse_accreted_bh_mass_code", 0.0)))
+    and float(row["coarse_accreted_bh_mass_code"]) > 0.0
+    for row in records
+):
+    raise SystemExit("FAIL: AGN profile has no accreting, thermally luminous coarse state")
+PY
+  agn_evidence=thermal_luminous_accretion_state
+fi
+if [[ "$CHIMES_BACKEND" == hybrid ]]; then
+  check_hybrid_process_reports run.log 1
+fi
+printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS profile=%s M5_order=5 AGN_state=%s M5_total_source_ledger=nonzero dust_mass=enabled CHIMES_backend=%s momentum_assert_cells=%s reference_controls=NONPRODUCTION raw_outputs=0\n' \
+  "$PROFILE" "$agn_evidence" "$CHIMES_BACKEND" "$momentum_assert_cells" \
   | tee "$WORK/result.txt"

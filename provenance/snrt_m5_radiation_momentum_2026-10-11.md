@@ -1143,3 +1143,43 @@ The queued A40 duplicate (`431707`, pending for `QOSMaxGRESPerUser`) was
 canceled before the manual rerun. Compact inputs, checksums, launch/result
 metadata and the full run log are retained in the run directory; raw RAMSES
 outputs were not generated.
+
+#### Thermal AGN reference coupling smoke on Lageunha Ada — 2026-10-21
+
+The `agn_reference` profile was then run manually on the RTX 5000 Ada,
+MPI=1/OMP=4, with the hybrid CHIMES backend, live dust, order-5 M5, and the
+reference-only AGN photon-group contract. It completed normally in 3524.28 s
+with no raw RAMSES dumps. The build was executable SHA256
+`a0516e0856828e2ec7a4c2524a6126b329546b8f078223a9d7ed8cdab7172e4d` (source
+commit `d14a4f1`); the launched runner SHA256 was
+`3c52d90cd3ba16d3e46f6ceb0801c679689566517b5ae1e2b6a0198bda073d22`. Full
+effective input, run log and coarse-state sidecar are retained under
+`.m5-source-dust-chimes-lageunha-20261021-agn-reference-ada/`.
+
+The pre-feedback AGN sidecar records a thermally luminous accreting state at
+coarse step 2 (`Lbol=3.05619e40 erg/s`, Eddington ratio 83.9178, positive
+accreted mass); step 3 transitions to the low-Eddington jet branch. M5 order-5
+commits include nonzero aggregate source/absorption ledgers, with projection
+and residual terms at approximately `1e-17`. CHIMES reports 691,012 GPU RHS
+calls, 2,576,372 CPU fallback calls, 173,147 batches and zero device errors.
+The log also contains 95 recoverable CVODE “unable to correct” warnings but
+no cold-stage or receiver rejection; the runner's existing policy allows a
+recoverable warning when the coupled run completes without terminal rejection.
+Cooling accounts for 99.6% of the measured run time.
+
+This is evidence that the luminous thermal AGN state, configured source-to-M5
+path, aggregate M5 source/absorption, live dust and hybrid CHIMES all execute
+together. It is **not** source-class-resolved proof that a measured fraction
+of the aggregate M5 photons came from the AGN: the stellar source was active
+and the runtime ledger does not split stellar and AGN photon receipts. The
+historical `result.txt` also printed `CHIMES=cpu` and asserted
+`actual_AGN_source=nonzero` unconditionally; both claims were therefore
+stronger/inaccurate relative to the available evidence. The runner is now
+corrected to report the selected CHIMES backend, require a positive-GPU hybrid
+report, and validate a positive-luminosity thermal accretion record, while
+labeling the M5 ledger as aggregate rather than AGN-attributed. That script
+correction passed shell syntax and existing-log evidence checks; it was not
+part of the binary used for this run and has not yet been exercised by a new
+full-length run. This smoke remains `NONPRODUCTION`; the group SED and dust
+contracts remain reference controls. Source-specific AGN photon attribution
+is an explicit remaining coupling-verification item.
