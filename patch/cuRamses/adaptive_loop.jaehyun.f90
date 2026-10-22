@@ -542,7 +542,7 @@ subroutine sidm_binary_orbit_monitor_init
           'record_type,step,time_code,dt_since_previous_checkpoint,' // &
           'dt_completed_coarse_step,aexp,requested_stop_time,level,phase,sink_id,' // &
           'mass,x,y,z,vx,vy,vz,overshoot'
-     if(ios==0)write(binary_orbit_monitor_unit,'(A,9(1X,ES25.16),6(1X,I0))',iostat=ios) &
+     if(ios==0)write(binary_orbit_monitor_unit,'(A,9(1X,ES25.16E3),6(1X,I0))',iostat=ios) &
           '# CONFIG',binary_orbit_stop_time,binary_orbit_sample_interval, &
           collisionless_courant_factor,minval(tout(1:noutput)), &
           maxval(tout(1:noutput)),minval(aout(1:noutput)), &
@@ -717,7 +717,7 @@ subroutine sidm_binary_orbit_monitor_write_rows(record_type,checkpoint_interval,
      else
         do isink=1,2
            write(binary_orbit_monitor_unit, &
-                '(A,",",I0,5(",",ES25.16),",",I0,",",A,",",I0,8(",",ES25.16))', &
+                '(A,",",I0,5(",",ES25.16E3),",",I0,",",A,",",I0,8(",",ES25.16E3))', &
                 iostat=ios) trim(record_type),completed_step,t,checkpoint_interval, &
                 completed_step_dt,aexp,binary_orbit_stop_time, &
                 ilevel,'centered_sink_level_sync',idsink(isink),msink(isink), &
@@ -774,7 +774,7 @@ subroutine sidm_binary_orbit_monitor_finish(success,reason,phase)
              status='new',action='write',form='formatted',iostat=ios)
         if(ios==0)write(terminal_unit,'(A)',iostat=ios) &
              'terminal_state,reason,step_at_record,time_code,requested_stop_time,overshoot,phase'
-        if(ios==0)write(terminal_unit,'(A,",",A,",",I0,3(",",ES25.16),",",A)', &
+        if(ios==0)write(terminal_unit,'(A,",",A,",",I0,3(",",ES25.16E3),",",A)', &
              iostat=ios) trim(terminal_state),trim(reason),completed_step,t, &
              binary_orbit_stop_time,t-binary_orbit_stop_time,trim(phase)
         if(ios==0)flush(terminal_unit,iostat=ios)
