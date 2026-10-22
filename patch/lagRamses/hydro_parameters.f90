@@ -113,6 +113,25 @@ module hydro_parameters
   real(dp)::gamma=1.4d0
   real(dp),dimension(1:512)::gamma_rad=1.33333333334d0
   real(dp)::courant_factor=0.5d0
+  ! Optional collisionless particle-step limit.  A negative value preserves
+  ! the historical courant_factor path; DMO/SIDM pilots may set (0,1].
+  real(dp)::collisionless_courant_factor=-1d0
+  ! Opt-in, dump-free live-binary orbit monitor.  Times are code units.
+  logical::binary_orbit_monitor=.false.
+  real(dp)::binary_orbit_stop_time=0d0
+  real(dp)::binary_orbit_sample_interval=0d0
+  integer::binary_orbit_monitor_unit=0
+  integer::binary_orbit_monitor_initialized=0
+  integer::binary_orbit_monitor_terminal=0
+  integer::binary_orbit_monitor_last_step=-1
+  integer::binary_orbit_monitor_sink_ids(2)=0
+  integer::binary_orbit_monitor_sink_level=0
+  logical::binary_orbit_monitor_has_initial=.false.
+  real(dp)::binary_orbit_monitor_sink_masses(2)=0d0
+  real(dp)::binary_orbit_monitor_boundary_margin=0d0
+  real(dp)::binary_orbit_monitor_next_time=0d0
+  real(dp)::binary_orbit_monitor_last_time=0d0
+  real(dp)::binary_orbit_monitor_last_sync_time=0d0
   real(dp)::difmag=0.0d0
   real(dp)::smallc=1.d-10
   real(dp)::smallr=1.d-10

@@ -189,6 +189,7 @@ subroutine update_time(ilevel)
   use amr_commons
   use pm_commons
   use hydro_commons
+  use hydro_parameters, only: binary_orbit_monitor
   use cooling_module
   implicit none
 #ifndef WITHOUTMPI
@@ -284,6 +285,13 @@ subroutine update_time(ilevel)
      !---------------
      if(t>=tout(noutput).or.aexp>=aout(noutput).or. &
           & nstep_coarse>=nstepmax)then
+        if(binary_orbit_monitor)then
+           ! The synchronized sink hook commits success or reports the safety
+           ! step cap on the next coarse-level pass.
+           if(myid==1)write(*,'(A,I0)') &
+                ' SIDM binary monitor defers generic stop at coarse step ', &
+                nstep_coarse
+        else
         if(myid==1)then
            write(*,*)'Run completed'
 #ifndef WITHOUTMPI
@@ -292,6 +300,7 @@ subroutine update_time(ilevel)
 #endif
         endif
         call clean_stop
+        endif
      end if
 
   end if
@@ -376,11 +385,25 @@ end subroutine update_time
   
 subroutine clean_stop
   use amr_commons
+  use hydro_parameters, only: binary_orbit_monitor, &
+       binary_orbit_monitor_terminal
   implicit none
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
   integer::info
+  ! clean_stop may be entered by only one rank (for example, a local
+  ! particle-capacity error).  Do not enter monitor collectives here.
+  if(binary_orbit_monitor.and.binary_orbit_monitor_terminal==0)then
+     if(myid==1)write(*,'(A)') &
+          'ERROR: unclassified clean_stop in binary orbit monitor mode'
+#ifndef WITHOUTMPI
+     call MPI_ABORT(MPI_COMM_WORLD,1,info)
+     return
+#else
+     stop 1
+#endif
+  endif
 
   call finalize_timer
 

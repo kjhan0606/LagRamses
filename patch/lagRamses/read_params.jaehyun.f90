@@ -1,4 +1,5 @@
 subroutine read_params
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use amr_commons
   use snrt_agn_efficiency, only: snrt_transport_selected, snrt_agn_model, snrt_agn_model_reference, &
        snrt_agn_reference_config_ok, snrt_agn_admit_reference
@@ -78,6 +79,8 @@ subroutine read_params
   namelist/run_params/clumpfind,cosmo,pic,sink,sinkprops,lightcone,poisson,hydro,rt,verbose,debug &
        & ,radiation_transport,snrt_transport_model,snrt_moment_order &
        & ,nrestart,ncontrol,nstepmax,nsubcycle,nremap,remap_thresh,ordering &
+       & ,collisionless_courant_factor,binary_orbit_monitor &
+       & ,binary_orbit_stop_time,binary_orbit_sample_interval &
        & ,bisec_tol,static,geom,overload,cost_weighting,aton,varcpu_chunk_nfile &
   & ,memory_balance,memory_balance_fast_particles,particle_tree_fast_relink &
   & ,particle_tree_fast_relink_maxlevel &
@@ -303,6 +306,33 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   open(1,file=infile)
   rewind(1)
   read(1,NML=run_params)
+  if(collisionless_courant_factor/=-1d0)then
+     if(hydro.or.collisionless_courant_factor/=collisionless_courant_factor.or. &
+          collisionless_courant_factor<=0d0.or.collisionless_courant_factor>1d0)then
+        if(myid==1)write(*,'(A)') &
+             'ERROR: collisionless_courant_factor requires hydro=.false. and 0<C<=1.'
+#ifndef WITHOUTMPI
+        call MPI_ABORT(MPI_COMM_WORLD,1,info2)
+#endif
+        stop 1
+     endif
+  endif
+  if(binary_orbit_monitor)then
+     if(cosmo.or.hydro.or.sidm.or..not.sink.or..not.poisson.or. &
+          binary_orbit_stop_time<=0d0.or. &
+          .not.ieee_is_finite(binary_orbit_stop_time).or. &
+          binary_orbit_sample_interval<=0d0.or. &
+          .not.ieee_is_finite(binary_orbit_sample_interval).or. &
+          collisionless_courant_factor<=0d0)then
+        if(myid==1)write(*,'(A)') &
+             'ERROR: binary_orbit_monitor needs non-cosmological hydro/SIDM-off ' // &
+             'sink+Poisson, finite positive stop/cadence, and a collisionless Courant override.'
+#ifndef WITHOUTMPI
+        call MPI_ABORT(MPI_COMM_WORLD,1,info2)
+#endif
+        stop 1
+     endif
+  endif
   legacy_rt_env=''
   call get_environment_variable('SNRT_RT_ENABLE',legacy_rt_env, &
        length=legacy_rt_env_length,status=legacy_rt_env_status)

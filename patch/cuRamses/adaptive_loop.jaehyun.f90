@@ -134,6 +134,7 @@ subroutine adaptive_loop
 #endif
 
   if(myid==1)write(*,*)'Starting time integration'
+  call sidm_binary_orbit_monitor_init()
 
   do ! Main time loop
                                call timer('coarse levels','start')
@@ -393,6 +394,425 @@ subroutine adaptive_loop
 999 format(' Level ',I2,' has ',I10,' grids (',3(I8,','),')')
 
 end subroutine adaptive_loop
+
+! Optional target-binary monitor.  Checkpoints are emitted only from the
+! same-time sink synchronization hook in synchro_fine; this initializer only
+! validates the run and creates the ledger/configuration header.
+subroutine sidm_binary_orbit_monitor_init
+  use amr_commons
+  use hydro_commons
+  use hydro_parameters
+  use pm_commons
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::local_error,ios,info,ipart,isink,ilevel,igrid,jgrid,jpart
+  integer::sink_count(2),global_sink_count(2)
+  logical::terminal_exists
+  real(dp)::dx_min
+
+  if(.not.binary_orbit_monitor)return
+  local_error=0
+  if(binary_orbit_monitor_initialized/=0) local_error=1
+  if(ndim/=3.or.cosmo.or.hydro.or.sidm.or..not.sink.or..not.poisson.or.bondi.or. &
+       .not.pic.or.static) &
+       local_error=1
+  if(nrestart/=0.or.create_sinks.or.nsink/=2) local_error=1
+  if(binary_orbit_stop_time<=t.or..not.ieee_is_finite(binary_orbit_stop_time)) &
+       local_error=1
+  if(binary_orbit_sample_interval<=0d0.or. &
+       .not.ieee_is_finite(binary_orbit_sample_interval)) local_error=1
+  if(collisionless_courant_factor<=0d0.or. &
+       collisionless_courant_factor>1d0.or. &
+       .not.ieee_is_finite(collisionless_courant_factor)) local_error=1
+  if(nstepmax<=0.or.foutput<=nstepmax.or.fbackup<=nstepmax) local_error=1
+  if(.not.ieee_is_finite(walltime_hrs).or.walltime_hrs>0d0) local_error=1
+  if(noutput<1.or.noutput>MAXOUT)then
+     local_error=1
+  else
+     if(any(.not.ieee_is_finite(tout(1:noutput))).or. &
+          any(.not.ieee_is_finite(aout(1:noutput)))) local_error=1
+     if(any(tout(1:noutput)<=binary_orbit_stop_time).or. &
+          any(aout(1:noutput)<=aexp)) local_error=1
+  endif
+  if(nlevelmax>levelmin)then
+     if(any(nsubcycle(levelmin:nlevelmax-1)/=1)) local_error=1
+  endif
+  if(.not.allocated(idsink).or..not.allocated(msink).or. &
+       .not.allocated(xsink).or..not.allocated(vsink).or. &
+       .not.allocated(oksink_all)) local_error=1
+  if(local_error==0)then
+     if(size(idsink)<2.or.size(msink)<2.or.size(xsink,1)<2.or. &
+          size(vsink,1)<2.or.size(oksink_all)<2.or. &
+          size(xsink,2)<3.or.size(vsink,2)<3)then
+        local_error=1
+     else
+        if(idsink(1)==idsink(2)) local_error=1
+        if(any(.not.ieee_is_finite(msink(1:2))).or.any(msink(1:2)<=0d0)) &
+             local_error=1
+        if(any(.not.ieee_is_finite(xsink(1:2,1:3))).or. &
+             any(.not.ieee_is_finite(vsink(1:2,1:3)))) local_error=1
+        if(any(xsink(1:2,1:3)<0d0).or.any(xsink(1:2,1:3)>=boxlen)) &
+             local_error=1
+     endif
+  endif
+  if(boxlen<=0d0.or..not.ieee_is_finite(boxlen))local_error=1
+
+  ! Count the two canonical seed particles in owned grid lists.  levelp is a
+  ! particle time-integration tag, not its actual AMR mesh level.
+  sink_count=0
+  if(.not.allocated(idp).or..not.allocated(ptypep).or. &
+       .not.allocated(headp).or..not.allocated(nextp).or. &
+       .not.allocated(numbp).or..not.allocated(headl).or. &
+       .not.allocated(numbl).or..not.allocated(next))then
+     local_error=1
+  else if(npart<0.or.npart>size(idp).or.npart>size(ptypep).or. &
+       size(nextp)<npartmax.or.size(headp)<ngridmax.or. &
+       size(numbp)<ngridmax.or.size(headl,1)<myid.or. &
+       size(headl,2)<nlevelmax.or.size(numbl,1)<myid.or. &
+       size(numbl,2)<nlevelmax.or.size(next)<ngridmax)then
+     local_error=1
+  else
+     do ilevel=1,nlevelmax
+        igrid=headl(myid,ilevel)
+        do jgrid=1,numbl(myid,ilevel)
+           ipart=headp(igrid)
+           do jpart=1,numbp(igrid)
+              if(ipart<=0.or.ipart>npartmax)then
+                 local_error=1
+                 exit
+              endif
+              if(ptypep(ipart)==PTYPE_SINK)then
+                 if(idp(ipart)>=0_i8b.or.idp(ipart)<-2_i8b)then
+                    local_error=1
+                 else
+                    isink=int(-idp(ipart))
+                    sink_count(isink)=sink_count(isink)+1
+                 endif
+              endif
+              ipart=nextp(ipart)
+           enddo
+           igrid=next(igrid)
+        enddo
+     enddo
+  endif
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(sink_count,global_sink_count,2,MPI_INTEGER,MPI_SUM, &
+       MPI_COMM_WORLD,info)
+  if(info/=MPI_SUCCESS)local_error=1
+#else
+  global_sink_count=sink_count
+#endif
+  if(any(global_sink_count/=1))local_error=1
+  call sidm_binary_orbit_monitor_check(local_error, &
+       'binary monitor requires a fresh fixed-mass 3-D PIC run with two ' // &
+       'uniquely owned seed sinks, nsubcycle=1, future output clocks and ' // &
+       'a dump-free step cap')
+
+  binary_orbit_monitor_sink_ids=idsink(1:2)
+  binary_orbit_monitor_sink_masses=msink(1:2)
+  binary_orbit_monitor_sink_level=0
+  if(icoarse_max<icoarse_min)call sidm_binary_orbit_monitor_check(1, &
+       'invalid coarse-grid bounds for the finest force-stencil margin')
+  dx_min=boxlen/dble(icoarse_max-icoarse_min+1)*0.5d0**nlevelmax
+  ! The initialized sink cloud reaches 4 dx_min; keep another 2 dx_min
+  ! between its edge and the periodic boundary for the force stencil.
+  binary_orbit_monitor_boundary_margin=6d0*dx_min
+  if(.not.ieee_is_finite(dx_min).or. &
+       dx_min<=0d0.or.binary_orbit_monitor_boundary_margin>=0.5d0*boxlen) &
+       call sidm_binary_orbit_monitor_check(1, &
+       'could not establish an interior margin for the finest force stencil')
+  if(any(xsink(1:2,1:3)<binary_orbit_monitor_boundary_margin).or. &
+       any(xsink(1:2,1:3)>=boxlen-binary_orbit_monitor_boundary_margin)) &
+       call sidm_binary_orbit_monitor_check(1, &
+       'initial sink lies inside the finest force-stencil boundary margin')
+  binary_orbit_monitor_has_initial=.false.
+  binary_orbit_monitor_last_step=-1
+  ios=0
+  if(myid==1)then
+     inquire(file='sidm_binary_orbit_state.terminal.csv',exist=terminal_exists)
+     ios=0
+     if(terminal_exists)ios=1
+     if(ios==0)open(newunit=binary_orbit_monitor_unit, &
+          file='sidm_binary_orbit_state.csv',status='new', &
+          action='write',form='formatted',iostat=ios)
+     if(ios==0)write(binary_orbit_monitor_unit,'(A)',iostat=ios) &
+          'record_type,step,time_code,dt_since_previous_checkpoint,' // &
+          'dt_completed_coarse_step,aexp,requested_stop_time,level,phase,sink_id,' // &
+          'mass,x,y,z,vx,vy,vz,overshoot'
+     if(ios==0)write(binary_orbit_monitor_unit,'(A,9(1X,ES25.16),6(1X,I0))',iostat=ios) &
+          '# CONFIG',binary_orbit_stop_time,binary_orbit_sample_interval, &
+          collisionless_courant_factor,minval(tout(1:noutput)), &
+          maxval(tout(1:noutput)),minval(aout(1:noutput)), &
+          maxval(aout(1:noutput)),boxlen,binary_orbit_monitor_boundary_margin, &
+          levelmin,nlevelmax,nstepmax,foutput,fbackup,noutput
+     if(ios==0)flush(binary_orbit_monitor_unit,iostat=ios)
+  endif
+  call sidm_binary_orbit_monitor_check(merge(0,1,ios==0), &
+       'could not create or initialize sidm_binary_orbit_state.csv')
+  binary_orbit_monitor_initialized=1
+  binary_orbit_monitor_next_time=0d0
+  binary_orbit_monitor_last_time=t
+  binary_orbit_monitor_last_sync_time=t
+  if(myid==1)write(*,'(A,1X,ES16.8,1X,A,1X,ES16.8)') &
+       'SIDM_BINARY_ORBIT_MONITOR enabled; requested_stop=', &
+       binary_orbit_stop_time,'sample_interval=',binary_orbit_sample_interval
+end subroutine sidm_binary_orbit_monitor_init
+
+subroutine sidm_binary_orbit_monitor_sync_step(ilevel,finished)
+  use amr_commons
+  use hydro_parameters
+  use pm_commons
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
+  integer,intent(in)::ilevel
+  logical,intent(out)::finished
+  real(dp)::checkpoint_interval,completed_step_dt,overshoot,tol
+  integer::completed_step
+
+  finished=.false.
+  if(.not.binary_orbit_monitor.or.binary_orbit_monitor_initialized/=1.or. &
+       binary_orbit_monitor_terminal/=0)return
+  if(ilevel==levelmin.and.numbtot(1,nlevelmax)<=0) &
+       call sidm_binary_orbit_monitor_abort( &
+       'finest-level mesh disappeared before synchronized checkpoint', &
+       'finest_mesh_guard')
+  if(binary_orbit_monitor_sink_level==0)then
+     if(ilevel<nlevelmax)return
+     if(ilevel/=nlevelmax.or.nsink/=2.or.any(oksink_all(1:2)/=1d0)) &
+          call sidm_binary_orbit_monitor_abort( &
+          'both canonical sinks are not present at the common finest sync', &
+          'finest_sink_level_sync')
+     binary_orbit_monitor_sink_level=ilevel
+  endif
+  if(ilevel/=binary_orbit_monitor_sink_level)return
+  if(nsink/=2.or.any(oksink_all(1:2)/=1d0)) &
+       call sidm_binary_orbit_monitor_abort( &
+       'both sinks were not synchronized at their common finest level', &
+       'sink_level_sync')
+  if(any(xsink(1:2,1:3)<binary_orbit_monitor_boundary_margin).or. &
+       any(xsink(1:2,1:3)>=boxlen-binary_orbit_monitor_boundary_margin)) &
+       call sidm_binary_orbit_monitor_abort( &
+       'sink cloud or force stencil reached the periodic boundary margin', &
+       'sink_boundary_guard')
+
+  if(.not.binary_orbit_monitor_has_initial)then
+     call sidm_binary_orbit_monitor_write_rows('initial',0d0,0d0,0d0,ilevel)
+     binary_orbit_monitor_has_initial=.true.
+     binary_orbit_monitor_last_step=nstep_coarse
+     binary_orbit_monitor_last_time=t
+     binary_orbit_monitor_last_sync_time=t
+     binary_orbit_monitor_next_time=t+binary_orbit_sample_interval
+     return
+  endif
+
+  completed_step=nstep_coarse
+  if(completed_step<=binary_orbit_monitor_last_step.or. &
+       .not.ieee_is_finite(t).or.t<=binary_orbit_monitor_last_time) &
+       call sidm_binary_orbit_monitor_abort( &
+       'synchronized step/time did not advance monotonically', &
+       'sink_level_sync')
+
+  checkpoint_interval=t-binary_orbit_monitor_last_time
+  completed_step_dt=dtnew(ilevel)
+  if(.not.ieee_is_finite(completed_step_dt).or.completed_step_dt<=0d0) &
+       call sidm_binary_orbit_monitor_abort( &
+       'completed coarse timestep is not finite and positive', &
+       'sink_level_sync')
+  tol=5d-12*max(1d-14,max(abs(checkpoint_interval), &
+       abs(completed_step_dt),abs(binary_orbit_sample_interval)))
+  if(.not.ieee_is_finite(binary_orbit_monitor_last_sync_time).or. &
+       t<=binary_orbit_monitor_last_sync_time.or. &
+       abs((t-binary_orbit_monitor_last_sync_time)-completed_step_dt)>tol.or. &
+       checkpoint_interval<=0d0.or. &
+       completed_step_dt>binary_orbit_sample_interval+tol.or. &
+       checkpoint_interval>2d0*binary_orbit_sample_interval+tol) &
+       call sidm_binary_orbit_monitor_abort( &
+       'completed timestep or checkpoint cadence exceeded its validated bound', &
+       'sink_level_sync')
+
+  if(t>=binary_orbit_stop_time)then
+     overshoot=t-binary_orbit_stop_time
+     if(overshoot<0d0.or.overshoot>completed_step_dt+tol.or. &
+          overshoot>binary_orbit_sample_interval+tol) &
+          call sidm_binary_orbit_monitor_abort( &
+          'physical-stop overshoot exceeded one completed timestep', &
+          'sink_level_sync')
+     call sidm_binary_orbit_monitor_write_rows('terminal', &
+          checkpoint_interval,completed_step_dt,overshoot,ilevel)
+     call sidm_binary_orbit_monitor_finish(.true.,'physical_time', &
+          'centered_sink_level_sync')
+     finished=.true.
+     return
+  endif
+
+  tol=5d-12*max(1d-14,max(abs(t), &
+       abs(binary_orbit_monitor_next_time)))
+  if(t+tol>=binary_orbit_monitor_next_time)then
+     call sidm_binary_orbit_monitor_write_rows('sample', &
+          checkpoint_interval,completed_step_dt,0d0,ilevel)
+     do while(binary_orbit_monitor_next_time<=t+tol)
+        binary_orbit_monitor_next_time= &
+             binary_orbit_monitor_next_time+binary_orbit_sample_interval
+     enddo
+  endif
+  if(completed_step>=nstepmax) &
+       call sidm_binary_orbit_monitor_abort( &
+       'safety_step_cap_reached_before_physical_stop','sink_level_sync')
+  binary_orbit_monitor_last_sync_time=t
+end subroutine sidm_binary_orbit_monitor_sync_step
+
+subroutine sidm_binary_orbit_monitor_write_rows(record_type,checkpoint_interval, &
+     completed_step_dt,overshoot,ilevel)
+  use amr_commons
+  use hydro_parameters
+  use pm_commons
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  character(len=*),intent(in)::record_type
+  real(dp),intent(in)::checkpoint_interval,completed_step_dt,overshoot
+  integer,intent(in)::ilevel
+  integer::isink,ios,local_error
+  integer::stored_index
+  integer::completed_step
+
+  local_error=0
+  if(nsink/=2.or..not.allocated(idsink).or..not.allocated(msink).or. &
+       .not.allocated(xsink).or..not.allocated(vsink)) local_error=1
+  if(local_error==0)then
+     if(idsink(1)==idsink(2))local_error=1
+     if(any(.not.ieee_is_finite(msink(1:2))).or. &
+          any(.not.ieee_is_finite(xsink(1:2,1:3))).or. &
+          any(.not.ieee_is_finite(vsink(1:2,1:3)))) local_error=1
+     if(any(xsink(1:2,1:3)<binary_orbit_monitor_boundary_margin).or. &
+          any(xsink(1:2,1:3)>= &
+          boxlen-binary_orbit_monitor_boundary_margin)) &
+          local_error=1
+     do isink=1,2
+        stored_index=0
+        if(idsink(isink)==binary_orbit_monitor_sink_ids(1))stored_index=1
+        if(idsink(isink)==binary_orbit_monitor_sink_ids(2))stored_index=2
+        if(stored_index==0)then
+           local_error=1
+        else if(msink(isink)<=0d0.or. &
+             abs(msink(isink)-binary_orbit_monitor_sink_masses(stored_index))> &
+             5d-12*abs(binary_orbit_monitor_sink_masses(stored_index)))then
+           local_error=1
+        endif
+     enddo
+  endif
+  call sidm_binary_orbit_monitor_check(local_error, &
+       'sink identities, masses, or canonical phase became invalid during orbit monitor')
+
+  ios=0
+  completed_step=nstep_coarse
+  if(myid==1)then
+     if(binary_orbit_monitor_unit==0)then
+        ios=1
+     else
+        do isink=1,2
+           write(binary_orbit_monitor_unit, &
+                '(A,",",I0,5(",",ES25.16),",",I0,",",A,",",I0,8(",",ES25.16))', &
+                iostat=ios) trim(record_type),completed_step,t,checkpoint_interval, &
+                completed_step_dt,aexp,binary_orbit_stop_time, &
+                ilevel,'centered_sink_level_sync',idsink(isink),msink(isink), &
+                xsink(isink,1),xsink(isink,2),xsink(isink,3), &
+                vsink(isink,1),vsink(isink,2),vsink(isink,3),overshoot
+           if(ios/=0)exit
+        enddo
+        if(ios==0)flush(binary_orbit_monitor_unit,iostat=ios)
+     endif
+  endif
+  call sidm_binary_orbit_monitor_check(merge(0,1,ios==0), &
+       'failed writing canonical sink rows to sidm_binary_orbit_state.csv')
+  binary_orbit_monitor_last_step=completed_step
+  binary_orbit_monitor_last_time=t
+end subroutine sidm_binary_orbit_monitor_write_rows
+
+subroutine sidm_binary_orbit_monitor_abort(reason,phase)
+  use hydro_parameters
+  implicit none
+  character(len=*),intent(in)::reason,phase
+  call sidm_binary_orbit_monitor_finish(.false.,reason,phase)
+  call sidm_binary_orbit_monitor_check(1,reason)
+end subroutine sidm_binary_orbit_monitor_abort
+
+subroutine sidm_binary_orbit_monitor_finish(success,reason,phase)
+  use amr_commons
+  use hydro_parameters
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  logical,intent(in)::success
+  character(len=*),intent(in)::reason,phase
+  integer::ios,local_error,terminal_unit,completed_step
+  character(len=8)::terminal_state
+
+  if(binary_orbit_monitor_initialized/=1.or. &
+       binary_orbit_monitor_terminal/=0)return
+  terminal_state='failed'
+  if(success)terminal_state='complete'
+  local_error=0
+  completed_step=nstep_coarse
+  if(myid==1)then
+     if(binary_orbit_monitor_unit/=0)then
+        flush(binary_orbit_monitor_unit,iostat=ios)
+        if(ios==0)close(binary_orbit_monitor_unit,iostat=ios)
+        if(ios/=0)local_error=1
+        binary_orbit_monitor_unit=0
+     else
+        local_error=1
+     endif
+     if(local_error==0)then
+        open(newunit=terminal_unit,file='sidm_binary_orbit_state.terminal.csv', &
+             status='new',action='write',form='formatted',iostat=ios)
+        if(ios==0)write(terminal_unit,'(A)',iostat=ios) &
+             'terminal_state,reason,step_at_record,time_code,requested_stop_time,overshoot,phase'
+        if(ios==0)write(terminal_unit,'(A,",",A,",",I0,3(",",ES25.16),",",A)', &
+             iostat=ios) trim(terminal_state),trim(reason),completed_step,t, &
+             binary_orbit_stop_time,t-binary_orbit_stop_time,trim(phase)
+        if(ios==0)flush(terminal_unit,iostat=ios)
+        if(ios==0)close(terminal_unit,iostat=ios)
+        if(ios/=0)local_error=1
+     endif
+  endif
+  call sidm_binary_orbit_monitor_check(local_error, &
+       'failed to close the orbit ledger or write its terminal commit')
+  binary_orbit_monitor_terminal=1
+end subroutine sidm_binary_orbit_monitor_finish
+
+subroutine sidm_binary_orbit_monitor_check(local_error,message)
+  use amr_commons
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::local_error
+  character(len=*),intent(in)::message
+  integer::global_error,info
+
+  global_error=local_error
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(local_error,global_error,1,MPI_INTEGER,MPI_MAX, &
+       MPI_COMM_WORLD,info)
+  if(info/=MPI_SUCCESS)global_error=1
+#endif
+  if(global_error/=0)then
+     if(myid==1)write(*,'(A,1X,A)') &
+          'ERROR: SIDM binary orbit monitor:',trim(message)
+#ifndef WITHOUTMPI
+     call MPI_ABORT(MPI_COMM_WORLD,1,info)
+#else
+     stop 1
+#endif
+  endif
+end subroutine sidm_binary_orbit_monitor_check
 
 subroutine check_jobcontrol
   use amr_commons

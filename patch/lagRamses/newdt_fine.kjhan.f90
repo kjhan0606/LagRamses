@@ -2,6 +2,8 @@ subroutine newdt_fine(ilevel)
   use pm_commons
   use amr_commons
   use hydro_commons
+  use hydro_parameters, only: collisionless_courant_factor, &
+       binary_orbit_monitor, binary_orbit_sample_interval
   use poisson_commons, ONLY: gravity_type
   use fdm_commons, ONLY: hbar_code
 #ifdef RT
@@ -34,7 +36,7 @@ subroutine newdt_fine(ilevel)
   real(kind=8)::dt_loc,dt_all,ekin_loc,ekin_all,dt_acc_min,dt_to_out,tau_out
   real(kind=8)::idt_loc,iekin_loc
   real(kind=8)::jdt_loc,jekin_loc
-  real(dp)::tff,fourpi,threepi2
+  real(dp)::tff,fourpi,threepi2,cfl_gravity
   real(dp)::aton_time_step,dt_aton,dt_rt
   real(dp)::dx_min,dx,scale,dt_fact,limiting_dt_fact
   real(dp)::dx_fdm,k2_nyq,k2_eff,k2_dB,dt_acc,dt_nyq,dt_adv
@@ -57,6 +59,9 @@ subroutine newdt_fine(ilevel)
 
   ! Save old time step
   dtold(ilevel)=dtnew(ilevel)
+  cfl_gravity=courant_factor
+  if(.not.hydro.and.collisionless_courant_factor>0d0) &
+       cfl_gravity=collisionless_courant_factor
 
   ! Maximum time step
   dtnew(ilevel)=boxlen/smallc
@@ -64,7 +69,7 @@ subroutine newdt_fine(ilevel)
      fourpi=4.0d0*ACOS(-1.0d0)
      if(cosmo)fourpi=1.5d0*omega_m*aexp
      tff=sqrt(threepi2/8./fourpi/rho_max(ilevel))
-     dtnew(ilevel)=MIN(dtnew(ilevel),courant_factor*tff)
+     dtnew(ilevel)=MIN(dtnew(ilevel),cfl_gravity*tff)
   end if
   if(cosmo)then
      dtnew(ilevel)=MIN(dtnew(ilevel),aexp_step_limit/hexp)
@@ -97,7 +102,7 @@ subroutine newdt_fine(ilevel)
   if(myid==1 .and. nstep_coarse_old < 36 .and. ilevel==levelmin &
      .and. fdm_use_hjm) then
      write(*,'(" HJM_CFL[grav]: dt=",1PE12.5," tff=",1PE12.5," hexp=",1PE12.5)') &
-          dtnew(ilevel), courant_factor*tff, aexp_step_limit/hexp
+          dtnew(ilevel), cfl_gravity*tff, aexp_step_limit/hexp
   end if
   ! FDM kinetic timestep (supercomoving time: no aexp factors in code units).
   ! The classic CFL dt < fdm_courant*dx^2/(6*hbar)
@@ -265,6 +270,9 @@ subroutine newdt_fine(ilevel)
      dtnew(ilevel) = MIN(dtnew(ilevel), &
           sidm_courant / sidm_Pmax(ilevel) * dtold(ilevel))
   end if
+  ! Bound every monitored step before it is consumed by AMR recursion.
+  if(binary_orbit_monitor)dtnew(ilevel)= &
+       MIN(dtnew(ilevel),binary_orbit_sample_interval)
 
   ! SGS dt diagnostic: print per-level dt for first 20 coarse steps
   if(myid==1 .and. nstep_coarse_old < 80) then
@@ -354,13 +362,14 @@ subroutine newdt2(ind_part,dt_loc,ekin_loc,nn,ilevel)
   use amr_commons
   use pm_commons
   use hydro_commons
+  use hydro_parameters, only: collisionless_courant_factor
   implicit none
   real(kind=8)::dt_loc,ekin_loc
   integer::nn,ilevel
   integer,dimension(1:nvector)::ind_part
 
   integer::i,idim,nx_loc
-  real(dp)::dx,dx_loc,scale,dtpart
+  real(dp)::dx,dx_loc,scale,dtpart,cfl_particle
   real(dp),dimension(1:nvector)::v2
 
   ! Compute time step
@@ -368,6 +377,9 @@ subroutine newdt2(ind_part,dt_loc,ekin_loc,nn,ilevel)
   nx_loc=(icoarse_max-icoarse_min+1)
   scale=boxlen/dble(nx_loc)
   dx_loc=dx*scale
+  cfl_particle=courant_factor
+  if(.not.hydro.and.collisionless_courant_factor>0d0) &
+       cfl_particle=collisionless_courant_factor
 
   v2(1:nn)=0.0D0
   do idim=1,ndim
@@ -378,7 +390,7 @@ subroutine newdt2(ind_part,dt_loc,ekin_loc,nn,ilevel)
   end do
   do i=1,nn
      if(v2(i)>0.0D0)then
-        dtpart=courant_factor*dx_loc/sqrt(v2(i))
+        dtpart=cfl_particle*dx_loc/sqrt(v2(i))
         dt_loc=MIN(dt_loc,dtpart)
      end if
   end do

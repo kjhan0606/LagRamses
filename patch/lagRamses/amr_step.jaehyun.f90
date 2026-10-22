@@ -8,6 +8,7 @@ recursive subroutine amr_step(ilevel,icount)
   use amr_commons
   use pm_commons
   use hydro_commons
+  use hydro_parameters, only: binary_orbit_monitor
   use poisson_commons
   use pbh_commons, only: use_pbh, pbh_mark_level
 #ifdef PHASE0_STELLAR_ENRICHMENT
@@ -337,6 +338,9 @@ recursive subroutine amr_step(ilevel,icount)
      ! available explicitly through aout/tout or the runtime output request.
      if((nstep_coarse>0.and.mod(nstep_coarse,foutput)==0).or. &
           & aexp>=aout(iout).or.t>=tout(iout).or.output_now_all.EQV..true.)then
+        if(binary_orbit_monitor)call sidm_binary_orbit_monitor_abort( &
+             'unexpected RAMSES output dispatch in dump-free orbit mode', &
+             'output_dispatch_guard')
                                call timer('io','start')
         if(.not.ok_defrag)then
            call defrag

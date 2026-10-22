@@ -1,6 +1,7 @@
 subroutine synchro_fine(ilevel)
   use pm_commons
   use amr_commons
+  use hydro_parameters, only: binary_orbit_monitor
 #ifdef HYDRO_CUDA
   use poisson_commons, only: f, phi
   use pm_gpu_commons
@@ -23,6 +24,7 @@ subroutine synchro_fine(ilevel)
   integer::igrid,jgrid,ipart,jpart
   integer::ig,ip,npart1,isink,info
   integer::npack,ip_buf,idim
+  logical::binary_orbit_finished
   real(dp),allocatable,dimension(:)::sink_sbuf,sink_rbuf
   integer, dimension(:), allocatable:: nparticles, ptrhead
   integer mythread, nthreads,nwork,icount,jcount,npart3,subnump
@@ -180,6 +182,10 @@ subroutine synchro_fine(ilevel)
   endif
   
   call MPI_BARRIER(MPI_COMM_WORLD,info)
+  if(binary_orbit_monitor)then
+     call sidm_binary_orbit_monitor_sync_step(ilevel,binary_orbit_finished)
+     if(binary_orbit_finished)call clean_stop
+  endif
   if(verbose)write(*,111)ilevel
 
 111 format('  +Entering synchro_fine for level ',I2)
