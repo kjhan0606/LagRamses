@@ -1346,6 +1346,136 @@ def _run_fortran_hdf5_roundtrip(root: Path) -> dict[str, object]:
     }
 
 
+def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, object]:
+    """Compare actual coupled outputs, not synthetic reader/schema fixtures.
+
+    Same-rank/static-layout comparison only. Retains the selected effective
+    profile's predeclared rtol=1e-12/atol=1e-25 for floating state; integer,
+    source identity and contract attributes must match exactly.
+    """
+    scopes = ("hydro/", "snrt/", "gravity/", "particles/", "sinks/")
+    for path in (left, right, checkpoint):
+        assert path.is_file() and (path.parent / "COMPLETE").is_file(), path
+    with h5py.File(checkpoint, "r") as seed:
+        assert int(np.asarray(seed["header"].attrs["ncpu"]).flat[0]) == 2
+        assert int(np.asarray(seed["header"].attrs["nstep_coarse"]).flat[0]) == 2
+        assert int(np.asarray(seed["snrt"].attrs["moment_order"]).flat[0]) == 5
+        assert int(np.asarray(seed["snrt"].attrs["format_version"]).flat[0]) >= 1000
+        width = int(np.asarray(seed["snrt"].attrs["cell_width"]).flat[0])
+        # This executable's level0 angular family pads 36 M5 coefficients
+        # into 80 entries/group. Signed higher moments are NOT photon counts.
+        payload = np.asarray(seed["snrt/level_2"]).reshape(64, width)
+        assert width >= 1444 and np.all(np.isfinite(payload))
+        assert np.any(payload[:, 4:724:80] > 0), "checkpoint has no live primary photons"
+        existing_stars = set(np.asarray(seed["particles/identity"])[
+            np.asarray(seed["particles/ptypep"]) == 1])
+    with h5py.File(left, "r") as a, h5py.File(right, "r") as b:
+        for handle in (a, b):
+            assert int(np.asarray(handle["header"].attrs["ncpu"]).flat[0]) == 2
+            assert int(np.asarray(handle["header"].attrs["nstep_coarse"]).flat[0]) == 4
+            assert int(np.asarray(handle["snrt"].attrs["moment_order"]).flat[0]) == 5
+            stars = np.asarray(handle["particles/ptypep"]) == 1
+            mass = np.asarray(handle["particles/mass"])[stars]
+            initial = np.asarray(handle["particles/mp0"])[stars]
+            assert np.any(stars) and np.all(mass > 0) and np.all(initial >= mass)
+            assert np.sum(initial - mass) > 0, "ordinary stellar return was not exercised"
+        def objects(handle: h5py.File, kind: type) -> list[str]:
+            names: list[str] = []
+            handle.visititems(lambda name, obj: names.append(name)
+                              if isinstance(obj, kind) and name.startswith(scopes) else None)
+            return sorted(names)
+        # Distributed restart/remap can change the rank-local grid-list
+        # order. Compare cell state at the SAME physical coordinate, never
+        # file row number. This does not relax the numerical tolerance.
+        grid_permutations = {}
+        for level in a["amr"]:
+            xyz_a = np.column_stack([a[f"amr/{level}/xg_{i}"][:] for i in (1, 2, 3)])
+            xyz_b = np.column_stack([b[f"amr/{level}/xg_{i}"][:] for i in (1, 2, 3)])
+            rows_b = {tuple(row): i for i, row in enumerate(xyz_b)}
+            assert len(rows_b) == len(xyz_b) == len(xyz_a)
+            assert len({tuple(row) for row in xyz_a}) == len(xyz_a)
+            assert set(rows_b) == {tuple(row) for row in xyz_a}, level
+            permutation = np.array([rows_b[tuple(row)] for row in xyz_a])
+            grid_permutations[level] = permutation
+            for key in ("son_flag", "cpu_map"):
+                x = np.asarray(a[f"amr/{level}/{key}"]).reshape(-1, 8)
+                y = np.asarray(b[f"amr/{level}/{key}"]).reshape(-1, 8)[permutation]
+                assert np.array_equal(x, y), (level, key)
+        def particle_keys(handle: h5py.File) -> list[tuple]:
+            p = handle["particles"]
+            ids, kinds, levels = (np.asarray(p[k]) for k in ("identity", "ptypep", "levelp"))
+            birth = np.asarray(p["birth_epoch"])
+            xyz = np.column_stack([p[f"x_{i}"][:] for i in (1, 2, 3)])
+            keys = []
+            for i, ident in enumerate(ids):
+                if kinds[i] == 1 and ident in existing_stars:
+                    key = (1, 0, int(ident))
+                elif kinds[i] == 1:
+                    # NEW stars receive sequential rank/list-order labels.
+                    # Match their exact birth event, not a newly assigned ID.
+                    key = (1, 1, float(birth[i]), *xyz[i])
+                else:
+                    key = (int(kinds[i]), 0, int(ident), int(levels[i]), *xyz[i])
+                keys.append(key)
+            assert len(set(keys)) == len(keys), "ambiguous particle birth/identity match"
+            return keys
+        keys_a, keys_b = particle_keys(a), particle_keys(b)
+        rows_b = {key: i for i, key in enumerate(keys_b)}
+        assert set(keys_a) == set(keys_b), "particle event/identity inventory differs"
+        particle_permutation = np.array([rows_b[key] for key in keys_a])
+        ids_a = np.asarray(a["particles/identity"])
+        ids_b = np.asarray(b["particles/identity"])[particle_permutation]
+        relabelled = ids_a != ids_b
+        for i in np.flatnonzero(relabelled):
+            assert keys_a[i][:2] == (1, 1), "pre-existing/nonstellar ID changed"
+        assert np.array_equal(np.sort(ids_a), np.sort(ids_b)), "ID inventory changed"
+        names = objects(a, h5py.Dataset)
+        assert names == objects(b, h5py.Dataset) and names
+        assert all(any(name.startswith(scope) for name in names) for scope in scopes)
+        differences = []
+        for name in names:
+            x, y = np.asarray(a[name]), np.asarray(b[name])
+            assert x.shape == y.shape and x.dtype == y.dtype, name
+            level = name.split("/")[1]
+            if level in grid_permutations:
+                permutation = grid_permutations[level]
+                x = x.reshape(len(permutation), 8, -1)
+                y = y.reshape(len(permutation), 8, -1)[permutation]
+            elif name.startswith("particles/") and x.size == len(particle_permutation):
+                y = y[particle_permutation]
+            if name == "particles/identity" and np.any(relabelled):
+                continue  # Checked exact old IDs and new-label bijection above.
+            if x.dtype.kind in "fiuc":
+                assert np.all(np.isfinite(x)) and np.all(np.isfinite(y)), name
+            if not np.array_equal(x, y):
+                assert x.dtype.kind == "f" and np.allclose(x, y, rtol=1e-12, atol=1e-25), name
+                differences.append({"name": name, "max_absolute": float(np.max(np.abs(x-y)))})
+        groups = objects(a, h5py.Group)
+        assert groups == objects(b, h5py.Group)
+        attribute_count = 0
+        for name in (*[scope[:-1] for scope in scopes], *groups):
+            assert set(a[name].attrs) == set(b[name].attrs), name
+            for key in a[name].attrs:
+                assert np.array_equal(a[name].attrs[key], b[name].attrs[key]), (name, key)
+                attribute_count += 1
+        clocks = {}
+        for key in ("time", "aexp", "dtnew", "dtold", "nstep", "nstep_coarse"):
+            x, y = a["header"].attrs[key], b["header"].attrs[key]
+            assert np.allclose(x, y, rtol=1e-12, atol=0), key
+            clocks[key] = bool(np.array_equal(x, y))
+        return {"status": "M5_COUPLED_RESTART_PASS", "moment_order": 5,
+                "compared_datasets": len(names),
+                "bitwise_datasets": len(names)-len(differences)-int(np.any(relabelled)),
+                "floating_differences": differences, "exact_contract_attributes": attribute_count,
+                "clock_bitwise": clocks, "rtol": 1e-12, "atol": 1e-25,
+                "grid_identity": "exact_level_and_xyz_with_exact_son_and_owner",
+                "reordered_grids": {level: int(np.count_nonzero(p != np.arange(len(p))))
+                                    for level, p in grid_permutations.items()},
+                "particle_identity": "existing_ID_exact_new_star_exact_birth_event_cloud_exact_position",
+                "new_star_ID_relabellings": int(np.count_nonzero(relabelled)),
+                "scope": "same_MPI2_static64_cells_effective_population_co_moving_dust"}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -1353,7 +1483,16 @@ def main() -> None:
         action="store_true",
         help="also run the bounded one-rank linked HDF5 writer/reader fixture",
     )
+    parser.add_argument("--compare-m5-coupled", nargs=2, type=Path, metavar=("CONTINUOUS", "RESTARTED"))
+    parser.add_argument("--source-checkpoint", type=Path)
     args = parser.parse_args()
+    if args.compare_m5_coupled is not None:
+        if args.source_checkpoint is None or args.fortran_runtime:
+            parser.error("coupled comparison needs --source-checkpoint and cannot run synthetic fixtures")
+        print(json.dumps(compare_m5_coupled(*args.compare_m5_coupled, args.source_checkpoint), indent=2))
+        return
+    if args.source_checkpoint is not None:
+        parser.error("--source-checkpoint needs --compare-m5-coupled")
 
     backup_text = BACKUP.read_text(encoding="utf-8")
     restore_text = RESTORE.read_text(encoding="utf-8")

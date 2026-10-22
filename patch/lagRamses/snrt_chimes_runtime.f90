@@ -273,17 +273,18 @@ contains
   subroutine chimes_prepare_level(ilevel,synchronize)
     integer,intent(in)::ilevel
     logical,optional,intent(in)::synchronize
-    integer::ind,i,cell,k,n,bad,all_bad,status,info
+    integer::ind,i,cell,k,n,bad,all_bad,status,info,first_bad_cell,first_bad_status,chem_status,s
     integer,allocatable::cells(:)
     real(dp),allocatable::stage(:,:)
-    real(dp)::elements(11)
+    real(dp)::elements(11),first_bad_emin,first_bad_emax,chem_elements(11),chem_charge
     include 'mpif.h'
     if(.not.dust_chimes_enabled())return
     call chimes_live_initialize(status)
     ! Serial level boundary: update the proper CMB before private cell solves.
     ! This is derived from the restored AMR clock, not independent restart state.
     if(status==0)status=chimes_set_expansion(merge(aexp,1d0,cosmo))
-    bad=merge(0,1,status==0);k=0
+    bad=merge(0,1,status==0);k=0;first_bad_cell=0;first_bad_status=0
+    first_bad_emin=0;first_bad_emax=0
     n=active(ilevel)%ngrid*twotondim
     allocate(cells(n),stage(chimes_ns,n))
     if(bad==0)then
@@ -300,12 +301,35 @@ contains
        do i=1,k
           cell=cells(i)
           call chimes_cell_state(cell,uold(cell,idust_species:idust_species+1),stage(:,i),elements,status)
-          if(status/=0)bad=1
+          if(status/=0)then
+             bad=1
+!$omp critical(chimes_prepare_first_failure)
+             if(first_bad_cell==0)then
+                first_bad_cell=cell;first_bad_status=status
+                first_bad_emin=minval(elements);first_bad_emax=maxval(elements)
+             endif
+!$omp end critical(chimes_prepare_first_failure)
+          endif
        enddo
 !$omp end parallel do
     endif
     call MPI_ALLREDUCE(bad,all_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
     if(all_bad/=0.or.info/=0)then
+       if(myid==1.and.first_bad_cell>0)write(*,*) &
+            'CHIMES_PREP_FIRST_FAILURE cell/status/nH/element_minmax/state_minmax=',first_bad_cell, &
+            first_bad_status,uold(first_bad_cell,1),first_bad_emin,first_bad_emax, &
+            minval(uold(first_bad_cell,ichimes:ichimes+chimes_ns-1)), &
+            maxval(uold(first_bad_cell,ichimes:ichimes+chimes_ns-1))
+       if(myid==1.and.first_bad_cell>0)then
+          chem_status=chimes_budget(uold(first_bad_cell,ichimes:ichimes+chimes_ns-1), &
+               chem_elements,chem_charge)
+          write(*,*)'CHIMES_PREP_FAILURE_BUDGET status/charge/solid_charge=', &
+               chem_status,chem_charge,cell_solid_charge(first_bad_cell)
+          do s=1,chimes_ns
+             if(uold(first_bad_cell,ichimes+s-1)<0d0)write(*,*) &
+                  'CHIMES_PREP_NEGATIVE_SPECIES index/value=',s,uold(first_bad_cell,ichimes+s-1)
+          enddo
+       endif
        if(myid==1)write(*,*)'ERROR: CHIMES element/transport/source reconciliation failed'
        call MPI_ABORT(MPI_COMM_WORLD,31,info)
     endif
@@ -443,7 +467,8 @@ contains
     real(dp)::old(chimes_ns),elements(11),new(chimes_ns),controls(9),bins(4),grains(2),alpha(128,9)
     real(dp)::pn(nd,9),pe(nd,9),budget(11),gn(9),ge(9),row(nvar_all),staged(chimes_ns)
     real(dp)::nh,cv,t,nonthermal,thermal,area,ratio,surface,proposed_energy,events(2)
-    integer::s,k,j,capture_seen
+    real(dp)::measured(11),charge,locked(11),excess(11)
+    integer::s,k,j,capture_seen,diag_status,diag_element,receiver_status
     ierr=1
     if(.not.ready.or..not.allocated(uold))return
     if(cell<lbound(uold,1).or.cell>ubound(uold,1).or.nd<1.or.nd>720)return
@@ -469,7 +494,23 @@ contains
     if(any(abs(grains-row(idust_species:idust_species+1))>1d-8*max(grains,1d-30)))return
     if(abs(sum(grains)-row(idust))>1d-8*max(sum(grains),1d-30))return
     call chimes_cell_state(cell,grains,old,elements,ierr,staged_row=row)
-    if(ierr/=0)return
+    if(ierr/=0)then
+       if(ierr==2)then
+          diag_status=chimes_locked(old,locked)
+          if(diag_status==0)then
+             excess=max(0d0,locked-elements)
+             diag_element=maxloc(excess,dim=1)
+             write(*,'(A,I0,A,I0,A,I0,A,ES13.5,A,ES13.5)') &
+                  'SNRT_CHIMES_STATE_RECONCILE_REJECT cell=',cell,' status=',ierr, &
+                  ' element=',diag_element,' locked_excess=',excess(diag_element), &
+                  ' target=',elements(diag_element)
+          else
+             write(*,'(A,I0,A,I0,A,I0)')'SNRT_CHIMES_STATE_RECONCILE_REJECT cell=',cell, &
+                  ' status=',ierr,' budget_status=',diag_status
+          endif
+       endif
+       return
+    endif
     ierr=1
     nonthermal=.5d0*sum(row(2:ndim+1)**2)/row(1)+magnetic_energy(row)
     if(dust_dynamics_enabled())nonthermal=dust_phase_kinetic(row(1:nvar))+magnetic_energy(row)
@@ -524,7 +565,21 @@ contains
          old/elements(1),alpha,number,radiation_energy,t,new,pn,pe,budget,gn,ge, &
          transition=snrt_chimes_transition_enabled(),event_info=events)
     endif
-    if(ierr/=0)return
+    if(ierr/=0)then
+       receiver_status=ierr
+       diag_status=chimes_budget(old/elements(1),measured,charge)
+       if(diag_status==0)then
+          write(*,'(A,I0,A,I0,A,9(1X,ES13.5),A,ES13.5,A,ES13.5)') &
+               'SNRT_CHIMES_COLD_RECEIVER_REJECT cell=',cell,' status=',receiver_status, &
+               ' controls(nH,Tgas,Tdust,dt,dx,dust_ratio,surface,unused,chat)=',controls, &
+               ' charge=',charge,' max_element_delta=',maxval(abs(measured-elements/elements(1)))
+       else
+          write(*,'(A,I0,A,I0,A,I0)')'SNRT_CHIMES_COLD_RECEIVER_REJECT cell=',cell, &
+               ' status=',receiver_status,' budget_status=',diag_status
+       endif
+       ierr=receiver_status
+       return
+    endif
     staged=new*elements(1)
     proposed_energy=nonthermal+chimes_live_capacity(staged,sd)*t/(sd*sv**2)
     ierr=1

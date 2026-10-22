@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <cstdio>
+#include <limits>
 
 extern "C" int snrt_chimes_fs_ready(void);
 extern "C" int snrt_chimes_fs_grid(int,double *,double *,double *);
@@ -18,6 +19,24 @@ constexpr int nphase=4,nphase_energy=ng*nphase,nphase_moment=6*nphase;
 constexpr int ne=258;
 using snrt_chimes_detail::Bank;
 void require(bool ok){if(!ok)throw std::runtime_error("atomic photo integration failed");}
+struct SecondaryTable {
+  std::array<double,ne> energy{};
+  std::array<double,14> xi{};
+  std::array<std::array<double,84>,ne> grid{};
+};
+const SecondaryTable &secondary_table(){
+  static thread_local SecondaryTable table;
+  static thread_local bool loaded=false;
+  if(!loaded){
+    require(snrt_chimes_fs_ready());
+    require(snrt_chimes_fs_grid(ne,table.energy.data(),table.xi.data(),table.grid[0].data())==0);
+    for(int j=1;j<14;++j)require(table.xi[j]>table.xi[j-1]);
+    for(int j=1;j<ne;++j)require(table.energy[j]>table.energy[j-1]);
+    for(const auto &row:table.grid)for(double v:row)require(std::isfinite(v) && v>=0);
+    loaded=true;
+  }
+  return table;
+}
 struct Term {int node,from,to,electrons,sample;double sigma,binding,excess;};
 struct MolecularTerm {int node,from,to1,to2;double sigma,yield,heat;};
 struct EnergyIndex {int index;double weight;};
@@ -25,6 +44,7 @@ struct Photo {
   double nh,cdt;
   double pumping=0;
   bool phases=false;
+  const SecondaryTable *secondary=nullptr;
   std::vector<int> node;
   std::vector<double> initial;
   std::vector<double> dust_alpha,node_energy;
@@ -37,9 +57,6 @@ struct Photo {
   std::vector<EnergyIndex> samples;
   std::vector<int> active_energy;
   std::vector<std::array<double,5>> fractions;
-  std::array<double,14> xi;
-  std::array<double,ne> energy;
-  std::array<std::array<double,84>,ne> grid;
 };
 struct Solver {
   N_Vector y=nullptr,tol=nullptr,constraints=nullptr;
@@ -58,10 +75,11 @@ struct Solver {
 // at the xi endpoints would introduce a different interpolation law.
 void partition(Photo &p,const double *state){
   if(p.samples.empty())return;
+  const auto &grid=*p.secondary;
   const double ion=std::max(0.,std::min(1.,state[2]));
-  const double xi=std::max(p.xi[0],std::min(p.xi[13],ion));
-  int ix=0;while(ix<12 && xi>p.xi[ix+1])++ix;
-  const double wx=(xi-p.xi[ix])/(p.xi[ix+1]-p.xi[ix]);
+  const double xi=std::max(grid.xi[0],std::min(grid.xi[13],ion));
+  int ix=0;while(ix<12 && xi>grid.xi[ix+1])++ix;
+  const double wx=(xi-grid.xi[ix])/(grid.xi[ix+1]-grid.xi[ix]);
   const double xr=std::max(1e-4,std::min(.999,ion)),he=.24/(4*.76);
   const double available[3]={std::min(1.,std::max(0.,state[1])/(1-xr)),
     std::min(1.,std::max(0.,state[4])/(he*(1-xr))),
@@ -71,7 +89,7 @@ void partition(Photo &p,const double *state){
   // actual secondary-ionization samples enter the RHS. Keep the original
   // interpolation and normalization order for every sampled endpoint.
   for(int e:p.active_energy)for(int j=0;j<6;++j)
-    by_energy[e][j]=(1-wx)*p.grid[e][ix*6+j]+wx*p.grid[e][(ix+1)*6+j];
+    by_energy[e][j]=(1-wx)*grid.grid[e][ix*6+j]+wx*grid.grid[e][(ix+1)*6+j];
   for(size_t k=0;k<p.samples.size();++k){
     const auto &s=p.samples[k];auto &f=p.fractions[k];double v[6],w[3];
     for(int j=0;j<6;++j)v[j]=std::max(0.,(1-s.weight)*by_energy[s.index][j]+s.weight*by_energy[s.index+1][j]);
@@ -204,56 +222,77 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
   if(!handle || nd<1 || nd>720 || !old || !number || !energy || !next || !next_number || !next_energy || !ledger)return 1;
   const bool phases=phase_alpha || directions || phase_energy || phase_moment;
   if(phases && (!dust_alpha || !phase_alpha || !directions || !phase_energy || !phase_moment))return 1;
-  if(!std::isfinite(nh) || nh<=0 || !std::isfinite(dt) || dt<0 || !std::isfinite(chat) || chat<=0 || chat>2.99792458e10)return 2;
+  auto reject=[](const char *reason,int index,double a,double b=0.,double c=0.){
+    std::fprintf(stderr,"CHIMES PHOTO INPUT REJECT reason=%s index=%d values=%.17g,%.17g,%.17g\n",
+        reason,index,a,b,c);
+    return 2;
+  };
+  if(!std::isfinite(nh) || nh<=0 || !std::isfinite(dt) || dt<0 || !std::isfinite(chat) || chat<=0 || chat>2.99792458e10)
+    return reject("controls",-1,nh,dt,chat);
   const auto &b=*static_cast<const Bank*>(handle);
   double nuclei[11],charge;
-  if(snrt_chimes_budget(old,nuclei,&charge) || std::abs(nuclei[0]-1)>1e-10)return 2;
+  const int budget_status=snrt_chimes_budget(old,nuclei,&charge);
+  if(budget_status || std::abs(nuclei[0]-1)>1e-10)
+    return reject("initial_chemistry_budget",budget_status,nuclei[0],charge,std::abs(nuclei[0]-1));
   // A fixed external solid charge is allowed: preserve the incoming gas
   // charge, do not reinterpret it as a new electron reservoir.
   try{
     Photo p;p.nh=nh;p.cdt=chat*dt;p.pumping=pumping;p.phases=phases;require(std::isfinite(p.cdt));
-    if(!std::isfinite(pumping) || pumping<0 || pumping>1)return 2;
+    if(!std::isfinite(pumping) || pumping<0 || pumping>1)return reject("pumping",-1,pumping);
     if(dust_alpha)for(int j=0;j<ng*K;++j)
-      if(!std::isfinite(dust_alpha[j]) || dust_alpha[j]<0)return 2;
+      if(!std::isfinite(dust_alpha[j]) || dust_alpha[j]<0)return reject("dust_alpha",j,dust_alpha[j]);
     if(phases){
       for(int node=0;node<ng*K;++node){
         double sum=0;
         for(int s=0;s<nphase;++s){
           const double alpha=phase_alpha[s*ng*K+node];
-          if(!std::isfinite(alpha) || alpha<0)return 2;
+          if(!std::isfinite(alpha) || alpha<0)return reject("phase_alpha",s*ng*K+node,alpha);
           sum+=alpha;
         }
         // No absolute floor: even a small opacity must have a real phase
         // owner. In particular total alpha=0 requires every phase alpha=0.
         if(!std::isfinite(sum) || std::abs(sum-dust_alpha[node])>
-            1e-12*std::max(sum,dust_alpha[node]))return 2;
+            1e-12*std::max(sum,dust_alpha[node]))
+          return reject("phase_alpha_sum",node,sum,dust_alpha[node],sum-dust_alpha[node]);
       }
       for(int d=0;d<nd;++d){
         double norm=0;
         for(int axis=0;axis<3;++axis){
           const double v=directions[3*d+axis];
-          if(!std::isfinite(v))return 2;
+          if(!std::isfinite(v))return reject("direction_nonfinite",d,v);
           norm+=v*v;
         }
-        if(!std::isfinite(norm) || std::abs(norm-1.)>1e-10)return 2;
+        if(!std::isfinite(norm) || std::abs(norm-1.)>1e-10)return reject("direction_norm",d,norm);
       }
     }
     if(molecules && (!shield || !std::isfinite(shield[0]) || !std::isfinite(shield[1]) ||
-        shield[0]<0 || shield[0]>1 || shield[1]<0 || shield[1]>1))return 2;
+        shield[0]<0 || shield[0]>1 || shield[1]<0 || shield[1]>1))
+      return reject("molecular_shield",-1,shield?shield[0]:NAN,shield?shield[1]:NAN);
     // Delay the large ray workspace until a validated nonzero ray needs it.
     // Zero-light cells still undergo all input/opacity/phase validation.
     std::vector<double> rays,initial(ng*K,0);
     double initial_energy=0;
     for(int g=0;g<ng;++g)for(int d=0;d<nd;++d){
       const size_t i=size_t(g)*nd+d;const double n=number[i],e=energy[i];
-      if(!std::isfinite(n) || !std::isfinite(e) || n<0 || e<0 || (n==0 && e!=0))return 2;
+      if(!std::isfinite(n) || !std::isfinite(e) || n<0 || e<0 || (n==0 && e!=0))
+        return reject("ray_moment",int(i),n,e);
       initial_energy+=e;
       if(n==0)continue;
+      // A paired subnormal N/E has no reliable quotient: independent FP64
+      // underflow can move its apparent mean outside the configured group.
+      // It is below normal precision, so leave the input/output moments
+      // bitwise unchanged and omit only its spectral reconstruction.
+      if(n<std::numeric_limits<double>::min() && e<std::numeric_limits<double>::min())continue;
       const double mean=e/n;std::array<double,K> weights;
       // Only FP64-sized endpoint roundoff, not the transport's FP32 margin.
       // N/E themselves are never projected; debit the actual absorbed nodes.
       if(mean<b.grids[g].e.front()*(1-2e-13) || mean>b.grids[g].e.back()*(1+2e-13) ||
-         !b.grids[g].reconstruct(mean,weights))return 2;
+         !b.grids[g].reconstruct(mean,weights)){
+        std::fprintf(stderr,"CHIMES PHOTO INPUT REJECT reason=ray_mean_energy group=%d ray=%d "
+            "N=%.17g E=%.17g mean=%.17g support=[%.17g,%.17g]\n",
+            g+1,d+1,n,e,mean,b.grids[g].e.front(),b.grids[g].e.back());
+        return 2;
+      }
       if(rays.empty())rays.resize(size_t(ng)*nd*K,0);
       for(int j=0;j<K;++j){const double q=n*weights[j];rays[i*K+j]=q;initial[g*K+j]+=q;}
     }
@@ -269,12 +308,9 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
       }
     };
     if(dt==0 || initial_energy==0){identity();return 0;}
-    require(snrt_chimes_fs_ready());
+    p.secondary=&secondary_table();
+    const auto &fs=*p.secondary;
     std::unordered_map<double,int> sample_index;
-    require(snrt_chimes_fs_grid(ne,p.energy.data(),p.xi.data(),p.grid[0].data())==0);
-    for(int j=1;j<14;++j)require(p.xi[j]>p.xi[j-1]);
-    for(int j=1;j<ne;++j)require(p.energy[j]>p.energy[j-1]);
-    for(const auto &row:p.grid)for(double v:row)require(std::isfinite(v) && v>=0);
     for(int node=0;node<ng*K;++node){
       if(initial[node]==0)continue;
       const int active=p.node.size();bool present=false;
@@ -288,9 +324,9 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
           if(found!=sample_index.end())sample=found->second;
           else{
             sample=p.samples.size();
-            const double ev=std::max(p.energy.front(),std::min(p.energy.back(),excess));
-            const int index=std::min(ne-2,int(std::upper_bound(p.energy.begin(),p.energy.end(),ev)-p.energy.begin())-1);
-            p.samples.push_back({index,(ev-p.energy[index])/(p.energy[index+1]-p.energy[index])});
+            const double ev=std::max(fs.energy.front(),std::min(fs.energy.back(),excess));
+            const int index=std::min(ne-2,int(std::upper_bound(fs.energy.begin(),fs.energy.end(),ev)-fs.energy.begin())-1);
+            p.samples.push_back({index,(ev-fs.energy[index])/(fs.energy[index+1]-fs.energy[index])});
             sample_index.emplace(excess,sample);
           }
         }
@@ -359,7 +395,9 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     N_VConst(1.,solver.constraints); // nonnegative accepted species/tau/counters
     solver.cv=CVodeCreate(CV_BDF);require(solver.cv);
     require(CVodeInit(solver.cv,rhs,0.,solver.y)==0 && CVodeSetUserData(solver.cv,&p)==0);
-    require(CVodeSVtolerances(solver.cv,1e-11,solver.tol)==0 && CVodeSetConstraints(solver.cv,solver.constraints)==0);
+    // Paired long-interval conservation and coupled M5 runs support this
+    // relative tolerance; retain the existing per-component absolute vector.
+    require(CVodeSVtolerances(solver.cv,1e-10,solver.tol)==0 && CVodeSetConstraints(solver.cv,solver.constraints)==0);
     require(CVodeSetMaxNumSteps(solver.cv,10000)==0);
     // Keep the requested endpoint; never interpolate backwards from a
     // later step with a different gas/grain capture budget.

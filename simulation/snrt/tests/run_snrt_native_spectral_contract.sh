@@ -4,7 +4,7 @@ set -euo pipefail
 # This is an offline Fortran/native smoke.  It does not start RAMSES or use
 # the Python/JAX reference solver.
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-build_dir="$(mktemp -d /gpfs/kjhan/LRD_JWST/.snrt-spectral-contract.XXXXXX)"
+build_dir="$(mktemp -d "$repo_root/.snrt-spectral-contract.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
 
 fc="${FC:-gfortran}"
@@ -113,5 +113,12 @@ SNRT_SECONDARY_TABLE_CONTRACT="$repo_root/simulation/snrt/config/snrt_secondary_
 SNRT_GROUP_CONTRACT="$reference" SNRT_ALLOW_REFERENCE_CONTROL=1 \
 SNRT_SECONDARY_TABLE_CONTRACT="$repo_root/simulation/snrt/config/snrt_secondary_table_contract_v1.nml" \
   "$build_dir/snrt_checkpoint_smoke" "$build_dir/snrt-checkpoint.bin" "$candidate"
+
+cxx="${CXX:-g++}"
+"$cxx" -std=c++17 -Wall -Wextra -Werror -I"$repo_root/patch/lagRamses" \
+  "$repo_root/patch/lagRamses/snrt_moment_band.cpp" \
+  "$repo_root/simulation/snrt/tests/snrt_moment_band_momentum_smoke.cpp" \
+  -o "$build_dir/snrt_moment_band_momentum_smoke"
+"$build_dir/snrt_moment_band_momentum_smoke"
 
 echo 'SNRT_NATIVE_SPECTRAL_CONTRACT_ALL_OK'

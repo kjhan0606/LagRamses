@@ -106,6 +106,15 @@ contains
 end subroutine stellar_feedback_hdf5_identity
 
 subroutine dust_mass_hdf5_identity(grp,writing)
+#ifdef GRACKLE_NEQ
+  ! This build rejects dust at admission. Do not pull inactive dust/RT
+  ! runtime identities into its otherwise independent HDF5 link.
+  use ramses_hdf5_io, only: HID_T
+  implicit none
+  integer(HID_T),intent(in)::grp
+  logical,intent(in)::writing
+  return
+#else
 #ifdef SNRT_CHIMES
   use snrt_chimes_runtime, only: chimes_live_identity
 #endif
@@ -441,6 +450,7 @@ subroutine dust_mass_hdf5_identity(grp,writing)
         call MPI_ABORT(MPI_COMM_WORLD,11,info)
      endif
   endif
+#endif
 end subroutine dust_mass_hdf5_identity
 
 subroutine cosmic_ray_hdf5_identity(grp,writing)
@@ -511,6 +521,9 @@ subroutine backup_header_hdf5()
 
   ! Hydro
   call hdf5_write_attr_int(grp_id, 'nvar', nvar)
+#ifdef GRACKLE_NEQ
+  call hdf5_write_attr_int(grp_id, 'grackle_neq_field_index', igrackle)
+#endif
 #ifdef SOLVERmhd
   call hdf5_write_attr_int(grp_id, 'mhd_ct_layout', 1)
   call hdf5_write_attr_int(grp_id, 'nvar_all', nvar_all)

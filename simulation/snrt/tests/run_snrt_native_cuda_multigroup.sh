@@ -4,7 +4,7 @@ set -euo pipefail
 # Native CUDA smoke for the production multigroup cap.  It exercises the C
 # ABI and the actual GPU kernel; it does not launch RAMSES or import Python.
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-build_dir="$(mktemp -d /gpfs/kjhan/LRD_JWST/.snrt-cuda-multigroup.XXXXXX)"
+build_dir="$(mktemp -d "$repo_root/.snrt-cuda-multigroup.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
 
 fc="${FC:-mpiifx}"
@@ -33,8 +33,13 @@ printf 'SNRT_NATIVE_CUDA_DEVICE name=%s visible_devices=%s arch=sm_%s\n' \
 "$nvcc" -O2 -gencode "arch=compute_${cuda_arch},code=sm_${cuda_arch}" -c \
   "$repo_root/patch/lagRamses/snrt_cuda_kernels.cu" \
   -o "$build_dir/snrt_cuda_kernels.o"
+"$nvcc" -O2 -gencode "arch=compute_${cuda_arch},code=sm_${cuda_arch}" \
+  -I"$repo_root/patch/cuRamses" -c \
+  "$repo_root/simulation/snrt/tests/snrt_cuda_default_stream_smoke.cu" \
+  -o "$build_dir/snrt_cuda_default_stream_smoke.o"
 "$fc" "$build_dir/snrt_cuda_multigroup_interface.o" \
   "$build_dir/snrt_cuda_multigroup_smoke.o" "$build_dir/snrt_cuda_kernels.o" \
+  "$build_dir/snrt_cuda_default_stream_smoke.o" \
   -L"$cuda_root/lib64" -lcudart -lcublas -lcublasLt -lstdc++ \
   -Wl,-rpath,"$cuda_root/lib64" -o "$build_dir/snrt_cuda_multigroup_smoke"
 

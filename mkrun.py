@@ -375,11 +375,12 @@ def save_text(path, text):
 
 def collect_snrt_transport(ui):
     """Select the comparison's sole transport method; placement stays orthogonal."""
-    model = ui.ask_choice('Local radiation transport (this comparison uses SNRT)', OrderedDict([
+    model = ui.ask_choice('Local radiation transport', OrderedDict([
+        ('none', ('No local radiation transport; chemistry/cooling remain independent',)),
         ('snrt_sn', ('SNRT discrete ordinates',)),
         ('snrt_mn', ('SNRT compact M_N moments with conservative transport',)),
     ]), 'snrt_sn')
-    if model not in ('snrt_sn', 'snrt_mn'):
+    if model not in ('none','snrt_sn', 'snrt_mn'):
         raise ValueError('Unknown radiation_transport selection.')
     order = 3
     if model == 'snrt_mn':
@@ -1552,7 +1553,7 @@ def generate_run(ui=None, write_text=save_text):
     if values['hydro']:
         print('\n=== Hydro solver ===')
         values.update(collect_snrt_transport(ui))
-        values['gamma'] = ask('gamma', 1.6666667, float)
+        values['gamma'] = ask('gamma', 5.0/3.0, float)
         values['courant_factor'] = ask('courant_factor', 0.8, float)
         values['slope_type'] = ask('slope_type', 2, int)
         values['riemann'] = "'{}'".format(ask('riemann solver', 'hllc'))
@@ -1586,6 +1587,23 @@ def generate_run(ui=None, write_text=save_text):
         ('use_snia', False), ('use_pisn', False),
     ])
     if physics_on:
+        cooling_choice=ui.ask_choice('Cooling solver',OrderedDict([
+            ('original',('Existing RAMSES cooling',)),
+            ('exact',('Equilibrium Grackle binary table + analytic energy integration',)),
+            ('grackle_neq',('Nine-species non-equilibrium Grackle + equilibrium metals; dust/RT off',)),
+        ]),'original')
+        values['cooling_method']=cooling_choice
+        if cooling_choice=='grackle_neq':
+            values.update(cooling=True,metal=True,neq_chem=False,radiation_transport='none',dust_mass_enabled=False,
+                          gamma=5.0/3.0,interpol_var=0,interpol_type=1,gpu_hydro=False,
+                          outformat="'hdf5'",informat="'hdf5'")
+            values['haardt_madau']=ask_bool('Enable uniform HM2012 UV background?', True)
+            values['grackle_neq_data_file']=ask('Grackle HDF5 data file (absolute path)',
+                '/home/kjhan/BACKUP/Eunha.A1/Prerequisites/Cooling_Grackle/input/'+
+                ('CloudyData_UVB=HM2012.h5' if values['haardt_madau'] else 'CloudyData_noUVB.h5'))
+            ui.info('Requires GRACKLE_NEQ=1 HDF5=1 build with CPU closure-consistent hydro; GPU Poisson remains available. Local RT/dust are disabled for this route; exact/CHIMES cooling is not also applied.')
+        elif cooling_choice=='exact':
+            values['grackle_table']=ask('Grackle equilibrium binary table (absolute path)','grackle_multi_z.bin')
         values.update(stellar_defaults)
         print('P(P)ISN is opt-in through use_pisn in the full editor: supply a v4 '
               'source_consistent history and matching wind/SNII/PISN windows inside the IMF. '
@@ -1617,9 +1635,10 @@ def generate_run(ui=None, write_text=save_text):
     values.setdefault('nexpand', 1)
     values.setdefault('m_refine', '{}*8.'.format(levelmin))
     values.setdefault('interpol_var', 1)
-    # Match the tested internal-energy path and hydro_parameters default.
-    # Straight injection (0) was not the bounded producer-isolation case;
-    # keep the limited MinMod slope (1) explicit in generated runs.
+    # Grackle chooses conservative variables above, with its scoped
+    # positivity limiter. Other existing modes retain their historical
+    # internal-energy choice. interpol_type=1 is the MinMod slope limiter,
+    # not a switch between conservative and internal-energy variables.
     values.setdefault('interpol_type', 1)
     values.setdefault('use_fftw', True)
     values.setdefault('nrestart', 0)

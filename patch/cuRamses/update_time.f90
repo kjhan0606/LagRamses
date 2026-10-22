@@ -366,8 +366,8 @@ subroutine update_time(ilevel)
          & ' epot=',1pe9.2,' ekin=',1pe9.2)
 778 format(' Main step=',i7,' mcons=',1pe9.2,' econs=',1pe9.2, &
          & ' epot=',1pe9.2,' ekin=',1pe9.2,' eint=',1pe9.2)
-779 format(' Mtot=',1pe9.2,' Ekin_tot=',1pe9.2, &
-         & ' Epop_tot=',1pe9.2,' Eint_tot=',1pe9.2)
+779 format(' Mtot=',1pe9.2,' Epot_tot=',1pe9.2, &
+         & ' Ekin_tot=',1pe9.2,' Eint_tot=',1pe9.2)
 888 format(' Fine step=',i7,' t=',1pe12.5,' dt=',1pe10.3, &
          & ' a=',1pe10.3,' mem=',0pF4.1,'% ',0pF4.1,'%')
 999 format(' Level ',I2,' has ',I10,' grids (',3(I8,','),')')
@@ -640,5 +640,4 @@ SUBROUTINE getAgeSec(t_birth_proper, age)
   age = (texp - t_birth_proper) * scale_t_sec
 END SUBROUTINE getAgeSec
 !------------------------------------------------------------------------
-
 

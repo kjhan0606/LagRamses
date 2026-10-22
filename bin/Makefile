@@ -26,6 +26,8 @@ NPRE = 8
 # rho + 3 momentum + total energy + total metal + delayed-cooling reservoir
 # + 11 tracked elements.  Unused passive fields remain inert in legacy mode.
 NVAR = 18
+GRACKLE_NEQ ?= 0
+GRACKLE_DIR ?= $(HOME)/local
 DUST_LIVE ?= 0
 DUST_IRON ?= 0
 DUST_PAH ?= 0
@@ -120,6 +122,15 @@ ifeq ($(RADIOACTIVE),1)
   NVAR := $(shell expr $(NVAR) + 2)
 endif
 EXEC = ramses_final
+ifeq ($(GRACKLE_NEQ),1)
+  ifneq ($(filter 1,$(DUST_LIVE) $(CHIMES) $(RADIOACTIVE)),)
+    $(error GRACKLE_NEQ=1 requires DUST_LIVE=0 CHIMES=0 RADIOACTIVE=0)
+  endif
+  ifeq ($(SOLVER),mhd)
+    $(error GRACKLE_NEQ initially supports SOLVER=hydro only)
+  endif
+  NVAR := $(shell expr $(NVAR) + 9)
+endif
 #############################################################################
 GITBRANCH = $(shell git rev-parse --abbrev-ref HEAD)
 GITHASH = $(shell git rev-parse HEAD)$(shell git diff-index --quiet HEAD -- || printf '%s' '-dirty')
@@ -150,6 +161,10 @@ endif
 ifeq ($(MG_PROFILE),1)
   # Refined-level multigrid phase timers only; retain the production -O3 flags.
   FFLAGS += -DMG_PROFILE
+endif
+ifeq ($(GRACKLE_CLOSURE_TRACE),1)
+  # Bounded diagnosis only: log first broken mass identity without changing it.
+  FFLAGS += -DGRACKLE_CLOSURE_TRACE
 endif
 ifdef AMR_INDEX_CHECK
   FFLAGS += -DAMR_INDEX_CHECK
@@ -288,6 +303,12 @@ LIBMPI =
 LIBCUDA = -L/opt/cuda/lib  -lm -lcuda -lcudart
 
 LIBGRACKLE = -lgrackle -lhdf5 -lz
+ifeq ($(GRACKLE_NEQ),1)
+  FFLAGS += -DGRACKLE_NEQ
+  GRACKLE_MODOBJ = grackle_neq_runtime.o grackle_neq_bridge.o
+  LIBS_GRACKLE = -L$(GRACKLE_DIR)/lib64 -L$(GRACKLE_DIR)/lib -lgrackle \
+    -lhdf5 -lgfortran -lquadmath -lm -Wl,-rpath,$(GRACKLE_DIR)/lib
+endif
 # Optional native chemistry; external libraries must both be double precision.
 CHIMES ?= 0
 CHIMES_CUDA ?= 0
@@ -344,7 +365,7 @@ ifeq ($(CHIMES),1)
       -Wl,-rpath,$(CHIMES_CUDA_SUNDIALS_BUILD_DIR)/src/nvector/cuda -lsundials_nveccuda
   endif
 endif
-LIBS = $(LIBMPI) $(LIBS_HDF5) $(LIBS_CUDA) $(LIBS_SNRT) $(LIBS_FFTW) $(LIBS_CHIMES)
+LIBS = $(LIBMPI) $(LIBS_HDF5) $(LIBS_CUDA) $(LIBS_SNRT) $(LIBS_FFTW) $(LIBS_CHIMES) $(LIBS_GRACKLE)
 #############################################################################
 # Sources directories are searched in this exact order
 VPATH = $(PATCH):../patch/cuda:../patch/oct_tree:../patch/cuRamses:../$(SOLVER):../aton:../hydro:../pm:../poisson:../amr
@@ -357,7 +378,7 @@ MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons
 	 cosmic_ray_physics.o dust_mass_physics.o dust_phase_state.o dust_drag.o dust_multifluid.o \
          dust_composition_material.o dust_composition_optics.o dust_element_cooling.o \
          dust_iron_material.o dust_iron_optics.o dust_iron_compare.o dust_iron_photons.o $(EUNHA_MODOBJ) $(HDF5_MODOBJ) $(CUDA_MODOBJ) $(SNRT_MODOBJ) snrt_agn_efficiency.o agn_feedback_deposition.o dark_cooling_mod.o fdm_commons.o pbh_commons.o \
-	 $(STELLAR_ENRICHMENT_MODOBJ)
+	 $(STELLAR_ENRICHMENT_MODOBJ) $(GRACKLE_MODOBJ)
 ifeq ($(SOLVER),mhd)
   MODOBJ += mhd_dispatch.o
   ifeq ($(USE_CUDA),1)
@@ -844,6 +865,12 @@ dynamic_exchange_mpi_test: amr_parameters.jaehyun.o amr_commons.kjhan.o pm_param
 		../tests/dynamic_exchange_mpi.f90 -o $@
 light_cone.fdm.o: amr_commons.kjhan.o pm_commons.o poisson_commons.o
 eunha_cooling_mod.o: amr_parameters.jaehyun.o amr_commons.kjhan.o
+ifeq ($(GRACKLE_NEQ),1)
+grackle_neq_runtime.o: amr_parameters.jaehyun.o hydro_parameters.o amr_commons.kjhan.o hydro_commons.o
+read_hydro_params.o init_time.kjhan.o cooling_fine.kjhan.o init_flow_fine.o: grackle_neq_runtime.o
+grackle_neq_bridge.o: ../patch/lagRamses/grackle_neq_bridge.c
+	mpicc -O2 -fopenmp -I$(GRACKLE_DIR)/include -c $< -o $@
+endif
 dark_cooling_mod.o: amr_parameters.jaehyun.o
 dark_cooling_fine.o: amr_commons.kjhan.o pm_commons.o dark_cooling_mod.o
 FORCE:

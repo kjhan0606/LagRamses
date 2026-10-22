@@ -79,7 +79,8 @@ subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid,uouter)
   real(dp),dimension(1:nvector,if1:if2,jf1:jf2,kf1:kf2)::divu_kjhan
 
   ! Local scalar variables
-  integer::i,j,k,l,ivar
+  integer::i,j,k,l,ivar,composition_direction
+  integer::composition_lo(3),composition_hi(3),composition_left(3)
   integer::ilo,ihi,jlo,jhi,klo,khi
 
 
@@ -135,6 +136,42 @@ subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid,uouter)
 
 #ifdef STELLAR_RADIOACTIVE
   call radioactive_limit_faces(qin,qm,qp,ngrid)
+#endif
+#ifdef GRACKLE_NEQ
+  if(cooling_method=='grackle_neq')then
+     ! Close temporary reconstructed compositions before the Riemann solve.
+     ! Unlike normalizing signed fluxes, this also works at zero net mass
+     ! flux. Shared conservative face fluxes retain each elemental inventory.
+     ! Only correct the states actually consumed by cmpflxm below. Its qm
+     ! dummy has a +1 lower-bound shift along the normal axis, hence the
+     ! left donor is face-1; qp uses the face index itself. Edge/corner
+     ! predictions outside these face slabs are never Riemann inputs.
+     do composition_direction=1,ndim
+        composition_lo=[ilo,jlo,klo];composition_hi=[ihi,jhi,khi]
+        select case(composition_direction)
+        case(1)
+           composition_lo(1)=if1;composition_hi(1)=if2
+        case(2)
+           composition_lo(2)=jf1;composition_hi(2)=jf2
+        case(3)
+           composition_lo(3)=kf1;composition_hi(3)=kf2
+        end select
+        do k=composition_lo(3),composition_hi(3)
+           do j=composition_lo(2),composition_hi(2)
+              do i=composition_lo(1),composition_hi(1)
+                 composition_left=[i,j,k]
+                 composition_left(composition_direction)=composition_left(composition_direction)-1
+                 do l=1,ngrid
+                    call grackle_consistent_face( &
+                         qin(l,composition_left(1),composition_left(2),composition_left(3),:), &
+                         qm(l,composition_left(1),composition_left(2),composition_left(3),:,composition_direction))
+                    call grackle_consistent_face(qin(l,i,j,k,:),qp(l,i,j,k,:,composition_direction))
+                 enddo
+              enddo
+           enddo
+        enddo
+     enddo
+  endif
 #endif
   ! Solve for 1D flux in X direction
   call cmpflxm(qm,iu1+1,iu2+1,ju1  ,ju2  ,ku1  ,ku2  , &
@@ -211,6 +248,88 @@ subroutine unsplit(uin,gravin,flux,tmp,dx,dy,dz,dt,ngrid,uouter)
     call consup(uin,flux,divu_kjhan,dt,ngrid)
   endif
 
+#ifdef GRACKLE_NEQ
+contains
+  pure subroutine grackle_consistent_face(parent,face)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    real(dp),intent(in)::parent(nvar)
+    real(dp),intent(inout)::face(nvar)
+    real(dp)::candidate(nvar),theta,parent_sum
+    integer::carriers(21),index,carrier
+    logical::closed
+    carriers(1)=imetal
+    do index=0,10
+       carriers(index+2)=ichem+index
+    enddo
+    do index=0,8
+       carriers(index+13)=igrackle+index
+    enddo
+    ! Invalid cell averages are left for existing admission/error handling.
+    ! This numerical reconstruction never repairs a polluted restart state.
+    if(.not.all(ieee_is_finite(parent(carriers))))return
+    if(.not.all(ieee_is_finite(face(carriers))))return
+    if(any(parent(carriers)<0d0))return
+    parent_sum=parent(ichem)+parent(ichem+1)+parent(imetal)
+    if(abs(parent_sum-1d0)>1d-8)return
+    theta=1d0
+    do index=1,size(carriers)
+       carrier=carriers(index)
+       if(face(carrier)<0d0)theta=min(theta,parent(carrier)/(parent(carrier)-face(carrier)))
+    enddo
+    if(theta<1d0)theta=theta*(1d0-64d0*epsilon(1d0))
+    candidate=face
+    candidate(carriers)=parent(carriers)+theta*(face(carriers)-parent(carriers))
+    ! Keep the originating cell's admitted composition sum. Forcing every
+    ! face to sum to one gives zero flux for C=H+He+Z-rho, stranding C in
+    ! the cell while rho evolves. With this target C is advected with rho;
+    ! exactly closed parents still use the original unit-sum reconstruction.
+    call grackle_close_face(candidate,parent_sum,closed)
+    if(.not.closed)then
+       ! A charge-inadmissible predicted composition uses the originating
+       ! cell composition (common theta=0), retaining the traced hydro state.
+       candidate(carriers)=parent(carriers)
+       call grackle_close_face(candidate,parent_sum,closed)
+       if(.not.closed)return
+    endif
+    face(carriers)=candidate(carriers)
+  end subroutine grackle_consistent_face
+
+  pure subroutine grackle_close_face(face,target_sum,valid)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    real(dp),intent(inout)::face(nvar)
+    real(dp),intent(in)::target_sum
+    logical,intent(out)::valid
+    real(dp)::total,metal_sum,h,he,factor
+    integer::hydrogen(5)
+    valid=.false.
+    total=face(ichem)+face(ichem+1)+face(imetal)
+    if(.not.ieee_is_finite(total).or.total<=0d0)return
+    factor=target_sum/total
+    face(imetal)=face(imetal)*factor
+    face(ichem:ichem+10)=face(ichem:ichem+10)*factor
+    face(igrackle:igrackle+8)=face(igrackle:igrackle+8)*factor
+    metal_sum=sum(face(ichem+2:ichem+10))
+    if(metal_sum>face(imetal))face(ichem+2:ichem+10)= &
+         face(ichem+2:ichem+10)*(face(imetal)/metal_sum)
+    hydrogen=igrackle+[0,1,2,6,7]
+    h=sum(face(hydrogen));he=sum(face(igrackle+3:igrackle+5))
+    ! Same neutral-ejecta convention as the Grackle caller: add missing
+    ! nuclei to HI/HeI; a reduced budget retains the existing phase fractions.
+    if(h<=face(ichem))then
+       face(igrackle)=face(igrackle)+face(ichem)-h
+    else
+       face(hydrogen)=face(hydrogen)*(face(ichem)/h)
+    endif
+    if(he<=face(ichem+1))then
+       face(igrackle+3)=face(igrackle+3)+face(ichem+1)-he
+    else
+       face(igrackle+3:igrackle+5)=face(igrackle+3:igrackle+5)*(face(ichem+1)/he)
+    endif
+    face(igrackle+8)=face(igrackle+1)-face(igrackle+2)+ &
+         face(igrackle+7)/2d0+face(igrackle+4)/4d0+face(igrackle+5)/2d0
+    valid=ieee_is_finite(face(igrackle+8)).and.face(igrackle+8)>=0d0
+  end subroutine grackle_close_face
+#endif
 end subroutine unsplit
 !###########################################################
 !###########################################################

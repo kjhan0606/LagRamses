@@ -52,7 +52,8 @@
   var_region(1,3)=0.25d0
   var_region(1,12)=0.01d0
   var_region(1,13)=0.006024096385542169d0
-  var_region(1,14)=1.26009674420798d-15
+  ! Initialize dust at the declared 10 K IR background energy for this composition.
+  var_region(1,14)=6.78681493041457d-14
 /
 
 &AMR_PARAMS

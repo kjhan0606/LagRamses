@@ -384,6 +384,9 @@ module amr_parameters
   ! 'compare' : run both, use original for physics, report diagnostics
   character(LEN=16)::cooling_method='original'
   character(LEN=256)::grackle_table='grackle_multi_z.bin'
+  character(LEN=256)::grackle_neq_data_file=''
+  integer::grackle_neq_h2_shielding=0 ! 0 off, 2 cell width, 3 local Jeans length
+  real(dp)::grackle_neq_initial_hii=2d-4,grackle_neq_initial_h2=2d-6
 
   ! SIDM (Self-Interacting Dark Matter) parameters
   logical ::sidm=.false.            ! Enable SIDM Monte Carlo scattering

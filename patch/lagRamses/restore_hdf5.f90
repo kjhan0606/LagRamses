@@ -8,7 +8,7 @@
 !   - Particles (xp, vp, mp, idp, levelp, tp, zp)
 !   - Sinks
 !
-! Supports distributed variable-ncpu/cross-ordering restart to Hilbert:
+! Supports distributed Hilbert restart, including unchanged ncpu:
 !   - An xg-only pre-pass builds grid-load-balanced Hilbert bounds
 !   - Recomputes cpu_map via generic cmp_cpumap
 !   - Ranks read disjoint row slices and redistribute locally owned grids
@@ -186,8 +186,11 @@ subroutine restore_amr_hdf5()
   !=====================================================
   ! Step 2: Check ncpu_file vs ncpu
   !=====================================================
-  if(ncpu_file /= ncpu .or. trim(ordering_file) /= trim(ordering)) then
-     ! Variable-ncpu, ksection, or cross-ordering: use distributed varcpu path
+  if(ncpu_file /= ncpu .or. trim(ordering_file) /= trim(ordering) .or. &
+       (ncpu > 1 .and. trim(ordering) == 'hilbert')) then
+     ! Unchanged-ncpu Hilbert restarts also use the distributed path:
+     ! retaining file ownership is not worth replicating the entire mesh.
+     ! Variable-ncpu or cross-ordering: use distributed varcpu path
      ! (the same-ncpu path replicates ALL grids on every rank, requiring
      !  ngridmax >= total_grids, which is prohibitively expensive)
      varcpu_restart = .true.
@@ -280,13 +283,18 @@ subroutine restore_amr_hdf5()
         ! Hilbert ordering: compute the global key extent now.  The actual
         ! grid-balanced bounds are placed by the xg-only pre-pass below.
         block
-           real(qdp), dimension(1:1) :: order_min_tmp, order_max_tmp
-           real(dp) :: x_tmp(1:1,1:3), dx_loc
+           ! Legacy ordering routines use explicit NVECTOR leading extents,
+           ! even when nn=1. Preserve their stride for every coordinate.
+           real(qdp), dimension(1:nvector) :: order_min_tmp, order_max_tmp
+           real(dp) :: x_tmp(1:nvector,1:ndim), dx_loc
            integer(8) :: iix, iiy, iiz
 
            order_all_min =  huge(0.0_qdp)
            order_all_max = -huge(0.0_qdp)
-           dx_loc = 0.5d0**1
+           ! cmp_minmaxorder requires the full coarse-cell width, as in
+           ! init_amr. A half-width covers only one octant of a unit box
+           ! and clamps most histogram entries into an endpoint bin.
+           dx_loc = scale
            do iiz = kcoarse_min, kcoarse_max
            do iiy = jcoarse_min, jcoarse_max
            do iix = icoarse_min, icoarse_max
@@ -846,6 +854,10 @@ subroutine restore_amr_hdf5()
               if(headf > 0) prev(headf) = 0
               numbf = numbf - 1
 
+              ! refine_fine may reserve virtual-grid capacity before the
+              ! final restore bookkeeping. Keep its occupancy input current.
+              used_mem = ngridmax - numbf
+
               xg(igrid_new, 1:ndim) = recvbuf(1:ndim, j)
 
               do iskip = 1, twotondim
@@ -1101,6 +1113,8 @@ subroutine restore_amr_hdf5()
               if(headf > 0) prev(headf) = 0
               numbf = numbf - 1
 
+              used_mem = ngridmax - numbf
+
               ! Set linked list for this CPU at this level
               if(igrid_prev_cpu == 0) then
                  headl(icpu, ilevel) = igrid_new
@@ -1324,6 +1338,9 @@ subroutine restore_hydro_hdf5()
   integer :: ilevel, i, igrid, ind, ivar, info
   integer :: hdf5_attr_status, hdf5_attr_status_all
   integer :: ngrid_loc, nvar_file, fidx,mhd_layout_file,nvar_all_file
+#ifdef GRACKLE_NEQ
+  integer::grackle_field_file,grackle_status
+#endif
 #ifdef DUST_LIVE
   integer :: dust_mass_field_file, dust_energy_field_file
 #endif
@@ -1409,6 +1426,15 @@ subroutine restore_hydro_hdf5()
      endif
   endif
   nvar_all_file=nvar_file
+#endif
+#ifdef GRACKLE_NEQ
+  if(igrackle>0)then
+     call hdf5_read_attr_int_checked(hdr_grp_id,'grackle_neq_field_index',grackle_field_file,grackle_status)
+     if(grackle_status/=0.or.grackle_field_file/=igrackle.or.nvar_file/=nvar)then
+        if(myid==1)write(*,*)'ERROR: Grackle NEQ restart requires matching species field metadata and NVAR'
+        call clean_stop
+     endif
+  endif
 #endif
   call hdf5_close_group(hdr_grp_id)
 

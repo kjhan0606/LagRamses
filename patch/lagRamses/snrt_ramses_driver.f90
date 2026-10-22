@@ -505,11 +505,12 @@ contains
        return
     end if
     if (myid == 1 .and. .not. transaction_config_reported) then
-       write(*,'(A,I0,A,I0,A,ES10.3,A,ES10.3,A,ES10.3,A,F6.3)') &
+       write(*,'(A,I0,A,I0,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,F6.3)') &
             ' SNRT RT transaction contract=', snrt_transaction_contract_version, &
             ' max_iter=', transaction_config%max_iterations, &
             ' frac_tol=', transaction_config%fraction_absolute_tolerance, &
             ' tau_tol=', transaction_config%tau_relative_tolerance, &
+            ' tau_abs_tol=', transaction_config%tau_absolute_tolerance, &
             ' tau_floor=', transaction_config%tau_floor, &
             ' relaxation=', transaction_config%relaxation
        if (transaction_config%failure_stage /= 0) &

@@ -139,3 +139,18 @@ RHS 한 번, 셀 하나:
 H200 잡은 `sm_90+sm_80`, `--fmad=false`, `-ffp-contract=off`, `-DCHIMES_USE_DOUBLE_PRECISION`으로 `patch/lagRamses/snrt_chimes_rhs_cuda.cu`를 컴파일한다. 디바이스 `pow10`은 `powten`이다. `chimes_proto.h`를 포함하는 번역 단위는 같은 double 매크로가 있어야 한다.
 
 잡 스크립트: `.cvode-gpu/hybrid-fixture/chimes_hybrid_fixture.sbatch`. 출력은 `chimes-cvode-%j.log`. 이 디렉터리는 커밋하지 않는다.
+
+## 10. 후속 정확도 재검증 상태 (2026-10-06)
+
+이 문서 작성 이후 고정 worker/backend 진단 패치를 작업트리에 적용했다.
+414219에서 최신 GPU 냉각 코드와 기존 reference 라이브러리의 실제 bridge
+상태를 재현했고, 양쪽 모두 기본 공차에서 CV_ERR_FAILURE를 보였다.
+저장소에 이미 있던 trace-species 복구 패치가 진단 라이브러리 빌드에서
+빠져 있었음을 확인하여 runner에 reference/trace 선택을 연결했다.
+수정 라이브러리를 사용하는 414224는 H200에서 완료되어 144개 실행 모두
+수용, worker/반복 차이 0, 공차 강화에 따른 수렴을 확인했다. 실제 bridge를
+통한 512셀 level queue 비교 414412도 완료되어 기본·혼합 조성 모두 정확도
+검사를 통과했다. 중앙값 배속은 각각 1.054배와 0.788배이며 CPU 기본값 유지
+결론은 같다. 이 후속 작업은 위 속도 자료와 별개의
+정확도 검사이며 생산 기본값은 바꾸지 않았다. 최신 결과·재개 절차는
+[후속 기록](provenance/chimes_fixed_route_requalification_2026-10-06.md)을 따른다.

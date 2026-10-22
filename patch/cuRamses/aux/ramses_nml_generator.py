@@ -189,7 +189,7 @@ PARAMS = [
     # ====== REFINE_PARAMS ======
     ParamDef('m_refine',  'real_arr','',   'REFINE_PARAMS', S_REFINE, 'Mass refinement threshold per level'),
     ParamDef('ivar_refine','int', -1,      'REFINE_PARAMS', S_REFINE, 'Variable for refinement (0=mass)'),
-    ParamDef('interpol_var','int', 0,      'REFINE_PARAMS', S_REFINE, 'Interpolation variable (0=cons,1=prim)'),
+    ParamDef('interpol_var','int', 0,      'REFINE_PARAMS', S_REFINE, 'AMR interpolation (0=conserved total energy,1=internal energy,2=internal energy/velocity)'),
     ParamDef('interpol_type','int',1,      'REFINE_PARAMS', S_REFINE, 'Interpolation type (0=minmod,1=linear)'),
     ParamDef('jeans_refine','real_arr','',  'REFINE_PARAMS', S_REFINE, 'Jeans refinement criteria per level'),
     ParamDef('mass_sph',  'real', 0.0,     'REFINE_PARAMS', S_REFINE, 'SPH kernel mass for refinement'),
@@ -266,7 +266,17 @@ PARAMS = [
     ParamDef('metal',     'bool', False,   'PHYSICS_PARAMS', S_COOL, 'Metal cooling'),
     ParamDef('isothermal','bool', False,   'PHYSICS_PARAMS', S_COOL, 'Isothermal EOS'),
     ParamDef('cooling_method','str','original','PHYSICS_PARAMS',S_COOL,'Cooling method',
-             choices=['original','exact']),
+             choices=['original','exact','grackle_neq']),
+    ParamDef('grackle_neq_data_file','str','','PHYSICS_PARAMS',S_COOL,
+             'Modern Grackle HDF5 cooling/UV table (not the exact binary table)',
+             visible_when="cooling_method=='grackle_neq'"),
+    ParamDef('grackle_neq_h2_shielding','int',0,'PHYSICS_PARAMS',S_COOL,
+             'H2 shielding: 0 off, 2 cell width, 3 local Jeans length',
+             choices=[0,2,3],visible_when="cooling_method=='grackle_neq'"),
+    ParamDef('grackle_neq_initial_hii','real',2e-4,'PHYSICS_PARAMS',S_COOL,
+             'Initial ionized fraction of H nuclei',visible_when="cooling_method=='grackle_neq'"),
+    ParamDef('grackle_neq_initial_h2','real',2e-6,'PHYSICS_PARAMS',S_COOL,
+             'Initial fraction of H nuclei in H2',visible_when="cooling_method=='grackle_neq'"),
     ParamDef('grackle_table','str','',     'PHYSICS_PARAMS', S_COOL, 'Grackle/Eunha cooling table file',
              visible_when="cooling_method=='exact'"),
     ParamDef('z_reion',   'real', 8.5,     'PHYSICS_PARAMS', S_COOL, 'Reionization redshift',
@@ -719,6 +729,18 @@ def validate_params(values):
             'mg_dynamic_hybrid is experimental and currently supports the 3-D red/black MG smoother only'))
 
     transport = str(values.get('radiation_transport','none')).strip("'\"")
+    if str(values.get('cooling_method','original')).strip("'\"")=='grackle_neq':
+        if values.get('gpu_hydro'):
+            msgs.append(ValidationMsg('ERROR','grackle_neq requires CPU closure-consistent hydro; GPU Poisson remains available'))
+        if not values.get('grackle_neq_data_file'):
+            msgs.append(ValidationMsg('ERROR','grackle_neq requires its HDF5 data file'))
+        if transport!='none' or values.get('dust_mass_enabled') or values.get('neq_chem') or values.get('use_sgs'):
+            msgs.append(ValidationMsg('ERROR','grackle_neq requires dust/RT, SGS and legacy neq_chem off'))
+        if not values.get('hydro') or not values.get('metal') or not values.get('cooling'):
+            msgs.append(ValidationMsg('ERROR','grackle_neq requires hydro, metal and cooling'))
+        if str(values.get('interpol_var',0)).strip()!='0':
+            msgs.append(ValidationMsg('WARNING','Grackle conservative AMR limiter requires interpol_var=0; internal-energy interpolation is not total-energy conservative'))
+        msgs.append(ValidationMsg('WARNING','Rebuild GRACKLE_NEQ=1 HDF5=1; nine species are separate passive densities; equilibrium metal cooling'))
     transports = ('none','snrt_sn','snrt_mn','ramses_rt','aton')
     if transport not in transports:
         msgs.append(ValidationMsg('ERROR','radiation_transport must be one of: '+', '.join(transports)))
@@ -1263,16 +1285,20 @@ def format_namelist(values, emit_defaults=False):
         if val is None:
             if p.name.lower()=='radiation_transport':
                 val=p.default
+            elif (p.name.lower()=='gpu_hydro' and
+                  str(values.get('cooling_method','original')).strip("'\"")=='grackle_neq'):
+                # CUDA builds default to GPU hydro, which does not implement
+                # the Grackle composition closure. Keep this choice explicit.
+                val=False
             elif emit_defaults and p.default is not None:
                 val = p.default
             else:
                 continue
-        # Keep AMR interpolation choices explicit whenever the caller
-        # supplied them.  Their numeric defaults are compiler/runtime
-        # behavior, so hiding an explicitly selected production choice makes
-        # an effective namelist ambiguous.
+        # Preserve supplied GPU hydro and AMR interpolation choices explicitly.
+        # CUDA's gpu_hydro default is True, unlike the setup database's False;
+        # backend/interpolation choices must not depend on hidden build defaults.
         if not emit_defaults:
-            explicit_run_choice = (p.name.lower()=='radiation_transport' or
+            explicit_run_choice = (p.name.lower() in ('radiation_transport','gpu_hydro') or
                                    (p.name.lower() in ('interpol_var','interpol_type') and
                                     p.name.lower() in values))
             if val == p.default and not explicit_run_choice:

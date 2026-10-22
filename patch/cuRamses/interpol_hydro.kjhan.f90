@@ -723,16 +723,15 @@ contains
     thermal=state(ndim+2)-kinetic
     ! An 8-ULP reserve is the fast path. Near cancellation, evaluate the sign
     ! of E-K in extended precision rather than turning this reserve into a
-    ! physical floor: integrated step-530 parents have positive stored-state
-    ! residuals of 6.1-7.6 ULP. The fallback is reached only near cancellation;
-    ! it adds no energy and leaves genuinely zero/negative states inadmissible.
+    ! physical floor. The fallback is reached only near cancellation; it
+    ! changes neither total energy nor the state and rejects genuinely
+    ! zero/negative stored-state residuals.
     roundoff_margin=8d0*spacing(max(abs(state(ndim+2)),abs(kinetic)))
     if(.not.ieee_is_finite(thermal))return
-    ! Downstream hydro evaluates the same residual in dp, so a nonpositive
-    ! dp result cannot be made admissible by a wider-precision sign check.
-    if(thermal<=0d0)return
     if(thermal>=roundoff_margin)then
        thermal_admissible=.true.
+    else if(thermal < -roundoff_margin)then
+       return
     else
        kinetic_q=0.5_thermal_qp*sum(real(state(2:ndim+1),thermal_qp)**2)/real(state(1),thermal_qp)
        thermal_q=real(state(ndim+2),thermal_qp)-kinetic_q

@@ -130,16 +130,21 @@ contains
     real(dp),intent(in)::rho,px,py,pz,energy
     character(*),intent(in)::label
     real(dp)::state(nvar),stencil(nvector,0:twondim,nvar),children(nvector,twotondim,nvar)
+    real(dp)::thermal_dp
     real(qp)::exact_thermal,scale_q
     integer::neighbor,child
     state=1d-3
     state(1)=rho
     state(2:ndim+1)=[px,py,pz]
     state(ndim+2)=energy
+    thermal_dp=energy-0.5d0*sum(state(2:ndim+1)**2)/rho
     exact_thermal=real(energy,qp)-sum(real(state(2:ndim+1),qp)**2)/(2._qp*real(rho,qp))
     scale_q=real(spacing(max(abs(energy),abs(0.5d0*sum(state(2:ndim+1)**2)/rho))),qp)
     if(exact_thermal<=0._qp.or.exact_thermal>=8._qp*scale_q) &
          error stop 'runtime-parent fixture is not positive and below the 8-ULP fast path'
+    if(abs(thermal_dp)>=8d0*spacing(max(abs(energy), &
+         abs(0.5d0*sum(state(2:ndim+1)**2)/rho)))) &
+         error stop 'runtime-parent fixture is not inside the 8-ULP double-precision near-cancellation band'
     do neighbor=0,twondim
        stencil(1,neighbor,:)=state
     enddo
@@ -150,6 +155,8 @@ contains
     enddo
     write(*,'(A,A,A,ES12.4)')'GRACKLE_THERMAL_NEAR_MARGIN_PARENT_PASS case=',label, &
          ' residual_ULP=',real(exact_thermal/scale_q,dp)
+    if(trim(label)=='rank2-vector14')write(*,*) &
+         'GRACKLE_THERMAL_NEAR_MARGIN_QP_POSITIVE_PASS cases=4 unchanged_total_energy=true'
   end subroutine check_runtime_parent
 
   subroutine check_submargin_parent()

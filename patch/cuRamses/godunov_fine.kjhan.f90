@@ -314,6 +314,10 @@ subroutine set_uold(ilevel)
   integer::i,ivar,irad,ind,nx_loc,ind_cell
   real(dp)::scale,d,u,v,w
   real(dp)::e_kin,e_cons,e_prim,e_trunc,div,dx,fact,d_old
+#ifdef GRACKLE_CLOSURE_TRACE
+  logical,save::closure_reported=.false.
+  real(dp)::closure_old,closure_new
+#endif
 #ifdef DUST_DYNAMICS
   integer::phase_status,phase_bad,phase_all_bad,phase_info
   real(dp)::phase_thermal,phase_ke,phase_v(3),phase_speed(3)
@@ -354,6 +358,31 @@ subroutine set_uold(ilevel)
         if(myid==1)write(*,*)'ERROR: relative dust hydro update rejected before uold commit'
         call MPI_ABORT(MPI_COMM_WORLD,11,phase_info)
      endif
+  endif
+#endif
+#ifdef GRACKLE_CLOSURE_TRACE
+  ! Inspect the complete conservative update after reverse exchange, before
+  ! committing it. Limit output to the first affected leaf on this rank.
+  if(cooling_method=='grackle_neq'.and..not.closure_reported)then
+     do ind=1,twotondim
+        do i=1,active(ilevel)%ngrid
+           ind_cell=ICELL_OF(active(ilevel)%igrid(i),ind)
+           if(son(ind_cell)/=0)cycle
+           closure_old=uold(ind_cell,ichem)+uold(ind_cell,ichem+1)+ &
+                uold(ind_cell,imetal)-uold(ind_cell,1)
+           closure_new=unew(ind_cell,ichem)+unew(ind_cell,ichem+1)+ &
+                unew(ind_cell,imetal)-unew(ind_cell,1)
+           if(abs(closure_new)<=1d-8*unew(ind_cell,1))cycle
+           write(*,*)'GRACKLE_CLOSURE_HYDRO rank/step/level/cell:',myid,nstep_coarse,ilevel,ind_cell
+           write(*,'(A,5ES25.16)')'GRACKLE_CLOSURE_OLD rho/H/He/Z/residual ', &
+                uold(ind_cell,1),uold(ind_cell,ichem),uold(ind_cell,ichem+1),uold(ind_cell,imetal),closure_old
+           write(*,'(A,5ES25.16)')'GRACKLE_CLOSURE_NEW rho/H/He/Z/residual ', &
+                unew(ind_cell,1),unew(ind_cell,ichem),unew(ind_cell,ichem+1),unew(ind_cell,imetal),closure_new
+           closure_reported=.true.
+           exit
+        enddo
+        if(closure_reported)exit
+     enddo
   endif
 #endif
   ! Set uold to unew for myid cells

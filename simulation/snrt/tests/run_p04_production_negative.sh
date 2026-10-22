@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=/gpfs/kjhan/LRD_JWST
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 binary="${P04_BINARY:-$root/bin/ramses_final3d}"
 namelist="$root/namelist/phase0_validation_pilot.nml"
-evidence_dir="$root/build/p04_fail_closed"
+if [[ -n "${P04_EVIDENCE_DIR:-}" ]]; then
+  evidence_dir="$P04_EVIDENCE_DIR"
+else
+  evidence_dir="$(mktemp -d "$root/.snrt-p04-negative.XXXXXX")"
+  trap 'rm -rf "$evidence_dir"' EXIT
+fi
 baseline_log="$evidence_dir/baseline_gate.log"
 
 mkdir -p "$evidence_dir"

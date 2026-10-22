@@ -45,7 +45,7 @@ def run_binary(contract_path: Path | None) -> dict[str, object]:
         environment["PHASE0_SNIA_RUNTIME_CONTRACT"] = str(contract_path)
     try:
         result = subprocess.run(
-            (str(BINARY), str(NAMELIST)),
+            (str(BINARY), str(NAMELIST.relative_to(ROOT))),
             cwd=ROOT,
             env=environment,
             text=True,

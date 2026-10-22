@@ -324,7 +324,10 @@ contains
     else
        status=chimes_molecular_factors(tin,controls(1),controls(5),incoming,factors)
     endif
-    if(status/=0)return
+    if(status/=0)then
+       write(*,*)'CHIMES cold-stage rejection at molecular shielding status=',status
+       return
+    endif
     split_start=omp_get_wtime()
     if(present(phase_alpha))then
        status=chimes_band_photo_molecular_phases(handle,mol,nd,controls(1),controls(4),2.99792458d10*controls(9), &
@@ -334,7 +337,10 @@ contains
        status=chimes_band_photo_molecular_groups(handle,mol,nd,controls(1),controls(4),2.99792458d10*controls(9), &
             alpha,factors(1:2),factors(3),incoming,number,energy,photo,pn,pe,budget(1:10),gn,ge)
     endif
-    if(status/=0)return
+    if(status/=0)then
+       write(*,*)'CHIMES cold-stage rejection at spectral photo receiver status=',status
+       return
+    endif
     chimes_last_split_wall(1)=omp_get_wtime()-split_start
     if(controls(4)==0)then
        temperature=controls(2);new=old;next_number=number;next_energy=energy;ledger=0
@@ -374,7 +380,11 @@ contains
     else
        status=chimes_cell_cold_dark(ctl,elements,photo,temp,chem)
     endif
-    if(status/=0)return
+    if(status/=0)then
+       write(*,*)'CHIMES cold-stage rejection at dark chemistry status=',status, &
+            ' transition=',general,' T=',ctl(2),' dt=',ctl(4)
+       return
+    endif
     status=8
     chimes_last_split_wall(2)=omp_get_wtime()-split_start
     if(temp<10.or.temp>merge(1d9,tmax,general))return

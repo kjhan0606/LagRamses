@@ -69,6 +69,17 @@ subroutine init_time
   end if                                                                   
 
   ! Initialize cooling model
+#ifdef GRACKLE_NEQ
+  if(cooling_method=='grackle_neq')then
+     if(cosmo)then
+        ! Keep the same effective reionization redshift used by the tabulated
+        ! Grackle/RAMSes path, and pass it into the local-API NEQ solver.
+        z_reion=min(1.d0/(1.1d0*aexp_ini)-1.d0,z_reion)
+        if(nrestart==0)T2_start=1.356d-2/aexp_ini**2
+     endif
+     call initialize_grackle_neq_runtime
+  endif
+#endif
 
 #ifdef grackle
   if(myid==1)write(*,*)'Grackle: Computing cooling model'
@@ -114,7 +125,7 @@ subroutine init_time
      &     UVbackground, grackle_h2_on_dust,            &
      &     grackle_cmb_temperature_floor, gamma) 
 #else
-  if(cooling.and..not.(neq_chem.or.rt))then
+  if(cooling.and..not.(neq_chem.or.rt).and.cooling_method/='grackle_neq')then
      if(myid==1)write(*,*)'Computing cooling model'
      call flush(6)
 #ifndef WITHOUTMPI

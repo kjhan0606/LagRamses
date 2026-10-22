@@ -1,0 +1,37 @@
+&RUN_PARAMS
+ hydro=.true., pic=.false., poisson=.false., cosmo=.false.
+ nstepmax=80, ncontrol=1
+/
+&AMR_PARAMS
+ levelmin=3, levelmax=4, ngridmax=10000, npartmax=100, boxlen=1d0
+/
+&REFINE_PARAMS
+ m_refine=1d0, mass_sph=.03d0
+/
+&OUTPUT_PARAMS
+ outformat='hdf5', informat='hdf5'
+ noutput=1, tout=1d100, aout=1.1d0, foutput=8, fbackup=1000000
+/
+&HYDRO_PARAMS
+ gamma=1.6666666666666667d0, courant_factor=.5d0
+ scheme='muscl', riemann='hllc'
+/
+&INIT_PARAMS
+ nregion=2, region_type='square','square'
+ x_center=.5d0,.5d0, y_center=.5d0,.5d0, z_center=.5d0,.5d0
+ length_x=1d0,1d0, length_y=1d0,1d0, length_z=1d0,1d0
+ d_region=1d0,100d0, p_region=100d0,100d0
+ u_region=0d0,40d0, v_region=0d0,0d0, w_region=0d0,0d0
+ length_x(2)=.25d0, length_y(2)=.25d0, length_z(2)=.25d0
+/
+&PHYSICS_PARAMS
+ cooling=.true., metal=.true., cooling_method='grackle_neq'
+ neq_chem=.false., dust_mass_enabled=.false., haardt_madau=.false.
+ grackle_neq_data_file='/home/kjhan/BACKUP/Eunha.A1/Prerequisites/Cooling_Grackle/input/CloudyData_noUVB.h5'
+ grackle_neq_h2_shielding=0
+ units_density=1.6726219d-24, units_length=3.0856776d18, units_time=3.15576d13
+/
+&STELLAR_ENRICHMENT_PARAMS
+ feedback_mode='legacy', use_wind=.false., use_agb=.false.
+ use_snii=.false., use_snia=.false., use_pisn=.false.
+/

@@ -30,7 +30,7 @@ subroutine read_hydro_params(nml_ok)
   include 'mpif.h'
 #endif
   logical::nml_ok
-  logical::cr_ok,dust_ok,dust_sink_ok
+  logical::cr_ok,dust_ok,dust_sink_ok,dust_params_ok,dust_chimes_ok
   !--------------------------------------------------
   ! Local variables  
   !--------------------------------------------------
@@ -122,6 +122,8 @@ subroutine read_hydro_params(nml_ok)
        & ,dust_iron_model,dust_fe_condensation,dust_fe_kinetics,dust_fe_sticking &
        & ,dust_pah_model,dust_pah_condensation &
        & ,cooling_method,grackle_table
+  namelist/physics_params/grackle_neq_data_file,grackle_neq_h2_shielding, &
+       grackle_neq_initial_hii,grackle_neq_initial_h2
 #ifdef grackle
   namelist/grackle_params/grackle_comoving_coordinates,grackle_with_radiative_cooling,grackle_primordial_chemistry &
        & ,grackle_metal_cooling,grackle_UVbackground,grackle_h2_on_dust,grackle_cmb_temperature_floor &
@@ -296,7 +298,54 @@ subroutine read_hydro_params(nml_ok)
   read(1,NML=grackle_params)
 #endif
   ! Validate and initialize Eunha cooling
+  if(cooling_method=='grackle_neq') then
+#ifndef HDF5
+     if(myid==1)write(*,*)'ERROR: Grackle NEQ requires HDF5 typed checkpoint support'
+     call clean_stop
+#endif
+#ifndef GRACKLE_NEQ
+     if(myid==1)write(*,*)'ERROR: grackle_neq requires GRACKLE_NEQ=1'
+     call clean_stop
+#endif
+#ifdef grackle
+     if(myid==1)write(*,*)'ERROR: modern Grackle NEQ cannot use legacy -Dgrackle'
+     call clean_stop
+#endif
+     if(gpu_hydro)then
+        if(myid==1)write(*,*)'ERROR: Grackle closure-consistent advection requires CPU hydro; GPU Poisson is supported'
+        call clean_stop
+     endif
+     if(.not.hydro.or..not.cooling.or..not.metal.or.neq_chem.or.isothermal.or. &
+          dust_mass_enabled.or.radiation_transport/='none'.or.aton.or.use_sgs.or.abs(gamma-5d0/3d0)>1d-12)then
+        if(myid==1)write(*,*)'ERROR: grackle_neq requires metal hydro, cooling, gamma=5/3, dust/RT/neq_chem/SGS off'
+        call clean_stop
+     endif
+     if(len_trim(grackle_neq_data_file)==0.or. &
+          .not.any(grackle_neq_h2_shielding==[0,2,3]).or. &
+          .not.ieee_is_finite(grackle_neq_initial_hii).or..not.ieee_is_finite(grackle_neq_initial_h2).or. &
+          min(grackle_neq_initial_hii,grackle_neq_initial_h2)<0.or. &
+          grackle_neq_initial_hii+grackle_neq_initial_h2>1)then
+        if(myid==1)write(*,*)'ERROR: invalid Grackle NEQ data, shielding or initial fractions'
+        call clean_stop
+     endif
+     if(self_shielding.and.index(grackle_neq_data_file,'shielded')==0)then
+        if(myid==1)write(*,*)'ERROR: self_shielding requires a compatible shielded metal table'
+        call clean_stop
+     endif
+     if(trim(outformat)/='hdf5'.or.(nrestart>0.and.trim(informat)/='hdf5'))then
+        if(myid==1)write(*,*)'ERROR: Grackle NEQ requires HDF5 output/restart'
+        call clean_stop
+     endif
+  endif
   if(cooling_method=='exact' .or. cooling_method=='compare') then
+#ifdef grackle
+     if(myid==1) write(*,*) 'ERROR: exact/compare requires a build without -Dgrackle'
+     call clean_stop
+#endif
+     if(abs(gamma-5d0/3d0)>1d-12.or.neq_chem) then
+        if(myid==1) write(*,*) 'ERROR: Eunha equilibrium cooling requires gamma=5/3 and neq_chem=false'
+        call clean_stop
+     endif
      if(len_trim(grackle_table)==0) then
         if(myid==1) write(*,*) 'ERROR: grackle_table required for cooling_method=',trim(cooling_method)
         call clean_stop
@@ -304,6 +353,8 @@ subroutine read_hydro_params(nml_ok)
      if(myid==1) write(*,'(A,A,A,A)') ' Cooling method: ', trim(cooling_method), &
           '  table: ', trim(grackle_table)
      call eunha_load_multi_z(trim(grackle_table))
+  else if(cooling_method=='grackle_neq')then
+     if(myid==1)write(*,*)'Cooling method: Grackle nine-species non-equilibrium + equilibrium metals'
   else
      if(myid==1 .and. cooling) write(*,'(A)') ' Cooling method: original (RAMSES solve_cooling)'
   endif
@@ -383,12 +434,14 @@ subroutine read_hydro_params(nml_ok)
   endif
 #endif
 
-  dust_ok=dust_mass_parameters_ok()
+  dust_params_ok=dust_mass_parameters_ok()
+  dust_ok=dust_params_ok
+  dust_chimes_ok=dust_chimes_enabled()
 #ifdef SNRT
   if((dust_sublimation_rt_enabled().or.dust_fe_uv_enabled().or.dust_pah_enabled()).and. &
        .not.snrt_transport_selected())dust_ok=.false.
 #endif
-  if(dust_chimes_enabled())then
+  if(dust_chimes_ok)then
 #ifndef SNRT_CHIMES
      dust_ok=.false.
 #endif
@@ -447,6 +500,31 @@ subroutine read_hydro_params(nml_ok)
      if(trim(outformat)/='hdf5'.or.(nrestart>0.and.trim(informat)/='hdf5'))dust_ok=.false.
   endif
   if(.not.dust_ok)then
+     if(dust_mass_enabled.and.myid==1)then
+#ifdef PHASE0_STELLAR_ENRICHMENT
+        write(*,'(A,9(1X,L1))')'DUST_VALIDATE parameters hydro metal periodic channel_elements cosmo no_sinks nener0=', &
+             dust_params_ok,hydro,metal,nboundary==0,use_channel_resolved_feedback(), &
+             all(active_element),cosmo,(.not.cosmo.or.(.not.sink.and..not.sink_AGN.and..not.agn)),nener==0
+#else
+        write(*,'(A,6(1X,L1))')'DUST_VALIDATE parameters hydro metal periodic cosmo nener0=', &
+             dust_params_ok,hydro,metal,nboundary==0,cosmo,nener==0
+#endif
+#ifdef SNRT
+        write(*,'(A,8(1X,L1))')'DUST_VALIDATE transport CHIMES two_size optics material sink sink_AGN agn=', &
+             snrt_transport_selected(),dust_chimes_ok,dust_two_size_enabled(),dust_optics_enabled(), &
+             dust_material_composition_enabled(),sink,sink_AGN,agn
+#else
+        write(*,'(A,7(1X,L1))')'DUST_VALIDATE CHIMES two_size optics material sink sink_AGN agn=', &
+             dust_chimes_ok,dust_two_size_enabled(),dust_optics_enabled(),dust_material_composition_enabled(), &
+             sink,sink_AGN,agn
+#endif
+        write(*,'(A,8(1X,L1))')'DUST_VALIDATE sink_ok no_neq no_delay cooling_matches_closure no_cr no_sgs no_drift no_shocks=', &
+             dust_sink_ok,.not.neq_chem,.not.delayed_cooling, &
+             cooling.eqv.(trim(dust_cooling)/='none'),.not.cr_enabled,.not.use_sgs, &
+             .not.dust_relative_motion,.not.dust_sn_shocks
+        write(*,'(A,A,A,A,A,A)')'DUST_VALIDATE model=',trim(dust_mass_model), &
+             ' cooling=',trim(dust_cooling),' solver=',trim(cooling_method)
+     endif
      if(myid==1)write(*,*)'ERROR: dust mass requires valid parameters and SNRT-module/DUST_LIVE/HDF5 channel feedback,'
      if(myid==1)write(*,*)'periodic metal hydro; no neq/delayed cooling; cooling needs an explicit dust closure'
      if(myid==1)write(*,*)'Cosmo dust: kind7/NENER=0 C/silicate DL01+D03/CHIMES; none=dark-ISM+CMB, SNRT=shared photons'
@@ -725,6 +803,17 @@ subroutine read_hydro_params(nml_ok)
   ! they must not overlap the delayed-cooling reservoir at idelay.
   ichem=ixion
   if(aton)ichem=ixion+1
+  igrackle=-1
+#ifdef GRACKLE_NEQ
+  if(cooling_method=='grackle_neq')then
+     igrackle=nvar-8
+     if(igrackle<=ichem+10)then
+        if(myid==1)write(*,*)'ERROR: Grackle species overlap the eleven element fields'
+        call clean_stop
+     endif
+     if(myid==1)write(*,*)'Grackle nine-species passive window: ',igrackle,igrackle+8
+  endif
+#endif
   isgs=ichem
   if(use_sgs)isgs=ichem+1
 #ifdef DUST_LIVE

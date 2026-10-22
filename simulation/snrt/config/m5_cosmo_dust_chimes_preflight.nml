@@ -1,0 +1,63 @@
+! Nonproduction integration preflight: real 12.5-cMpc 128^3 cosmological IC,
+! M5 transport plus coadvected two-size dust and CHIMES. Star formation is
+! deliberately disabled, so this checks dark material/transport wiring only;
+! it is not a source-active or physically admitted production run.
+&RUN_PARAMS
+ cosmo=.true., pic=.true., poisson=.true., hydro=.true.
+ radiation_transport='snrt_mn', snrt_moment_order=5
+ sink=.false., sinkprops=.false., nrestart=0, nstepmax=2
+ ncontrol=1, nsubcycle=1, nremap=0, aexp_step_limit=1d-6
+ use_fftw=.true., n_cuda_streams=1, gpu_hydro=.false., gpu_poisson=.false.
+ gpu_fft=.false., gpu_sink=.false., gpu_scalar=.false., gpu_particle=.false.
+ gpu_auto_tune=.false., verbose=.true.
+/
+&INIT_PARAMS
+ filetype='grafic'
+ initfile(1)='/gpfs/kjhan/LRD_JWST/.galaxy-preenriched.IJ8aeX/ics/level_007'
+/
+&AMR_PARAMS
+ levelmin=7, levelmax=7, ngridtot=600000, nparttot=3000000
+ nexpand=1, boxlen=1
+/
+&COSMO_PARAMS
+ omega_b=.049
+/
+&OUTPUT_PARAMS
+ noutput=1, aout=1.1, tout=1d100
+ foutput=1000000, fbackup=1000000
+ outformat='hdf5', informat='hdf5'
+/
+&HYDRO_PARAMS
+ gamma=1.6666666666666667d0, courant_factor=.1
+ scheme='muscl', slope_type=1, riemann='hllc', pressure_fix=.true.
+/
+&POISSON_PARAMS
+ epsilon=1d-4, maxiter_fine=1000, abort_on_mg_nonconvergence=.true.
+/
+&PHYSICS_PARAMS
+ cooling=.true., cooling_method='original', metal=.true., neq_chem=.false.
+ haardt_madau=.false., z_ave=5d-9, sf_virial=.false., delayed_cooling=.false.
+ t_star=0, eps_star=0, T2_star=0, isothermal=.false.
+ dust_mass_enabled=.true., dust_cooling='chimes_neq_v1'
+ dust_mass_model='carbon_olivine_2size_v1', dust_material_model='dl01_composition_v1'
+ dust_optics_model='d03_transport_v1', dust_size_radius_cm=1d-6,1d-5
+ dust_size_density=2.2d0,3.8d0
+ dust_growth=.true., dust_sputtering=.true., dust_coagulation=.true., dust_shattering=.true.
+ dust_sn_shocks=.false., cr_enabled=.false., smbh=.false., agn=.false., sink_AGN=.false.
+/
+&REFINE_PARAMS
+ m_refine=-1, jeans_refine=-1
+/
+&STELLAR_ENRICHMENT_PARAMS
+ feedback_mode='channel_resolved'
+ fate_policy='user_selected_model_v1'
+ high_mass_preset='source_consistent'
+ high_mass_history_path='/gpfs/kjhan/LRD_JWST/.effective-population.gQodLz/inputs/history.nml'
+ yield_source_basis='per_star_cumulative'
+ population_model='effective_ssp'
+ imf_id=1, imf_mass_min_msun=.08d0, imf_mass_max_msun=600d0
+ binary_fraction=0d0
+ channel_mass_min_msun=2d0,2d0,2d0,3d0,2d0
+ channel_mass_max_msun=600d0,600d0,600d0,8d0,600d0
+ use_snia=.true., use_pisn=.true.
+/

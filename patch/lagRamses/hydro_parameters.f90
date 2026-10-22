@@ -132,6 +132,7 @@ module hydro_parameters
   integer::idelay=6
   integer::ixion=6
   integer::ichem=6
+  integer::igrackle=-1 ! nine conservative species densities, reserved at tail
   integer::ivirial=6
   integer::inener=6
   integer::iHydrogen=-1

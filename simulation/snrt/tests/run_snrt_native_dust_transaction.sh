@@ -5,7 +5,7 @@ set -euo pipefail
 # the Python/JAX reference solver; the actual CUDA boundary is covered by the
 # existing A10 multigroup smoke.
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-build_dir="$(mktemp -d /gpfs/kjhan/LRD_JWST/.snrt-dust-transaction.XXXXXX)"
+build_dir="$(mktemp -d "$repo_root/.snrt-dust-transaction.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
 module_dir="$build_dir/modules"
 mkdir -p "$module_dir"

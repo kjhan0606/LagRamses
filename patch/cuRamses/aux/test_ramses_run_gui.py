@@ -102,6 +102,41 @@ def comparison_workspace():
 
 
 class WizardTests(unittest.TestCase):
+    def test_grackle_cpu_hydro_gpu_poisson_contract(self):
+        rng = mkrun.rng
+        values = dict(cooling_method='grackle_neq', cooling=True, hydro=True,
+                      metal=True, neq_chem=False, dust_mass_enabled=False,
+                      radiation_transport='none', gpu_hydro=False,
+                      gpu_poisson=True, interpol_var=0,
+                      grackle_neq_data_file='/setup-only/CloudyData.h5')
+        self.assertFalse(any(m.level == 'ERROR' for m in rng.validate_params(values)))
+        parsed, _ = rng.parse_namelist(rng.format_namelist(values))
+        imported = rng.import_to_values(parsed)
+        self.assertFalse(imported['gpu_hydro'])
+        self.assertTrue(imported['gpu_poisson'])
+        implicit = dict(values)
+        del implicit['gpu_hydro']
+        self.assertIn('gpu_hydro=.false.', rng.format_namelist(implicit))
+        errors = [m.msg for m in rng.validate_params(dict(values, gpu_hydro=True))
+                  if m.level == 'ERROR']
+        self.assertTrue(any('CPU closure-consistent hydro' in message for message in errors))
+
+    def test_grackle_shared_wizard_selects_conservative_cpu_hydro(self):
+        with mock.patch('subprocess.run', side_effect=AssertionError('setup launches')), \
+                mock.patch('builtins.open', side_effect=AssertionError('preview touches files')), \
+                mock.patch('os.makedirs', side_effect=AssertionError('preview creates directories')):
+            _, files, report = collect({'Run mode': 'hydro', 'IC pipeline': 'none',
+                                       'Cooling solver': 'grackle_neq'})
+        values = report['values']
+        self.assertFalse(values['gpu_hydro'])
+        self.assertEqual(values['radiation_transport'], 'none')
+        self.assertFalse(values['dust_mass_enabled'])
+        self.assertEqual(values['interpol_var'], 0)
+        self.assertFalse(any(m.level == 'ERROR' for m in report['messages']))
+        nml = next(text for name, text in files.items() if name.endswith('.nml'))
+        self.assertIn('gpu_hydro=.false.', nml)
+        self.assertIn("cooling_method='grackle_neq'", nml)
+
     def test_gas_mhd_namelist_contract(self):
         values=dict(hydro=True,mhd_enabled=True,mhd_seed='0.2,0.1,0.3',
                     riemann='hlld',scheme='muscl',gpu_hydro=False,outformat='hdf5')
@@ -1595,7 +1630,7 @@ class WizardTests(unittest.TestCase):
                 if overrides.get('Zoom-in run?'):
                     self.assertEqual(stages['Zoom region'], 7)
                 if overrides.get('Run mode') == 'hydro':
-                    self.assertEqual(stages['Hydro solver'], 7)  # Includes native RT representation.
+                    self.assertEqual(stages['Hydro solver'], 8)  # Includes RT representation and cooling choice.
 
     def test_stage_navigation_and_invalid_pair_are_atomic(self):
         wizard = gui.RunWizard.__new__(gui.RunWizard)

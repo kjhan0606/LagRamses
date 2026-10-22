@@ -26,6 +26,9 @@ end subroutine init_flow
 !################################################################
 !################################################################
 subroutine init_flow_fine(ilevel)
+#ifdef GRACKLE_NEQ
+  use grackle_neq_runtime, only: grackle_neq_seed
+#endif
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_enrichment_config, only: use_channel_resolved_feedback,elem_h,elem_he
 #endif
@@ -52,6 +55,9 @@ subroutine init_flow_fine(ilevel)
 
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   real(dp)::dx,rr,vx,vy,vz,ek,ei,pp,xx1,xx2,xx3,dx_loc,scale,xval
+#ifdef GRACKLE_NEQ
+  real(dp)::gr_h,gr_he,gr_z,gr_species(9)
+#endif
   real(dp),dimension(1:3)::skip_loc
   real(dp),dimension(1:twotondim,1:3)::xc
   real(dp),dimension(1:nvector)       ,save::vv
@@ -640,6 +646,23 @@ subroutine init_flow_fine(ilevel)
               write(*,*)'ERROR: relative dust co-moving initialization rejected'
               call clean_stop
            endif
+        enddo
+     enddo
+  endif
+#endif
+#ifdef GRACKLE_NEQ
+  if(igrackle>0.and.nrestart==0)then
+     do igrid=1,ncache
+        do ind=1,twotondim
+           icell=ICELL_OF(active(ilevel)%igrid(igrid),ind)
+           rr=uold(icell,1);gr_z=uold(icell,imetal)
+           gr_h=uold(icell,ichem);gr_he=uold(icell,ichem+1)
+           if(gr_h+gr_he==0d0)then
+              gr_h=.76d0*(rr-gr_z);gr_he=.24d0*(rr-gr_z)
+              uold(icell,ichem)=gr_h;uold(icell,ichem+1)=gr_he
+           endif
+           call grackle_neq_seed(gr_h,gr_he,grackle_neq_initial_hii,grackle_neq_initial_h2,gr_species)
+           uold(icell,igrackle:igrackle+8)=gr_species
         enddo
      enddo
   endif

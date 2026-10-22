@@ -23,7 +23,7 @@ subroutine cooling_fine(ilevel)
   !-------------------------------------------------------------------
   ! Compute cooling for fine levels
   !-------------------------------------------------------------------
-  integer::ncache,i,igrid,ngrid,info
+  integer::ncache,i,igrid,ngrid,info,tile_status,cooling_status,global_status
 
 #ifdef grackle
   integer:: iresult, initialize_grackle
@@ -37,18 +37,39 @@ subroutine cooling_fine(ilevel)
   ! Operator splitting step for cooling source term
   ! by vector sweeps
   ncache=active(ilevel)%ngrid
-!$omp parallel do private(igrid,ngrid) schedule(dynamic)
+  cooling_status=0
+!$omp parallel do private(igrid,ngrid,tile_status) reduction(max:cooling_status) schedule(dynamic)
   do igrid=1,ncache,nvector
      ngrid=MIN(nvector,ncache-igrid+1)
-     call sub_cooling_fine(ilevel,igrid,ngrid)
+     call sub_cooling_fine(ilevel,igrid,ngrid,tile_status)
+     cooling_status=max(cooling_status,tile_status)
   end do
+#ifdef GRACKLE_NEQ
+  ! MPI is called only by the main thread, after every OMP owner has returned.
+  ! clean_stop finalizes MPI and is appropriate for collective normal exit,
+  ! not for a tile failure while other ranks are still evolving.
+  if(cooling_method=='grackle_neq')then
+     global_status=cooling_status
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(cooling_status,global_status,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+#endif
+     if(global_status/=0)then
+        if(myid==1)write(*,*)'ERROR: Grackle NEQ collective failure, level/status: ',ilevel,global_status
+#ifndef WITHOUTMPI
+        call MPI_ABORT(MPI_COMM_WORLD,global_status,info)
+#endif
+        error stop 1
+     endif
+  endif
+#endif
 
   ! Report comparison statistics at end of coarse step
   if(ilevel==levelmin .and. cooling_method=='compare') then
      call eunha_report(nstep_coarse)
   endif
 
-  if((cooling.and..not.neq_chem).and.ilevel==levelmin.and.cosmo.and..not.dust_chimes_enabled())then
+  if((cooling.and..not.neq_chem).and.ilevel==levelmin.and.cosmo.and..not.dust_chimes_enabled().and. &
+       cooling_method/='grackle_neq')then
      if(myid==1)write(*,*)'Computing new cooling table'
 #ifdef grackle
      ! Compute new cooling table at current aexp with grackle
@@ -76,7 +97,7 @@ subroutine cooling_fine(ilevel)
 #else
      call set_table(dble(aexp))
      ! Update Eunha multi-z table if loaded
-     if(cooling_method/='original') then
+     if(cooling_method=='exact'.or.cooling_method=='compare') then
         call eunha_interp_redshift(1.0d0/dble(aexp) - 1.0d0)
      endif
 #endif
@@ -87,21 +108,25 @@ end subroutine cooling_fine
 
 !###########################################################
 !###########################################################
-subroutine sub_cooling_fine(ilevel,igrid,ngrid)
+subroutine sub_cooling_fine(ilevel,igrid,ngrid,cooling_status)
   use amr_commons
   use hydro_commons
   use cooling_module
   integer,dimension(1:nvector)::ind_grid
-  integer:: i,ilevel,igrid,ngrid
+  integer:: i,ilevel,igrid,ngrid,cooling_status
   do i = 1,ngrid
      ind_grid(i)=active(ilevel)%igrid(igrid+i-1)
   enddo
-  call coolfine1(ind_grid,ngrid,ilevel)
+  call coolfine1(ind_grid,ngrid,ilevel,cooling_status)
 end subroutine sub_cooling_fine
 
 !###########################################################
 !###########################################################
-subroutine coolfine1(ind_grid,ngrid,ilevel)
+subroutine coolfine1(ind_grid,ngrid,ilevel,cooling_status)
+#ifdef GRACKLE_NEQ
+  use grackle_neq_runtime, only: grackle_neq_step,grackle_neq_thermal_energy
+  use iso_c_binding, only: c_int
+#endif
 #ifdef DUST_DYNAMICS
   use dust_phase_state, only: dust_phase_kinetic
 #endif
@@ -123,7 +148,7 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
 #endif
 #include "amr_index.h"
   implicit none
-  integer::ilevel,ngrid
+  integer::ilevel,ngrid,cooling_status
   integer,dimension(1:nvector)::ind_grid
   !-------------------------------------------------------------------
   !-------------------------------------------------------------------
@@ -141,6 +166,12 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
   real(kind=8),dimension(1:nvector)::T2min,Zsolar,boost
   real(kind=8),dimension(1:nvector)::delta_T2_eunha
   real(dp)::rdiff,old_max
+#ifdef GRACKLE_NEQ
+  real(dp)::gr_rho(nvector),gr_u(nvector),gr_s(nvector,9),gr_z(nvector),gr_len(nvector)
+  real(dp)::gr_h,gr_he,gr_old_h,gr_old_he,gr_a,gr_tunit,gr_dt,gr_scale_T2
+  integer(c_int)::gr_cool(nvector)
+  integer::gr_ierr
+#endif
 
 #ifdef grackle
   real(kind=8) gr_density(nvector), gr_energy(nvector), &
@@ -155,6 +186,7 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
   endif
 #endif
 
+  cooling_status=0
   ! Mesh spacing in that level
   dx=0.5D0**ilevel
   nx_loc=(icoarse_max-icoarse_min+1)
@@ -279,7 +311,16 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
      end do
 #endif
      do i=1,nleaf
+#ifdef GRACKLE_NEQ
+        if(cooling_method=='grackle_neq')then
+           T2(i)=(gamma-1.0)*grackle_neq_thermal_energy(nH(i), &
+                uold(ind_leaf(i),2:ndim+1),uold(ind_leaf(i),ndim+2),err(i)+emag(i))
+        else
+           T2(i)=(gamma-1.0)*(T2(i)-ekk(i)-err(i)-emag(i))
+        endif
+#else
         T2(i)=(gamma-1.0)*(T2(i)-ekk(i)-err(i)-emag(i))
+#endif
      end do
 
      ! Compute T2=T/mu in Kelvin
@@ -388,6 +429,63 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
      delta_T2(1:nleaf) = T2_new(1:nleaf) - T2(1:nleaf)
 #else
      ! Eunha exact / compare / original cooling dispatch
+#ifdef GRACKLE_NEQ
+     if(cooling_method=='grackle_neq')then
+        gr_a=1d0
+        gr_tunit=scale_t
+        gr_dt=dtnew(ilevel)
+        if(cosmo)then
+           gr_a=dble(aexp)
+           gr_tunit=scale_t/gr_a**2
+           gr_dt=dtnew(ilevel)*gr_a**2
+        endif
+        ! Grackle's code specific-energy unit is [LU/(a TU)]^2. RAMSES uses
+        ! [LU/t_RAMSES]^2 with t_RAMSES=a^2 TU, hence T2_unit_Grackle=a^2*T2_unit_RAMSES.
+        gr_scale_T2=scale_T2*gr_a**2
+        do i=1,nleaf
+           gr_rho(i)=uold(ind_leaf(i),1)
+           gr_z(i)=uold(ind_leaf(i),imetal)
+           gr_u(i)=T2(i)/(gr_scale_T2*(gamma-1d0))
+           gr_s(i,:)=uold(ind_leaf(i),igrackle:igrackle+8)
+           ! Feedback returns neutral ejecta; removed mass retains species fractions.
+           ! Element/passive advection shares the same hydro stencil.
+           gr_h=uold(ind_leaf(i),ichem);gr_he=uold(ind_leaf(i),ichem+1)
+           gr_old_h=sum(gr_s(i,[1,2,3,7,8]));gr_old_he=sum(gr_s(i,4:6))
+           if(gr_h>=gr_old_h)then
+              gr_s(i,1)=gr_s(i,1)+gr_h-gr_old_h
+           else if(gr_old_h>0)then
+              gr_s(i,[1,2,3,7,8])=gr_s(i,[1,2,3,7,8])*gr_h/gr_old_h
+           endif
+           if(gr_he>=gr_old_he)then
+              gr_s(i,4)=gr_s(i,4)+gr_he-gr_old_he
+           else if(gr_old_he>0)then
+              gr_s(i,4:6)=gr_s(i,4:6)*gr_he/gr_old_he
+           endif
+           gr_s(i,9)=gr_s(i,2)-gr_s(i,3)+gr_s(i,8)/2+gr_s(i,5)/4+gr_s(i,6)/2
+           gr_len(i)=dx_loc
+           gr_cool(i)=1
+           if(delayed_cooling)then
+              if(uold(ind_leaf(i),idelay)/gr_rho(i)>1d-3)gr_cool(i)=0
+           endif
+        enddo
+        call grackle_neq_step(nleaf,gr_rho(1:nleaf),gr_u(1:nleaf),gr_s(1:nleaf,:), &
+             gr_z(1:nleaf),gr_len(1:nleaf),gr_cool(1:nleaf),scale_d,scale_l,gr_tunit, &
+             gr_a,gr_dt,gr_ierr)
+        if(gr_ierr/=0)then
+!$omp critical(grackle_failure_report)
+           write(*,*)'ERROR: Grackle NEQ solve/budget failed, rank/step/level/status: ', &
+                myid,nstep_coarse,ilevel,gr_ierr
+           write(*,*)'Grackle failed tile cell IDs: ',ind_leaf(1:nleaf)
+!$omp end critical(grackle_failure_report)
+           cooling_status=gr_ierr
+           return
+        endif
+        do i=1,nleaf
+           delta_T2(i)=gr_u(i)*gr_scale_T2*(gamma-1d0)-T2(i)
+           uold(ind_leaf(i),igrackle:igrackle+8)=gr_s(i,:)
+        enddo
+     else
+#endif
      if(cooling_method=='exact' .or. cooling_method=='compare') then
         call eunha_solve(nH,T2,Zsolar,dtcool,delta_T2_eunha,nleaf)
      endif
@@ -442,6 +540,9 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
            endif
         end do
      endif
+#ifdef GRACKLE_NEQ
+     endif ! alternate equilibrium/Grackle-NEQ ownership
+#endif
 #endif
 
      ! Compute rho

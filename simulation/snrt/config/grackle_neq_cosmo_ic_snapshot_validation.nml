@@ -1,0 +1,43 @@
+! Same single-step 128^3 IC run, with one final dump for positivity/budget check.
+&RUN_PARAMS
+ hydro=.true., pic=.true., poisson=.true., cosmo=.true.
+ nrestart=0, nstepmax=1, ncontrol=1, nsubcycle=1
+ use_fftw=.false.
+/
+&COSMO_PARAMS
+ omega_m=.315d0, omega_l=.700d0, h0=67.4d0, omega_b=.049d0
+/
+&AMR_PARAMS
+ levelmin=7, levelmax=7, ngridmax=300000, npartmax=3000000
+ boxlen=12.5d0
+/
+&OUTPUT_PARAMS
+ outformat='hdf5', informat='hdf5'
+ noutput=1, tout=1d100, aout=.0109d0
+ foutput=1000000, fbackup=1000000
+/
+&HYDRO_PARAMS
+ gamma=1.6666666666666667d0, courant_factor=.5d0
+ scheme='muscl', riemann='hllc'
+/
+&POISSON_PARAMS
+ abort_on_mg_nonconvergence=.true.
+/
+&INIT_PARAMS
+ filetype='grafic'
+ initfile(1)='/gpfs/kjhan/LRD_JWST/.galaxy-preenriched.IJ8aeX/ics/level_007'
+ aexp_ini=.01d0
+/
+&PHYSICS_PARAMS
+ cooling=.true., metal=.true., cooling_method='grackle_neq'
+ neq_chem=.false., dust_mass_enabled=.false., haardt_madau=.true.
+ grackle_neq_data_file='/home/kjhan/BACKUP/Eunha.A1/Prerequisites/Cooling_Grackle/input/CloudyData_UVB=HM2012.h5'
+ grackle_neq_h2_shielding=0
+ omega_b=.049d0
+ units_density=1.6726219d-24
+ units_length=3.0856776d24, units_time=4.35d17
+/
+&STELLAR_ENRICHMENT_PARAMS
+ feedback_mode='legacy', use_wind=.false., use_agb=.false.
+ use_snii=.false., use_snia=.false., use_pisn=.false.
+/

@@ -2,7 +2,7 @@
 !###########################################################
 ! Eunha Exact Cooling Integrator (Fortran port)
 !
-! Method: Townsend (2009) Y-function exact integration
+! Method: analytic segment integration of a piecewise-linear energy/rate curve
 !         Zhu, Smith & Hernquist (2017), MNRAS 470, 1017
 !
 ! Table: Grackle equilibrium net-rate binary
@@ -35,7 +35,6 @@ module eunha_cooling_mod
   real(dp), allocatable :: tab_metallicity(:)    ! (M) Z_solar
   real(dp), allocatable :: tab_temperature(:)    ! (N) T [K]
   real(dp), allocatable :: tab_net_rate(:,:,:)   ! (N,M,L) erg/g/s
-  real(dp), allocatable :: tab_Y(:,:,:)          ! (N,M,L) Y-function
   real(dp), allocatable :: tab_mmw(:,:,:)        ! (N,M,L) mean mol weight
   integer  :: tab_L, tab_M, tab_N
   logical  :: tab_loaded = .false.
@@ -120,14 +119,12 @@ subroutine eunha_load_table(filename)
   if(allocated(tab_metallicity)) deallocate(tab_metallicity)
   if(allocated(tab_temperature)) deallocate(tab_temperature)
   if(allocated(tab_net_rate))    deallocate(tab_net_rate)
-  if(allocated(tab_Y))          deallocate(tab_Y)
   if(allocated(tab_mmw))        deallocate(tab_mmw)
 
   allocate(tab_density(nd))
   allocate(tab_metallicity(nm))
   allocate(tab_temperature(nt))
   allocate(tab_net_rate(nt, nm, nd))
-  allocate(tab_Y(nt, nm, nd))
   allocate(tab_mmw(nt, nm, nd))
 
   ! Build density grid (log-spaced from log10 values)
@@ -171,12 +168,6 @@ subroutine eunha_load_table(filename)
   end do
   deallocate(raw_rate)
 
-  ! Build Y function tables for each (density, metallicity) cell
-  do i = 1, nd
-     do j = 1, nm
-        call build_Y_cell(i, j)
-     end do
-  end do
 
   tab_loaded = .true.
 
@@ -188,141 +179,6 @@ subroutine eunha_load_table(filename)
   write(*,'(A,ES10.3,A,ES10.3)') '   Temperature: ', tab_temperature(1), ' - ', tab_temperature(nt)
 
 end subroutine eunha_load_table
-
-!###########################################################
-! Build Y function table for one (density, metallicity) cell
-! Eq. (9): cumulative sum of deltaY from reference
-!###########################################################
-subroutine build_Y_cell(i_d, j_z)
-  implicit none
-  integer, intent(in) :: i_d, j_z
-  integer :: k, k_ref
-  real(dp) :: T_ref, L_ref, mu_ref, u_ref
-  real(dp) :: T1, T2, L1, L2, mu1, mu2, u1, u2
-  real(dp) :: Y_accum, dY
-  real(dp) :: nH_val, Z_met
-
-  nH_val = tab_density(i_d)
-  Z_met  = tab_metallicity(j_z)
-
-  ! Reference point at middle of temperature grid
-  k_ref = tab_N / 2
-  T_ref = tab_temperature(k_ref)
-  L_ref = tab_net_rate(k_ref, j_z, i_d)
-
-  ! Find non-zero reference if needed
-  if(abs(L_ref) < EPSILON) then
-     do k = 1, tab_N
-        if(abs(tab_net_rate(k, j_z, i_d)) > EPSILON) then
-           k_ref = k
-           T_ref = tab_temperature(k_ref)
-           L_ref = tab_net_rate(k_ref, j_z, i_d)
-           exit
-        end if
-     end do
-  end if
-  if(abs(L_ref) < EPSILON) L_ref = 1.0d-30
-
-  mu_ref = interp_mmw_cell(nH_val, Z_met, T_ref)
-  u_ref  = T_to_u(T_ref, mu_ref)
-
-  ! Set Y = 0 at reference
-  tab_Y(k_ref, j_z, i_d) = 0.0d0
-
-  ! Build Y upward (higher T)
-  Y_accum = 0.0d0
-  do k = k_ref + 1, tab_N
-     T1 = tab_temperature(k - 1)
-     T2 = tab_temperature(k)
-     L1 = tab_net_rate(k - 1, j_z, i_d)
-     L2 = tab_net_rate(k, j_z, i_d)
-
-     if(abs(L1) < EPSILON .or. abs(L2) < EPSILON .or. L1 * L2 < 0.0d0) then
-        tab_Y(k, j_z, i_d) = Y_accum
-        cycle
-     end if
-
-     mu1 = interp_mmw_cell(nH_val, Z_met, T1)
-     mu2 = interp_mmw_cell(nH_val, Z_met, T2)
-     u1  = T_to_u(T1, mu1)
-     u2  = T_to_u(T2, mu2)
-
-     dY = calc_delta_Y(u1, u2, L1, L2, u_ref, L_ref)
-     Y_accum = Y_accum + dY
-     tab_Y(k, j_z, i_d) = Y_accum
-  end do
-
-  ! Build Y downward (lower T)
-  Y_accum = 0.0d0
-  do k = k_ref - 1, 1, -1
-     T1 = tab_temperature(k + 1)
-     T2 = tab_temperature(k)
-     L1 = tab_net_rate(k + 1, j_z, i_d)
-     L2 = tab_net_rate(k, j_z, i_d)
-
-     if(abs(L1) < EPSILON .or. abs(L2) < EPSILON .or. L1 * L2 < 0.0d0) then
-        tab_Y(k, j_z, i_d) = Y_accum
-        cycle
-     end if
-
-     mu1 = interp_mmw_cell(nH_val, Z_met, T1)
-     mu2 = interp_mmw_cell(nH_val, Z_met, T2)
-     u1  = T_to_u(T1, mu1)
-     u2  = T_to_u(T2, mu2)
-
-     dY = calc_delta_Y(u1, u2, L1, L2, u_ref, L_ref)
-     Y_accum = Y_accum + dY
-     tab_Y(k, j_z, i_d) = Y_accum
-  end do
-
-end subroutine build_Y_cell
-
-!###########################################################
-! Eq. (6), (7), (8): calculate deltaY for a segment
-!###########################################################
-function calc_delta_Y(u1, u2, L1, L2, u_ref, L_ref) result(dY)
-  implicit none
-  real(dp), intent(in) :: u1, u2, L1, L2, u_ref, L_ref
-  real(dp) :: dY
-  real(dp) :: du, dL, norm, L_avg, A, B, arg1, arg2
-
-  du = u2 - u1
-  dL = L2 - L1
-  norm = L_ref / u_ref
-
-  ! Eq. (7): equal rates
-  if(abs(dL) < REL_TOL * abs(L1 + L2) * 0.5d0 + EPSILON) then
-     L_avg = 0.5d0 * (L1 + L2)
-     if(abs(L_avg) < EPSILON) then
-        dY = 0.0d0
-        return
-     end if
-     dY = norm * du / L_avg
-     return
-  end if
-
-  ! Eq. (8)
-  A = du / dL
-  B = (u2 * L1 - u1 * L2) / dL
-
-  arg1 = B + u1
-  arg2 = B + u2
-
-  ! Fallback for invalid log arguments
-  if(arg1 * arg2 <= 0.0d0 .or. abs(arg1) < EPSILON .or. abs(arg2) < EPSILON) then
-     L_avg = 0.5d0 * (L1 + L2)
-     if(abs(L_avg) < EPSILON) then
-        dY = 0.0d0
-        return
-     end if
-     dY = norm * du / L_avg
-     return
-  end if
-
-  ! Eq. (6)
-  dY = norm * A * log(arg2 / arg1)
-
-end function calc_delta_Y
 
 !###########################################################
 ! T -> u (specific internal energy)
@@ -447,25 +303,6 @@ function interp_net_rate(nH, Z_met, T) result(rate)
 end function interp_net_rate
 
 !###########################################################
-! Bilinear Y interpolation at (nH, Z) indices with fractions
-!###########################################################
-function interp_Y_bilinear(i, j, k, f_n, f_z) result(Y_val)
-  implicit none
-  integer,  intent(in) :: i, j, k
-  real(dp), intent(in) :: f_n, f_z
-  real(dp) :: Y_val
-  real(dp) :: Y00, Y01, Y10, Y11, Y0, Y1
-
-  Y00 = tab_Y(k, j,   i  )
-  Y01 = tab_Y(k, j+1, i  )
-  Y10 = tab_Y(k, j,   i+1)
-  Y11 = tab_Y(k, j+1, i+1)
-  Y0  = Y00 + f_z * (Y01 - Y00)
-  Y1  = Y10 + f_z * (Y11 - Y10)
-  Y_val = Y0 + f_n * (Y1 - Y0)
-end function interp_Y_bilinear
-
-!###########################################################
 ! Find index in log-spaced array (binary search + fine-tune)
 ! Returns idx in [1, n-1] and fraction f in [0,1]
 !###########################################################
@@ -533,206 +370,99 @@ end function T2_to_T
 
 !###########################################################
 ! Main exact integration for a single cell
-! Input: nH [cm^-3], Z [Z_solar], T [K], dt [s]
-! Output: T_final [K]
+! Input: nH [cm^-3], Z [Z_solar], specific internal energy [erg/g], dt [s]
+! Output: specific internal energy [erg/g]
 !###########################################################
-function exact_integrate(nH, Z_met, T_init, dt) result(T_final)
+! Integrate du/dt=-Lambda(u) exactly for the piecewise-linear, bilinearly
+! interpolated energy/rate curve. No interpolation of separately normalized
+! Y functions, no corner-dependent equilibrium, and no chemical state solve.
+function exact_energy(nH, Z_met, u_initial, dt) result(u)
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
-  real(dp), intent(in) :: nH, Z_met, T_init, dt
-  real(dp) :: T_final
-  integer :: i, j, k, k_ref, k_init
-  real(dp) :: f_n, f_z, f_t
-  real(dp) :: nH_c, Z_c, T_c
-  real(dp) :: Lambda_init, T_ref, L_ref, mu_ref, u_ref
-  real(dp) :: Delta_Y, Y_init, Y_target, T_new
-  real(dp) :: Y_lo_seg, Y_hi_seg, Y_k, Y_k1, Y_km1
-  real(dp) :: frac, log_T_k, log_T_k1, log_T_km1
-  real(dp) :: Lambda_k, Lambda_prev
-  logical  :: is_cooling, found
+  real(dp), intent(in) :: nH, Z_met, u_initial, dt
+  real(dp) :: u, energy(tab_N), rate(tab_N), remaining
+  real(dp) :: slope, current, target, endpoint, travel, exponent, factor,fn,fz,mu
+  integer :: k, step,i,j
+  if(.not.tab_loaded) error stop 'Eunha: cooling table not loaded'
+  if(.not.ieee_is_finite(dt).or.dt<0) error stop 'Eunha: invalid timestep'
+  if(.not.ieee_is_finite(nH).or.nH<=0.or..not.ieee_is_finite(Z_met).or.Z_met<0.or. &
+     .not.ieee_is_finite(u_initial).or.u_initial<=0) error stop 'Eunha: invalid cell state'
+  u=u_initial
+  if(dt==0) return
+  call find_index_log(tab_density,tab_L,nH,i,fn)
+  call find_index_log(tab_metallicity,tab_M,Z_met,j,fz)
+  do k=1,tab_N
+     mu=(1-fn)*((1-fz)*tab_mmw(k,j,i)+fz*tab_mmw(k,j+1,i)) &
+          +fn*((1-fz)*tab_mmw(k,j,i+1)+fz*tab_mmw(k,j+1,i+1))
+     if(.not.ieee_is_finite(mu).or.mu<=0) error stop 'Eunha: invalid table molecular weight'
+     energy(k)=T_to_u(tab_temperature(k),mu)
+     rate(k)=(1-fn)*((1-fz)*tab_net_rate(k,j,i)+fz*tab_net_rate(k,j+1,i)) &
+          +fn*((1-fz)*tab_net_rate(k,j,i+1)+fz*tab_net_rate(k,j+1,i+1))
+     if(.not.ieee_is_finite(rate(k))) error stop 'Eunha: invalid table rate'
+  enddo
+  if(any(energy(2:)<=energy(:tab_N-1))) error stop 'Eunha: nonmonotone energy table'
+  u=max(energy(1),min(u,energy(tab_N)))
+  remaining=dt
+  do step=1,tab_N+1
+     k=1
+     do while(k<tab_N-1)
+        if(u<energy(k+1)) exit
+        k=k+1
+     enddo
+     current=rate(k)+(rate(k+1)-rate(k))*(u-energy(k))/(energy(k+1)-energy(k))
+     if(abs(current)<EPSILON) return
+     ! At a knot select the segment in the direction of evolution.
+     if(current>0.and.k>1.and.u==energy(k)) k=k-1
+     slope=(rate(k+1)-rate(k))/(energy(k+1)-energy(k))
+     current=rate(k)+slope*(u-energy(k))
+     if(current>0) then
+        target=energy(k); endpoint=rate(k)
+     else
+        target=energy(k+1); endpoint=rate(k+1)
+     endif
+     if(target==u) return ! outward motion at the table boundary
+     travel=huge(1.0_dp)
+     if(current*endpoint>0) then
+        if(abs(slope)*(energy(k+1)-energy(k))<=1d-12*abs(current)) then
+           travel=abs((target-u)/current)
+        else
+           travel=log(abs(current/endpoint))/slope
+        endif
+     endif
+     if(remaining>=travel) then
+        u=target
+        remaining=remaining-travel
+        if(remaining<=0) return
+     else
+        exponent=-slope*remaining
+        if(abs(exponent)<1d-5) then
+           factor=remaining*(1+exponent/2+exponent**2/6+exponent**3/24+exponent**4/120)
+        else
+           factor=(1-exp(exponent))/slope
+        endif
+        u=u-current*factor
+        ! A zero of Lambda is approached asymptotically, never crossed.
+        if(current*endpoint<=0.and.slope/=0) then
+           target=energy(k)-rate(k)/slope
+        endif
+        u=max(min(u,max(u_initial,target)),min(u_initial,target))
+        u=max(energy(k),min(u,energy(k+1)))
+        return
+     endif
+  enddo
+  error stop 'Eunha: segment traversal failed'
+end function exact_energy
 
-  ! Clamp inputs to table range
-  nH_c = max(tab_density(1),     min(nH,    tab_density(tab_L)))
-  Z_c  = max(tab_metallicity(1), min(Z_met, tab_metallicity(tab_M)))
-  T_c  = max(tab_temperature(1), min(T_init,tab_temperature(tab_N)))
-
-  ! Get initial net cooling rate
-  Lambda_init = interp_net_rate(nH_c, Z_c, T_c)
-
-  ! Negligible rate → no change
-  if(abs(Lambda_init) < EPSILON) then
-     T_final = T_c
-     return
-  end if
-
-  is_cooling = (Lambda_init > 0.0d0)
-
-  ! Find indices and fractions
-  call find_index_log(tab_density,     tab_L, nH_c, i, f_n)
-  call find_index_log(tab_metallicity, tab_M, Z_c,  j, f_z)
-  call find_index_log(tab_temperature, tab_N, T_c,  k_init, f_t)
-
-  ! Reference values
-  k_ref = tab_N / 2
-  T_ref = tab_temperature(k_ref)
-  L_ref = tab_net_rate(k_ref, j, i)
-  if(abs(L_ref) < EPSILON) L_ref = abs(Lambda_init)
-
-  mu_ref = interp_mmw_cell(nH_c, Z_c, T_ref)
-  u_ref  = T_to_u(T_ref, mu_ref)
-
-  ! Eq. (10): Delta_Y for this timestep
-  Delta_Y = (abs(L_ref) / u_ref) * dt
-
-  ! Interpolate Y at initial T
-  Y_init = interp_Y_bilinear(i, j, k_init, f_n, f_z) * (1.0d0 - f_t) &
-         + interp_Y_bilinear(i, j, k_init+1, f_n, f_z) * f_t
-
-  ! Target Y
-  if(is_cooling) then
-     Y_target = Y_init - Delta_Y   ! cooling: Y decreases
-  else
-     Y_target = Y_init + Delta_Y   ! heating: Y increases
-  end if
-
-  ! Search for T_new where Y(T) = Y_target
-  T_new = T_c
-  found = .false.
-
-  if(is_cooling) then
-     ! Cooling: search downward
-     ! First check current segment [k_init, k_init+1]
-     if(k_init < tab_N) then
-        Y_lo_seg = interp_Y_bilinear(i, j, k_init, f_n, f_z)
-        Y_hi_seg = interp_Y_bilinear(i, j, k_init+1, f_n, f_z)
-        if(Y_target >= Y_lo_seg .and. Y_target <= Y_hi_seg) then
-           frac = 0.0d0
-           if(abs(Y_hi_seg - Y_lo_seg) > EPSILON) &
-                frac = (Y_target - Y_lo_seg) / (Y_hi_seg - Y_lo_seg)
-           frac = max(0.0d0, min(1.0d0, frac))
-           log_T_k  = log10(max(tab_temperature(k_init),   1.0d-30))
-           log_T_k1 = log10(max(tab_temperature(k_init+1), 1.0d-30))
-           T_new = 10.0d0 ** (log_T_k + frac * (log_T_k1 - log_T_k))
-           found = .true.
-        end if
-     end if
-
-     ! Search downward
-     do k = k_init, 1, -1
-        if(found) exit
-
-        ! Check equilibrium crossing
-        Lambda_k = tab_net_rate(k, j, i)
-        if(Lambda_k <= 0.0d0) then
-           if(k < k_init .and. k < tab_N) then
-              Lambda_prev = tab_net_rate(k+1, j, i)
-              if(abs(Lambda_prev - Lambda_k) > EPSILON) then
-                 frac = Lambda_prev / (Lambda_prev - Lambda_k)
-                 frac = max(0.0d0, min(1.0d0, frac))
-                 log_T_k  = log10(max(tab_temperature(k),   1.0d-30))
-                 log_T_k1 = log10(max(tab_temperature(k+1), 1.0d-30))
-                 T_new = 10.0d0 ** (log_T_k1 + frac * (log_T_k - log_T_k1))
-              else
-                 T_new = tab_temperature(k+1)
-              end if
-           else
-              T_new = tab_temperature(k)
-           end if
-           found = .true.
-           exit
-        end if
-
-        ! Check segment [k-1, k]
-        if(k > 1) then
-           Y_k   = interp_Y_bilinear(i, j, k,   f_n, f_z)
-           Y_km1 = interp_Y_bilinear(i, j, k-1, f_n, f_z)
-
-           Y_lo_seg = min(Y_km1, Y_k)
-           Y_hi_seg = max(Y_km1, Y_k)
-
-           if(Y_target >= Y_lo_seg .and. Y_target <= Y_hi_seg) then
-              frac = 0.0d0
-              if(abs(Y_k - Y_km1) > EPSILON) &
-                   frac = (Y_target - Y_k) / (Y_km1 - Y_k)
-              frac = max(0.0d0, min(1.0d0, frac))
-              log_T_k   = log10(max(tab_temperature(k),   1.0d-30))
-              log_T_km1 = log10(max(tab_temperature(k-1), 1.0d-30))
-              T_new = 10.0d0 ** (log_T_k + frac * (log_T_km1 - log_T_k))
-              found = .true.
-           end if
-        end if
-     end do
-
-     if(.not. found) T_new = tab_temperature(1)
-
-  else
-     ! Heating: search upward
-     do k = k_init, tab_N - 1
-        if(found) exit
-
-        Y_k  = interp_Y_bilinear(i, j, k,   f_n, f_z)
-        Y_k1 = interp_Y_bilinear(i, j, k+1, f_n, f_z)
-
-        if((Y_target >= Y_k .and. Y_target <= Y_k1) .or. &
-           (Y_target <= Y_k .and. Y_target >= Y_k1)) then
-           frac = 0.0d0
-           if(abs(Y_k1 - Y_k) > EPSILON) &
-                frac = (Y_target - Y_k) / (Y_k1 - Y_k)
-           frac = max(0.0d0, min(1.0d0, frac))
-           log_T_k  = log10(max(tab_temperature(k),   1.0d-30))
-           log_T_k1 = log10(max(tab_temperature(k+1), 1.0d-30))
-           T_new = 10.0d0 ** (log_T_k + frac * (log_T_k1 - log_T_k))
-           found = .true.
-        end if
-
-        ! Equilibrium crossing
-        Lambda_k = tab_net_rate(k, j, i)
-        if(Lambda_k >= 0.0d0 .and. .not. found) then
-           T_new = tab_temperature(k)
-           found = .true.
-        end if
-     end do
-
-     if(.not. found) T_new = tab_temperature(tab_N)
-  end if
-
-  ! Clamp to table range
-  T_final = max(tab_temperature(1), min(T_new, tab_temperature(tab_N)))
-
-end function exact_integrate
-
-!###########################################################
-! Batch solver: T/mu -> T, exact integrate, T -> delta(T/mu)
-!
-! nH(:)    — hydrogen number density [cm^-3]
-! T2(:)    — temperature T/mu [K]
-! Zsolar(:)— metallicity [Z_solar]
-! dt       — cooling timestep [s]
-! delta_T2(:) — output: change in T/mu [K]
-! n        — number of cells
-!###########################################################
 subroutine eunha_solve(nH, T2, Zsolar, dt, delta_T2, n)
   implicit none
-  integer,  intent(in) :: n
-  real(dp), intent(in) :: dt
-  real(dp), dimension(1:n), intent(in)  :: nH, T2, Zsolar
-  real(dp), dimension(1:n), intent(out) :: delta_T2
-  integer  :: ic
-  real(dp) :: T_phys, T_final, mu_final, T2_final
-
-  do ic = 1, n
-     ! Convert T/mu -> T using Grackle mmw
-     T_phys = T2_to_T(T2(ic), nH(ic), Zsolar(ic))
-
-     ! Exact integration
-     T_final = exact_integrate(nH(ic), Zsolar(ic), T_phys, dt)
-
-     ! Convert T -> T/mu using Grackle mmw at new T
-     mu_final  = interp_mmw_cell(nH(ic), Zsolar(ic), T_final)
-     T2_final  = T_final / mu_final
-
-     delta_T2(ic) = T2_final - T2(ic)
-  end do
-
+  integer, intent(in) :: n
+  real(dp), intent(in) :: dt,nH(n),T2(n),Zsolar(n)
+  real(dp), intent(out) :: delta_T2(n)
+  integer :: ic
+  real(dp), parameter :: specific_heat=k_B/((GAMMA_AD-1)*m_H)
+  do ic=1,n
+     delta_T2(ic)=exact_energy(nH(ic),Zsolar(ic),specific_heat*T2(ic),dt)/specific_heat-T2(ic)
+  enddo
 end subroutine eunha_solve
 
 !###########################################################
@@ -887,8 +617,9 @@ subroutine eunha_load_multi_z(filename)
   allocate(tab_z_values(nz))
   read(iunit) tab_z_values(1:nz)
 
-  ! Read header (7 doubles)
-  read(iunit) log_dmin, log_dmax, log_zmin, log_zmax, log_tmin, log_tmax, unused
+  ! The bundled multi-z file retains the single-z seven-double header:
+  ! placeholder redshift first, then the six log-domain bounds.
+  read(iunit) unused, log_dmin, log_dmax, log_zmin, log_zmax, log_tmin, log_tmax
 
   ! Read temperature grid
   allocate(log_T(nt))
@@ -899,14 +630,12 @@ subroutine eunha_load_multi_z(filename)
   if(allocated(tab_metallicity)) deallocate(tab_metallicity)
   if(allocated(tab_temperature)) deallocate(tab_temperature)
   if(allocated(tab_net_rate))    deallocate(tab_net_rate)
-  if(allocated(tab_Y))          deallocate(tab_Y)
   if(allocated(tab_mmw))        deallocate(tab_mmw)
 
   allocate(tab_density(nd))
   allocate(tab_metallicity(nm))
   allocate(tab_temperature(nt))
   allocate(tab_net_rate(nt, nm, nd))
-  allocate(tab_Y(nt, nm, nd))
   allocate(tab_mmw(nt, nm, nd))
 
   ! Build density grid
@@ -1033,13 +762,6 @@ subroutine eunha_interp_redshift(z_target)
      end do
   end do
 
-  ! Rebuild Y-function for all (density, metallicity) cells
-  !$omp parallel do collapse(2) private(i,j)
-  do i = 1, tab_L
-     do j = 1, tab_M
-        call build_Y_cell(i, j)
-     end do
-  end do
 
   if(myid==1) write(*,'(A,F7.3,A,I2,A,F5.3)') &
        ' Eunha: interpolated to z=', z_target, '  bracket iz=', iz, '  w=', w
