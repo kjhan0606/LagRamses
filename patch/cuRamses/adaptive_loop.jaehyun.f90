@@ -569,7 +569,7 @@ subroutine sidm_binary_orbit_monitor_sync_step(ilevel,finished)
   implicit none
   integer,intent(in)::ilevel
   logical,intent(out)::finished
-  real(dp)::checkpoint_interval,completed_step_dt,overshoot,tol
+  real(dp)::checkpoint_interval,completed_step_dt,overshoot,monitor_tol
   integer::completed_step
 
   finished=.false.
@@ -621,22 +621,22 @@ subroutine sidm_binary_orbit_monitor_sync_step(ilevel,finished)
        call sidm_binary_orbit_monitor_abort( &
        'completed coarse timestep is not finite and positive', &
        'sink_level_sync')
-  tol=5d-12*max(1d-14,max(abs(checkpoint_interval), &
+  monitor_tol=5d-12*max(1d-14,max(abs(checkpoint_interval), &
        abs(completed_step_dt),abs(binary_orbit_sample_interval)))
   if(.not.ieee_is_finite(binary_orbit_monitor_last_sync_time).or. &
        t<=binary_orbit_monitor_last_sync_time.or. &
-       abs((t-binary_orbit_monitor_last_sync_time)-completed_step_dt)>tol.or. &
+       abs((t-binary_orbit_monitor_last_sync_time)-completed_step_dt)>monitor_tol.or. &
        checkpoint_interval<=0d0.or. &
-       completed_step_dt>binary_orbit_sample_interval+tol.or. &
-       checkpoint_interval>2d0*binary_orbit_sample_interval+tol) &
+       completed_step_dt>binary_orbit_sample_interval+monitor_tol.or. &
+       checkpoint_interval>2d0*binary_orbit_sample_interval+monitor_tol) &
        call sidm_binary_orbit_monitor_abort( &
        'completed timestep or checkpoint cadence exceeded its validated bound', &
        'sink_level_sync')
 
   if(t>=binary_orbit_stop_time)then
      overshoot=t-binary_orbit_stop_time
-     if(overshoot<0d0.or.overshoot>completed_step_dt+tol.or. &
-          overshoot>binary_orbit_sample_interval+tol) &
+     if(overshoot<0d0.or.overshoot>completed_step_dt+monitor_tol.or. &
+          overshoot>binary_orbit_sample_interval+monitor_tol) &
           call sidm_binary_orbit_monitor_abort( &
           'physical-stop overshoot exceeded one completed timestep', &
           'sink_level_sync')
@@ -648,12 +648,12 @@ subroutine sidm_binary_orbit_monitor_sync_step(ilevel,finished)
      return
   endif
 
-  tol=5d-12*max(1d-14,max(abs(t), &
+  monitor_tol=5d-12*max(1d-14,max(abs(t), &
        abs(binary_orbit_monitor_next_time)))
-  if(t+tol>=binary_orbit_monitor_next_time)then
+  if(t+monitor_tol>=binary_orbit_monitor_next_time)then
      call sidm_binary_orbit_monitor_write_rows('sample', &
           checkpoint_interval,completed_step_dt,0d0,ilevel)
-     do while(binary_orbit_monitor_next_time<=t+tol)
+     do while(binary_orbit_monitor_next_time<=t+monitor_tol)
         binary_orbit_monitor_next_time= &
              binary_orbit_monitor_next_time+binary_orbit_sample_interval
      enddo
