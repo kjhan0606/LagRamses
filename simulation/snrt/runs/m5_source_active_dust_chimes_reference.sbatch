@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Reference-only source-active integration: real BH accretion + M5 + live
-# two-size dust mass + CPU CHIMES. Requires a previously built CHIMES binary.
-# This does not qualify the reference physical tables for production.
+# two-size dust + CHIMES. The AGN profile disables stellar photons so its M5
+# source ledger is attributable to the AGN; physical tables remain references.
 #SBATCH --job-name=m5-src-dust-chem
 #SBATCH --partition=a100,h100
 #SBATCH --nodes=1
@@ -77,7 +77,9 @@ case "$PROFILE" in
     TEMPLATE=$ROOT/simulation/snrt/config/snrt_stellar_agn_dust_reference_smoke.nml
     WORK=$ROOT/.m5-source-dust-chimes-$RUN_ID
     SOURCE_IC=$ROOT/simulation/snrt/config/snrt_agn_accretion_smoke.ic_sink
-    SED=$ROOT/simulation/snrt/config/snrt_stellar_sed_bpass_independent_v3.nml
+    # Isolate AGN photons. Stellar feedback settings in the namelist are
+    # unchanged; only the independent stellar radiation source is omitted.
+    SED=''
     ;;
   effective_population)
     TEMPLATE=$ASSETS/.effective-coupled.Q9Kw29/short/run.nml
@@ -283,12 +285,13 @@ sha256sum "$TEMPLATE" "$WORK/effective.nml" "$WORK/ic_sink" "$WORK/rank-bind.sh"
   "$ROOT/simulation/snrt/runs/m5_source_active_dust_chimes_reference.sbatch" "$BINARY" \
   "$CHIMES_REPORTER_SOURCE" "$CHIMES_REPORTER" \
   "$CHIMES_INSTALL/libchimes.so" "$TABLE" "$GROUP_DIR/manifest.json" \
-  "$GROUP_DIR"/group_*.hdf5 "$SED" "$GROUP_CONTRACT" "$SECONDARY" "$DUST_CONTRACT" \
+  "$GROUP_DIR"/group_*.hdf5 "$GROUP_CONTRACT" "$SECONDARY" "$DUST_CONTRACT" \
   "$ASSETS/.chimes-spectral.TrQxAG/bank-final/atomic_shells.h5" \
   "$ASSETS/.chimes-molecular.U6ZQCr/bank/molecular_nodes.h5" \
   "$ASSETS/.effective-population.gQodLz/inputs/history.nml" \
   "$ASSETS/.mixed-lowmass.Rbb2fZ/input-v5/yields.dat" \
   > "$WORK/inputs.sha256"
+if [[ -n "$SED" ]]; then sha256sum "$SED" >> "$WORK/inputs.sha256"; fi
 if [[ "$PROFILE" == effective_population ]]; then
   sha256sum "$SNIA_CONTRACT" "$ASSETS/.mixed-lowmass.Rbb2fZ/input-v5/nodes.dat" \
     >> "$WORK/inputs.sha256"
@@ -300,7 +303,8 @@ export OMP_STACKSIZE=512M KMP_STACKSIZE=512M I_MPI_FABRICS=shm I_MPI_PIN=0
 export SNRT_BACKEND="$TRANSPORT_BACKEND" SNRT_DUST_BACKEND="$MATERIAL_BACKEND" SNRT_AGN_MODEL=partition_reference_v1
 export SNRT_REDUCED_C=0.01 SNRT_RT_LEVEL=3 SNRT_ALLOW_REFERENCE_CONTROL=1
 export SNRT_GROUP_CONTRACT="$GROUP_CONTRACT" SNRT_SECONDARY_TABLE_CONTRACT="$SECONDARY"
-export SNRT_STELLAR_SED="$SED" SNRT_DUST_CONTRACT="$DUST_CONTRACT"
+if [[ -n "$SED" ]]; then export SNRT_STELLAR_SED="$SED"; else unset SNRT_STELLAR_SED; fi
+export SNRT_DUST_CONTRACT="$DUST_CONTRACT"
 export SNRT_SPECTRAL_MODEL=chimes_transition_d03_maxent128_fs2010_v1
 export SNRT_CHIMES_BINARY="$BINARY" SNRT_CHIMES_MAIN_DATA="$TABLE" SNRT_CHIMES_GROUP_DIR="$GROUP_DIR"
 export SNRT_CHIMES_BAND_TABLE=$ASSETS/.chimes-spectral.TrQxAG/bank-final/atomic_shells.h5
@@ -323,8 +327,10 @@ if [[ "$PROFILE" == effective_population ]]; then
 fi
 
 printf 'PROFILE=%s_M5_live_dust_CHIMES_reference_NONPRODUCTION\n' "$PROFILE" | tee -a "$WORK/launch.txt"
-printf 'MPI=%s OMP=%s; real_BH_accretion_sink; SED_and_dust_contracts=reference_control; CHIMES_backend=%s; VERIFY_RESTART=%s\n' \
-  "$MPI_RANKS" "$OMP_NUM_THREADS" "$CHIMES_BACKEND" "$VERIFY_RESTART" \
+stellar_sed_status=enabled
+if [[ -z "$SED" ]]; then stellar_sed_status=disabled; fi
+printf 'MPI=%s OMP=%s; real_BH_accretion_sink; stellar_SED=%s; AGN/dust contracts=reference_control; CHIMES_backend=%s; VERIFY_RESTART=%s\n' \
+  "$MPI_RANKS" "$OMP_NUM_THREADS" "$stellar_sed_status" "$CHIMES_BACKEND" "$VERIFY_RESTART" \
   | tee -a "$WORK/launch.txt"
 printf 'TRANSPORT_BACKEND=%s MATERIAL_BACKEND=%s\n' "$TRANSPORT_BACKEND" "$MATERIAL_BACKEND" \
   | tee -a "$WORK/launch.txt"
@@ -433,6 +439,10 @@ if grep -Eiq 'ERROR:|Aborting|forrtl:|failed to converge|nonfinite|NaN_CHK.*=[[:
   echo 'FAIL: runtime error/nonfinite/nonconvergence marker; preserving evidence' >&2
   exit 3
 fi
+if [[ "$PROFILE" == agn_reference ]] && grep -Eq 'SNRT stellar population binding:|SNRT radiation population \(' run.log; then
+  echo 'FAIL: AGN-only source run unexpectedly loaded a stellar radiation population' >&2
+  exit 5
+fi
 shopt -s nullglob
 raw_outputs=(output_[0-9][0-9][0-9][0-9][0-9])
 if [[ "$VERIFY_RESTART" == 1 ]]; then
@@ -497,6 +507,8 @@ fi
 if [[ "$CHIMES_BACKEND" == hybrid ]]; then
   check_hybrid_process_reports run.log 1
 fi
-printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS profile=%s M5_order=5 AGN_state=%s M5_total_source_ledger=nonzero dust_mass=enabled CHIMES_backend=%s momentum_assert_cells=%s reference_controls=NONPRODUCTION raw_outputs=0\n' \
-  "$PROFILE" "$agn_evidence" "$CHIMES_BACKEND" "$momentum_assert_cells" \
+source_scope=effective_population
+if [[ "$PROFILE" == agn_reference ]]; then source_scope=AGN_only_point_source; fi
+printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS profile=%s M5_order=5 source_scope=%s AGN_state=%s M5_total_source_ledger=nonzero dust_mass=enabled CHIMES_backend=%s momentum_assert_cells=%s reference_controls=NONPRODUCTION raw_outputs=0\n' \
+  "$PROFILE" "$source_scope" "$agn_evidence" "$CHIMES_BACKEND" "$momentum_assert_cells" \
   | tee "$WORK/result.txt"
