@@ -66,8 +66,10 @@ contains
          nksec_levels = nksec_levels + mults(i)
       end do
 
-      ! Max factor
-      ksec_kmax = primes(1)
+      ! Max factor. A serial tree has no split factor but its leaf marker
+      ! still needs child column 1 (ksec_next(:,1) == 0).
+      ksec_kmax = 1
+      if(nfactors > 0) ksec_kmax = primes(1)
 
       ! Build factor sequence: [p, p, ...(m times), q, q, ...(n times), ...]
       if(allocated(ksec_factor)) deallocate(ksec_factor)
