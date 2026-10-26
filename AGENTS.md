@@ -17,6 +17,17 @@ COLIBRE-type galaxy-observable calibration and resolution convergence form
 a separate science plan (`provenance/galaxy_calibration_science_plan.md`),
 not additional prerequisites for the approved three-step implementation.
 
+## Compute placement
+
+- Run GPU work through Slurm on `h200`, `h100`, `a100`, `a40`, or `a10`.
+  Use the typed GRES syntax required by a partition, e.g.
+  `--partition=h200 --gres=gpu:H200:1`; do not launch GPU simulations
+  manually on Lageunha or a login node.
+- Run CPU-only jobs through grammar's Slurm `normal` queue. Do not run
+  simulations directly on a login node.
+- Preserve resource requests in the job script (`--cpus-per-task`, memory,
+  wall time, and GPU count/type); report the actual allocation in run evidence.
+
 ## Short-term M5 transport and coupling objective
 
 Operator decision (2026-09-14): the short-term objective is to select and

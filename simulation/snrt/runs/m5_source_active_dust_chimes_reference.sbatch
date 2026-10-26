@@ -3,7 +3,8 @@
 # two-size dust + CHIMES. The AGN profile disables stellar photons so its M5
 # source ledger is attributable to the AGN; physical tables remain references.
 #SBATCH --job-name=m5-src-dust-chem
-#SBATCH --partition=a100,h100
+#SBATCH --partition=a10,a40,a100,h100
+# For H200, override at submission: --partition=h200 --gres=gpu:H200:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -19,35 +20,13 @@ readonly ASSETS=/gpfs/kjhan/LRD_JWST
 readonly PROFILE=${M5_SOURCE_PROFILE:-agn_reference}
 readonly VERIFY_RESTART=${M5_VERIFY_RESTART:-0}
 readonly AMR_INTERFACE=${M5_AMR_INTERFACE_CHECK:-0}
-readonly A40_SMOKE=${M5_ALLOW_A40_SMOKE:-0}
-readonly MANUAL_LAUNCH=${M5_MANUAL_LAUNCH:-0}
 readonly RUN_ID=${M5_RUN_ID:-${SLURM_JOB_ID:-}}
 readonly OMP_THREADS=${SLURM_CPUS_PER_TASK:-${M5_OMP_THREADS:-8}}
 readonly MPI_RANKS=${SLURM_NTASKS:-${M5_MPI_RANKS:-1}}
 readonly CHIMES_BACKEND=${M5_CHIMES_BACKEND:-cpu}
 readonly TRANSPORT_BACKEND=${M5_TRANSPORT_BACKEND:-auto}
 readonly MATERIAL_BACKEND=${M5_MATERIAL_BACKEND:-auto}
-case "$A40_SMOKE" in
-  0|1) ;;
-  *) echo 'M5_ALLOW_A40_SMOKE must be 0 or 1' >&2; exit 2 ;;
-esac
-case "$MANUAL_LAUNCH" in
-  0) ;;
-  1)
-    test "$M5_ALLOW_ADA_MANUAL" = 1
-    test -n "$RUN_ID"
-    case "$PROFILE:$CHIMES_BACKEND:$VERIFY_RESTART:$AMR_INTERFACE" in
-      effective_population:hybrid:0:1|effective_population:hybrid:1:0|effective_population:cpu:1:0|\
-      agn_reference:hybrid:0:0) ;;
-      *) echo 'Manual Ada permits the effective-population AMR/restart cases or the hybrid AGN reference smoke' >&2; exit 2 ;;
-    esac
-    case "$MPI_RANKS" in
-      1|2) ;;
-      *) echo 'Manual Ada smoke supports one or two MPI ranks' >&2; exit 2 ;;
-    esac
-    ;;
-  *) echo 'M5_MANUAL_LAUNCH must be 0 or 1' >&2; exit 2 ;;
-esac
+test -n "${SLURM_JOB_ID:-}" || { echo 'This GPU runner must be submitted through Slurm' >&2; exit 2; }
 [[ "$OMP_THREADS" =~ ^[1-9][0-9]*$ ]] || { echo 'OMP thread count must be a positive integer' >&2; exit 2; }
 if [[ "$CHIMES_BACKEND" == hybrid && "$PROFILE" == effective_population && "$AMR_INTERFACE" == 1 ]] &&
    ((OMP_THREADS<4)); then
@@ -136,33 +115,14 @@ gcc -std=c11 -O2 -fPIC -shared "$CHIMES_REPORTER_SOURCE" -ldl -o "$CHIMES_REPORT
 
 gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | sed -n '1p')
 case "$gpu_name" in
-  *A100*|*H100*) ;;
-  *RTX*5000*Ada*)
-    if [[ "$MANUAL_LAUNCH" != 1 || \
-          ("$PROFILE" != effective_population && "$PROFILE" != agn_reference) ]]; then
-      echo 'Ada is allowed only for an explicit manual effective-population or AGN reference smoke' >&2
-      exit 2
-    fi
-    case "$PROFILE:$CHIMES_BACKEND:$VERIFY_RESTART:$AMR_INTERFACE" in
-      effective_population:hybrid:0:1|effective_population:hybrid:1:0|effective_population:cpu:1:0|\
-      agn_reference:hybrid:0:0) ;;
-      *) echo 'Ada smoke permits the effective-population AMR/restart cases or the hybrid AGN reference smoke' >&2; exit 2 ;;
-    esac
-    ;;
-  *A40*)
-    if [[ "$A40_SMOKE" != 1 || "$PROFILE" != effective_population || \
-          "$VERIFY_RESTART" != 0 || "$AMR_INTERFACE" != 1 ]]; then
-      echo 'A40 is allowed only for the approved effective-population AMR smoke' >&2
-      exit 2
-    fi
-    ;;
-  *) echo "Refusing non-A100/H100 GPU allocation: $gpu_name" >&2; exit 2 ;;
+  *A10*|*A40*|*A100*|*H100*|*H200*) ;;
+  *) echo "Refusing GPU outside the approved Slurm partitions: $gpu_name" >&2; exit 2 ;;
 esac
 printf 'GPU=%s\nRUN_ID=%s\nBINARY=%s\n' "$gpu_name" "$RUN_ID" "$BINARY" \
   | tee "$WORK/launch.txt"
-printf 'A40_SMOKE_OVERRIDE=%s\n' "$A40_SMOKE" | tee -a "$WORK/launch.txt"
-printf 'MANUAL_LAUNCH=%s ADA_OVERRIDE=%s\n' "$MANUAL_LAUNCH" "${M5_ALLOW_ADA_MANUAL:-0}" \
-  | tee -a "$WORK/launch.txt"
+printf 'SLURM_JOB_ID=%s PARTITION=%s NODELIST=%s GPUS=%s\n' \
+  "$SLURM_JOB_ID" "${SLURM_JOB_PARTITION:-unknown}" "${SLURM_JOB_NODELIST:-unknown}" \
+  "${SLURM_JOB_GPUS:-${SLURM_JOB_GRES:-unknown}}" | tee -a "$WORK/launch.txt"
 
 test -f "$TABLE" -a -f "$GROUP_DIR/manifest.json"
 test -f "$SUN/include/cvode/cvode.h" -a -f "$HDF5_ROOT/include/hdf5.h"
@@ -342,15 +302,9 @@ run_m5_case() {
   local directory=$1
   (
     cd "$directory"
-    if [[ "$MANUAL_LAUNCH" == 1 ]]; then
-      mpiexec -genv I_MPI_PIN 1 -genv I_MPI_PIN_DOMAIN omp \
-        -genv LD_PRELOAD "$CHIMES_REPORTER" -n "$MPI_RANKS" \
-        "$BINARY" effective.nml > run.log 2>&1
-    else
-      srun --export=ALL,LD_PRELOAD="$CHIMES_REPORTER" --mpi=pmi2 \
-        --ntasks="$SLURM_NTASKS" --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=none \
-        bash "$WORK/rank-bind.sh" "$BINARY" effective.nml > run.log 2>&1
-    fi
+    srun --export=ALL,LD_PRELOAD="$CHIMES_REPORTER" --mpi=pmi2 \
+      --ntasks="$SLURM_NTASKS" --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=none \
+      bash "$WORK/rank-bind.sh" "$BINARY" effective.nml > run.log 2>&1
   )
 }
 check_hybrid_process_reports() {
