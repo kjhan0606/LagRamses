@@ -75,3 +75,31 @@ alter solver state or tolerances.
 The separate A40 Slurm smoke request was superseded by the requested manual
 lageunha Ada run. No raw output cleanup was needed because both accepted runs
 wrote no raw dumps.
+
+## AGN-only source attribution follow-up — 2026-10-26
+
+The separate directory
+`.m5-source-dust-chimes-lageunha-20261021-agn-reference-ada/` is **not** an
+AGN-only acceptance run. Its launch record says `PROFILE=agn_reference`, but
+`run.log` loaded `independent_radiation_reference` / BPASS v2.2.1 stellar
+radiation. It also has a nonzero aggregate M5 source ledger and a thermally
+luminous accretion state. Those facts establish simultaneous stellar and AGN
+activity, not AGN photon receipt; its old `actual_AGN_source=nonzero` result
+label overstates source attribution and must not be used as an AGN-only PASS.
+
+Commit `8773f95` corrects the reference runner: the `agn_reference` profile
+leaves `SNRT_STELLAR_SED` unset and rejects a log that reports a stellar
+radiation population. Source inspection confirms the M5 source arrays start
+at zero, receive the accepted AGN photon budget, and receive stellar photons
+only when `stellar_sed_enabled` is true. An offline regression check against
+the retained mixed-source log confirms it trips the new guard while the
+positive M5 ledger and thermal AGN state remain present. This validates the
+isolation logic, **not** the corrected run's runtime behavior.
+
+The corrected AGN-only M5 + live-dust + CHIMES execution is still pending.
+During the latest attempt, `ssh lageunha nvidia-smi` ended with connection
+closed (exit 255); the one-time Slurm status check showed both A100 and H100
+nodes allocated. No substitute device or queued job was selected. The
+reference-control contracts remain explicitly `NONPRODUCTION`; even a
+successful isolated smoke will verify the AGN-to-M5 coupling path only, not
+approve a physical AGN spectrum or production asset set.
