@@ -49,10 +49,14 @@ subroutine sidm_scatter(ilevel)
 
   if(.not.sidm) return
   if(numbtot(1,ilevel)==0) return
+
   if(verbose) write(*,111) ilevel
 
   ! Initialize excited DM fraction (once, for iSIDM)
   if(sidm_inelastic .and. .not.sidm_excited_init) then
+     ! Validate all ranks before OpenMP or RNG/state mutation. Whole-particle
+     ! transitions implement equal-weight microphysics only.
+     call sidm_check_inelastic_masses()
      call sidm_init_excited()
      sidm_excited_init = .true.
   end if
@@ -550,6 +554,7 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
 
            ! New relative velocity magnitude (per-chi kinematics:
            ! v'^2 = v^2 + 2*delta_KE/mu_chi)
+           ! ISIDM_RELATIVE_SPEED_BEGIN
            mu = m1*m2/mtot
            if(delta_KE == 0.0d0) then
               v_rel_new_mag = v_rel_mag  ! elastic
@@ -558,6 +563,7 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
               if(KE_cm_new < 0.0d0) cycle  ! safety
               v_rel_new_mag = sqrt(2.0d0*KE_cm_new/mu_chi)
            end if
+           ! ISIDM_RELATIVE_SPEED_END
 
            ! Dissipative SIDM: remove fraction f_diss of CM kinetic energy
            if(sidm_fdiss > 0.0d0) then
@@ -605,8 +611,10 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
            v_rel_new(1:3) = v_rel_new_mag * nhat(1:3)
 
            ! New velocities in COM frame
+           ! SIDM_COM_VELOCITIES_BEGIN
            v1_new(1:3) = v_cm(1:3) + (m2/mtot)*v_rel_new(1:3)
            v2_new(1:3) = v_cm(1:3) - (m1/mtot)*v_rel_new(1:3)
+           ! SIDM_COM_VELOCITIES_END
 
            ! [DEBUG] POST-scatter NaN trap
            if(v1_new(1)/=v1_new(1).or.v1_new(2)/=v1_new(2).or.v1_new(3)/=v1_new(3).or. &
@@ -688,11 +696,66 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
 end subroutine sub_sidm_scatter
 !################################################################
 !################################################################
-! Initialize excited DM fraction for iSIDM
+! Validate the macro-particle weights supported by whole-particle iSIDM
+!################################################################
+subroutine sidm_check_inelastic_masses()
+  use pm_commons
+  use amr_commons
+  use iso_fortran_env, only: output_unit
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer::ilevel,igrid,jgrid,ipart,jpart,info
+  real(dp)::mass_min,mass_max,invalid_mass
+
+  mass_min = huge(1.0_dp)
+  mass_max = 0.0_dp
+  invalid_mass = 0.0_dp
+  do ilevel=levelmin,nlevelmax
+     igrid = headl(myid,ilevel)
+     do jgrid=1,numbl(myid,ilevel)
+        ipart = headp(igrid)
+        do jpart=1,numbp(igrid)
+           ! Same eligible population as sub_sidm_scatter.
+           if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. ptypep(ipart)/=PTYPE_SINK) then
+              if(.not.ieee_is_finite(mp(ipart)) .or. mp(ipart)<=0.0_dp) then
+                 invalid_mass = 1.0_dp
+              else
+                 mass_min = min(mass_min,mp(ipart))
+                 mass_max = max(mass_max,mp(ipart))
+              end if
+           end if
+           ipart = nextp(ipart)
+        end do
+        igrid = next(igrid)
+     end do
+  end do
+  call MPI_ALLREDUCE(MPI_IN_PLACE,mass_min,1,MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(MPI_IN_PLACE,mass_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(MPI_IN_PLACE,invalid_mass,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
+  if(invalid_mass>0.0_dp .or. &
+       & (mass_max>0.0_dp .and. mass_max-mass_min>64.0_dp*epsilon(1.0_dp)*mass_max)) then
+     if(myid==1) then
+        write(*,'(A)') 'ERROR: sidm_inelastic requires finite, positive, equal-mass DM macro-particles'
+        write(*,'(A,2ES24.16)') ' iSIDM eligible mass range (code units): ',mass_min,mass_max
+        write(*,'(A)') ' Whole-particle state transitions do not conserve total energy for unequal weights.'
+        flush(output_unit)
+     end if
+     ! The flag is global: all ranks reach this barrier. Preserve the error
+     ! message before any rank enters the shutdown path.
+     call MPI_BARRIER(MPI_COMM_WORLD,info)
+     call clean_stop
+  end if
+end subroutine sidm_check_inelastic_masses
+!################################################################
+! Initialize excited DM fraction for a new run, never a checkpoint.
 !################################################################
 subroutine sidm_init_excited()
   use pm_commons
   use pm_parameters, only: iseed
+  use amr_parameters, only: nrestart
   use amr_commons
   use random
   implicit none
@@ -707,6 +770,12 @@ subroutine sidm_init_excited()
   real(dp)::R1,cum_frac
   real(dp),dimension(0:9)::cum_prob  ! Cumulative probability for N states
 
+  ! All-ground checkpoints are valid: counts are not a restart marker.
+  if(nrestart>0) then
+     if(myid==1) write(*,'(A)') ' iSIDM: preserving checkpoint states (skipping init)'
+     return
+  end if
+
   ! Check if any non-ground population is requested
   if(sum(sidm_frac_init(1:sidm_nstates-1)) <= 0.0d0) return
 
@@ -720,7 +789,7 @@ subroutine sidm_init_excited()
      cum_prob = cum_prob / cum_prob(sidm_nstates-1)
   end if
 
-  ! Check if already initialized (restart case: some DM have excited ptype)
+  ! Preserve pre-populated excited states in a new-run particle input too.
   ndm_existing = 0
   do ilevel=levelmin,nlevelmax
      igrid = headl(myid,ilevel)

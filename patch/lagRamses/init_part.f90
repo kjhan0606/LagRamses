@@ -481,7 +481,12 @@ subroutine init_part
                        if(ndim>0)xp(ipart,1)=xg(ind_grid(i),1)+xc(ind,1)
                        if(ndim>1)xp(ipart,2)=xg(ind_grid(i),2)+xc(ind,2)
                        if(ndim>2)xp(ipart,3)=xg(ind_grid(i),3)+xc(ind,3)
-                       mp(ipart)=0.5d0**(3*ilevel)*(1.0d0-omega_b/omega_m)
+                       ! DMO_GRAFIC_MASS_BEGIN
+                       ! One-fluid DMO particles represent total matter. Only
+                       ! hydro ICs split the total mass into gas and particles.
+                       mp(ipart)=0.5d0**(3*ilevel)
+                       if(hydro)mp(ipart)=mp(ipart)*(1.0d0-omega_b/omega_m)
+                       ! DMO_GRAFIC_MASS_END
                     end if
                  end do
               end do

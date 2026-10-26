@@ -40,6 +40,7 @@ subroutine newdt_fine(ilevel)
   real(dp)::dx_fdm,k2_nyq,k2_eff,k2_dB,dt_acc,dt_nyq,dt_adv
   real(dp)::dtheta_max,c1_max,eps_c1,dt_qp
   logical::highest_level
+  real(dp)::sidm_dt_before,sidm_dt_candidate
 
   if(numbtot(1,ilevel)==0)return
   if(verbose)write(*,111)ilevel
@@ -261,10 +262,26 @@ subroutine newdt_fine(ilevel)
   end if
 
   ! SIDM timestep constraint: keep P_scatter < sidm_courant
+  ! SIDM_DT_DIAGNOSTIC_BEGIN
+  if(sidm .and. sidm_estimator_diagnostics) sidm_dt_before=dtnew(ilevel)
   if(sidm .and. sidm_Pmax(ilevel) > 0.0d0) then
      dtnew(ilevel) = MIN(dtnew(ilevel), &
           sidm_courant / sidm_Pmax(ilevel) * dtold(ilevel))
   end if
+  ! Optional local-limiter telemetry; preserve the physical expression above.
+  ! Parent/subcycle limits are applied later by amr_step and logged separately.
+  if(sidm .and. sidm_estimator_diagnostics .and. myid==1)then
+     sidm_dt_candidate=0.0d0 ! inactive bound, not a physical zero timestep
+     if(sidm_Pmax(ilevel)>0.0d0) &
+          sidm_dt_candidate=sidm_courant/sidm_Pmax(ilevel)*dtold(ilevel)
+     write(*,'(A,I0,A,I0,A,I0,7(A,ES22.14E3),A,L1,A,L1)') &
+          ' SIDM_DT: coarse=',nstep_coarse,' fine=',nstep,' level=',ilevel, &
+          ' a=',aexp,' dt_other=',sidm_dt_before,' dt_old=',dtold(ilevel), &
+          ' pmax=',sidm_Pmax(ilevel),' courant=',sidm_courant,' dt_sidm=',sidm_dt_candidate, &
+          ' dt_local=',dtnew(ilevel),' bound_active=',sidm_Pmax(ilevel)>0.0d0, &
+          ' sidm_limited=',dtnew(ilevel)<sidm_dt_before
+  end if
+  ! SIDM_DT_DIAGNOSTIC_END
 
   ! SGS dt diagnostic: print per-level dt for first 20 coarse steps
   if(myid==1 .and. nstep_coarse_old < 80) then

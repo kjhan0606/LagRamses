@@ -292,6 +292,7 @@ subroutine init_cosmo
   use hydro_commons
   use pm_commons
   use gadgetreadfilemod
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 
   implicit none
 #ifndef WITHOUTMPI
@@ -309,7 +310,7 @@ subroutine init_cosmo
   integer::ios_hdr
   character(LEN=80)::filename
   character(LEN=5)::nchar
-  logical::ok
+  logical::ok,has_omega_b_header
   TYPE(gadgetheadertype) :: gadgetheader
   integer::i
   integer,parameter::tag=1117
@@ -362,9 +363,11 @@ subroutine init_cosmo
            ! grafic v2 header carries 11 values. An IC pipeline that appends
            ! omega_b writes a 12th float. Try the extended read first and fall
            ! back to the legacy 11-value header, marking omega_b0 as absent.
+           ! GRAFIC_BARYON_READ_BEGIN
            read(10,iostat=ios_hdr)n1(ilevel),n2(ilevel),n3(ilevel),dxini0 &
                 & ,xoff10,xoff20,xoff30 &
                 & ,astart0,omega_m0,omega_l0,h00,omega_b0
+           has_omega_b_header=ios_hdr==0
            if(ios_hdr/=0)then
               rewind 10
               read(10)n1(ilevel),n2(ilevel),n3(ilevel),dxini0 &
@@ -372,6 +375,7 @@ subroutine init_cosmo
                    & ,astart0,omega_m0,omega_l0,h00
               omega_b0=-1.0_sp
            end if
+           ! GRAFIC_BARYON_READ_END
            close(10)
 
            ! Send the token
@@ -400,11 +404,17 @@ subroutine init_cosmo
 !          reproducibility of earlier runs that relied on the old default.
            if(hydro .and. omega_b<=0.0d0) omega_b=0.047d0
            ! --- IC / namelist omega_b consistency (grafic extended header) ---
-           ! omega_b sets the baryon fraction and the gravitating mass. A run
-           ! whose namelist omega_b disagrees with the value the IC was built
-           ! with is stopped here rather than run with a silent 2-3 per cent
-           ! mass error.
-           if(omega_b0>0.0_sp)then
+           ! omega_b carries the cosmological baryon fraction. Only hydro
+           ! splits gas and particle mass; one-fluid DMO uses total matter.
+           ! Reject a namelist/header mismatch before initializing particles.
+           ! GRAFIC_BARYON_HEADER_BEGIN
+           if(has_omega_b_header)then
+              if(.not.ieee_is_finite(omega_b0).or.omega_b0<0.0_sp.or. &
+                   & omega_b0>omega_m0.or..not.ieee_is_finite(omega_b).or. &
+                   & omega_b<0.0d0.or.omega_b>omega_m)then
+                 if(myid==1)write(*,*)'FATAL: invalid omega_b in IC or namelist.'
+                 call clean_stop
+              end if
               if(abs(dble(omega_b0)-omega_b)>1.0d-4)then
                  if(myid==1)then
                     write(*,*)'==================================================='
@@ -424,6 +434,7 @@ subroutine init_cosmo
               if(myid==1)write(*,*)'WARNING: IC header carries no omega_b '// &
                  & '(legacy grafic); using namelist omega_b'
            end if
+           ! GRAFIC_BARYON_HEADER_END
 !jhshin1
            !!!if(hydro)omega_b=0.999999*omega_m
            h0=h00

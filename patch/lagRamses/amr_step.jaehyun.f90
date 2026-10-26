@@ -41,6 +41,7 @@ recursive subroutine amr_step(ilevel,icount)
   real(kind=8):: t_lb_level_start, t_lb_level_end
   real(kind=8):: t_lb_cpu_level_start,t_lb_cpu_level_end
   real(kind=8):: t_lb_cpu_child_start,t_lb_cpu_child_time
+  real(dp)::sidm_dt_local,sidm_dt_parent
 
   ! Particle sub-timers
   integer(kind=8) :: pt_t1, pt_t2, pt_rate
@@ -800,9 +801,22 @@ recursive subroutine amr_step(ilevel,icount)
   !----------------------
                                call timer('courant','start')
   call newdt_fine(ilevel)
+  ! SIDM_DT_PARENT_DIAGNOSTIC_BEGIN
+  if(sidm .and. sidm_estimator_diagnostics) sidm_dt_local=dtnew(ilevel)
   if(ilevel>levelmin)then
      dtnew(ilevel)=MIN(dtnew(ilevel-1)/real(nsubcycle(ilevel-1)),dtnew(ilevel))
   end if
+  if(sidm .and. sidm_estimator_diagnostics .and. myid==1)then
+     sidm_dt_parent=0.0d0 ! no parent bound at the base level
+     if(ilevel>levelmin) &
+          sidm_dt_parent=dtnew(ilevel-1)/real(nsubcycle(ilevel-1))
+     write(*,'(A,I0,A,I0,A,I0,4(A,ES22.14E3),A,L1,A,L1)') &
+          ' SIDM_DT_PARENT: coarse=',nstep_coarse,' fine=',nstep,' level=',ilevel, &
+          ' a=',aexp,' dt_local=',sidm_dt_local,' dt_parent=',sidm_dt_parent, &
+          ' dt_selected=',dtnew(ilevel),' bound_active=',ilevel>levelmin, &
+          ' parent_limited=',dtnew(ilevel)<sidm_dt_local
+  end if
+  ! SIDM_DT_PARENT_DIAGNOSTIC_END
 
   ! Set unew equal to uold
                                call timer('hydro - set unew','start')

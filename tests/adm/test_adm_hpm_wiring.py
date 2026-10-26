@@ -20,6 +20,7 @@ def main() -> None:
     )
     assert "call adm_hpm_timestep(ilevel)" in newdt
     assert "adm_hpm currently requires star=F and sink=F" in params
+    assert "adm_hpm currently requires hydro=F (shared force array)" in params
     assert "adm_hpm_gamma must exceed 1" in params
     assert "adm_hpm requires poisson=T" in params
     print("ADM HPM wiring regression passed")

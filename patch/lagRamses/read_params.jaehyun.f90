@@ -745,12 +745,18 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
            call clean_stop
         end if
         ! The first HPM implementation applies the mesh kick through f(),
-        ! which is shared by the collisionless particle population.  Do not
-        ! silently accelerate stellar or sink particles as ADM.
+        ! which is also consumed by hydro and non-DM particles.  Until a
+        ! dark-only force is available, reject all those consumers.
+        ! ADM_HPM_CONSUMERS_BEGIN
+        if(hydro) then
+           if(myid==1) write(*,*) 'ERROR: adm_hpm currently requires hydro=F (shared force array)'
+           call clean_stop
+        end if
         if(star .or. sink) then
            if(myid==1) write(*,*) 'ERROR: adm_hpm currently requires star=F and sink=F'
            call clean_stop
         end if
+        ! ADM_HPM_CONSUMERS_END
      end if
      if(myid==1) then
         write(*,'(A)') ' Atomic Dark Matter (aDM) enabled:'

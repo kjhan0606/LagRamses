@@ -68,9 +68,11 @@ sidm3_snapshot=$(select_target_output "${validation_root}/sidm3_${sidm3_force_jo
 
 python3 "${analysis_root}/snapshot/analyze_mg_convergence_log.py" \
   "${validation_root}/cdm_${cdm_force_job}/run.log" \
+  --require-converged --require-fftw \
   --json "${analysis_root}/mg_convergence_cdm.json"
 python3 "${analysis_root}/snapshot/analyze_mg_convergence_log.py" \
   "${validation_root}/sidm3_${sidm3_force_job}/run.log" \
+  --require-converged --require-fftw \
   --json "${analysis_root}/mg_convergence_sidm3.json"
 
 python3 "${analysis_root}/snapshot/analyse_zoom_sidm_force_convergence.py" \
