@@ -2,7 +2,8 @@
 # Isolated incremental M5+CHIMES build for RAMSES-state momentum closure checks.
 # The baseline build tree and executable are kept untouched.
 #SBATCH --job-name=m5-momentum-build
-#SBATCH --partition=a100,h100
+#SBATCH --partition=normal
+# CPU-only compilation is submitted on grammar's normal queue; no GPU is requested.
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
