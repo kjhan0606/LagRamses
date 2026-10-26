@@ -83,20 +83,20 @@ if [[ "$BUILD_CUDA" == 1 ]]; then
   test -f "$BUILD/bin/snrt_chimes_cvode_cuda.o"
   test -f "$BUILD/bin/snrt_chimes_rhs_cuda.o"
 fi
-if ldd "$BIN" | rg 'not found'; then
+if ldd "$BIN" | grep -E 'not found'; then
   echo 'Unresolved shared library dependency in momentum-closure executable' >&2
   exit 3
 fi
 if [[ "$BUILD_CUDA" == 1 ]]; then
-  strings "$BIN" | rg -F 'hybrid (host CVODE/LU, asynchronous device RHS/cooling)'
+  strings "$BIN" | grep -F 'hybrid (host CVODE/LU, asynchronous device RHS/cooling)'
 else
-  if ldd "$BIN" | rg 'lib(cudart|cuda)\.so'; then
+  if ldd "$BIN" | grep -E 'lib(cudart|cuda)\.so'; then
     echo 'CPU-only momentum-closure executable unexpectedly links CUDA runtime libraries' >&2
     exit 3
   fi
 fi
-strings "$BIN" | rg -F 'M_N radiation momentum finite check failed'
-strings "$BIN" | rg -F 'M_N RAMSES momentum closure failed'
+strings "$BIN" | grep -F 'M_N radiation momentum finite check failed'
+strings "$BIN" | grep -F 'M_N RAMSES momentum closure failed'
 build_artifacts=("$BIN" "$BUILD/bin/snrt_moment_ramses.o" "$BUILD/bin/snrt_chimes_bridge.o")
 if [[ "$BUILD_CUDA" == 1 ]]; then
   build_artifacts+=("$BUILD/bin/snrt_chimes_cvode_cuda.o" "$BUILD/bin/snrt_chimes_rhs_cuda.o")
