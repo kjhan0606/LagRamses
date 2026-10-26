@@ -2,8 +2,10 @@
 # Isolated incremental M5+CHIMES build for RAMSES-state momentum closure checks.
 # The baseline build tree and executable are kept untouched.
 #SBATCH --job-name=m5-momentum-build
-#SBATCH --partition=normal
-# CPU-only compilation is submitted on grammar's normal queue; no GPU is requested.
+# CUDA toolkit modules are available on syntax's GPU nodes, not grammar normal.
+# The compiler does not execute kernels, but reserve one typed GPU for the build.
+#SBATCH --partition=h100
+#SBATCH --gres=gpu:H100:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
