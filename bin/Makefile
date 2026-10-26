@@ -338,7 +338,8 @@ ifeq ($(SOLVER),mhd)
 endif
 
 # SIDM object (depends on amr_commons, pm_commons, random)
-SIDM_OBJ = sidm_scatter.o sidm_angular.o sidm_estimator.o
+SIDM_OBJ = sidm_scatter.o sidm_cell_geometry.o sidm_angular.o sidm_estimator.o
+sidm_cell_geometry.o: pm_commons.o amr_commons.kjhan.o
 # Atomic Dark Matter objects
 ADM_OBJ = dark_cooling_fine.o adm_hpm_mod.o adm_hpm_fine.o
 # Evaporating primordial black hole objects

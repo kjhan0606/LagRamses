@@ -794,29 +794,6 @@ subroutine sidm_init_excited()
 end subroutine sidm_init_excited
 !################################################################
 !################################################################
-! Helper: determine subcell index (1..8) for a particle in a grid
-!################################################################
-integer function cell_index_from_part(ipart,igrid,ilevel)
-  use pm_commons, only: xp
-  use amr_commons, only: xg,dp
-  implicit none
-  integer,intent(in)::ipart,igrid,ilevel
-  integer::ix,iy,iz
-
-  ! Subcell indices (0 or 1 in each dimension)
-  ix = 0; iy = 0; iz = 0
-  if(xp(ipart,1) > xg(igrid,1)) ix = 1
-  if(xp(ipart,2) > xg(igrid,2)) iy = 1
-#if NDIM==3
-  if(xp(ipart,3) > xg(igrid,3)) iz = 1
-#endif
-
-  ! RAMSES subcell ordering: ind = 1 + ix + 2*iy + 4*iz
-  cell_index_from_part = 1 + ix + 2*iy + 4*iz
-
-end function cell_index_from_part
-!################################################################
-!################################################################
 ! Report excited DM fraction (called from adaptive_loop)
 !################################################################
 subroutine sidm_report_excited_fraction()
@@ -900,6 +877,7 @@ subroutine sidm_baryon_drag(ilevel)
   real(dp)::m_dm_phys,m_gas_phys,dEk_dm,dv_max,dv_mag
   integer::igrid,jgrid,ind,iskip,icell,nx_loc
   integer::ipart,jpart,npart1,info
+  integer,external::cell_index_from_part
   ! Diagnostics
   integer::n_drag_loc,n_drag_tot
   real(dp)::dp_drag_loc(3),dp_drag_tot(3),dv_max_loc,dv_max_tot
@@ -954,7 +932,7 @@ subroutine sidm_baryon_drag(ilevel)
            ! DM only (idp>0, ptypep is DM or excited iSIDM)
            if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. ptypep(ipart)/=PTYPE_SINK) then
               ! Check subcell match
-              if(cell_index_from_part_inline(ipart,igrid)==ind) then
+              if(cell_index_from_part(ipart,igrid,ilevel)==ind) then
                  ! DM velocity (proper peculiar)
                  v_dm_phys(1) = vp(ipart,1) * scale_v
                  v_dm_phys(2) = vp(ipart,2) * scale_v
@@ -1046,17 +1024,5 @@ subroutine sidm_baryon_drag(ilevel)
           ' IDM level ',ilevel,': n_drag=',n_drag_tot, &
           ' dv_max=',dv_max_tot*1d-5,' km/s'
   end if
-
-contains
-  ! Inline subcell index (avoids external function in tight loop)
-  integer function cell_index_from_part_inline(ip,ig)
-    integer,intent(in)::ip,ig
-    integer::ixx,iyy,izz
-    ixx=0; iyy=0; izz=0
-    if(xp(ip,1) > xg(ig,1)) ixx=1
-    if(xp(ip,2) > xg(ig,2)) iyy=1
-    if(xp(ip,3) > xg(ig,3)) izz=1
-    cell_index_from_part_inline = 1 + ixx + 2*iyy + 4*izz
-  end function cell_index_from_part_inline
 
 end subroutine sidm_baryon_drag
