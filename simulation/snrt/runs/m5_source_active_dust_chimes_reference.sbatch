@@ -5,6 +5,7 @@
 #SBATCH --job-name=m5-src-dust-chem
 #SBATCH --partition=a10,a40,a100,h100
 # For H200, override at submission: --partition=h200 --gres=gpu:H200:1
+# CPU-only CHIMES: submit on grammar with --partition=normal --gres=none and M5_CHIMES_BACKEND=cpu.
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -26,7 +27,18 @@ readonly MPI_RANKS=${SLURM_NTASKS:-${M5_MPI_RANKS:-1}}
 readonly CHIMES_BACKEND=${M5_CHIMES_BACKEND:-cpu}
 readonly TRANSPORT_BACKEND=${M5_TRANSPORT_BACKEND:-auto}
 readonly MATERIAL_BACKEND=${M5_MATERIAL_BACKEND:-auto}
-test -n "${SLURM_JOB_ID:-}" || { echo 'This GPU runner must be submitted through Slurm' >&2; exit 2; }
+test -n "${SLURM_JOB_ID:-}" || { echo 'This runner must be submitted through Slurm' >&2; exit 2; }
+if [[ "$CHIMES_BACKEND" == hybrid ]]; then
+  case "${SLURM_JOB_PARTITION:-}" in
+    h200|h100|a100|a40|a10) ;;
+    *) echo "Hybrid CHIMES requires an approved GPU partition, got: ${SLURM_JOB_PARTITION:-unknown}" >&2; exit 2 ;;
+  esac
+else
+  [[ "${SLURM_JOB_PARTITION:-}" == normal ]] || {
+    echo "CPU-only CHIMES must use grammar's normal queue, got: ${SLURM_JOB_PARTITION:-unknown}" >&2
+    exit 2
+  }
+fi
 [[ "$OMP_THREADS" =~ ^[1-9][0-9]*$ ]] || { echo 'OMP thread count must be a positive integer' >&2; exit 2; }
 if [[ "$CHIMES_BACKEND" == hybrid && "$PROFILE" == effective_population && "$AMR_INTERFACE" == 1 ]] &&
    ((OMP_THREADS<4)); then
@@ -102,6 +114,11 @@ if [[ "$CHIMES_BACKEND" == hybrid ]]; then
     echo 'Hybrid CHIMES requested with a binary lacking the CHIMES_CUDA backend' >&2
     exit 3
   }
+else
+  if ldd "$BINARY" | rg 'lib(cudart|cuda)\.so'; then
+    echo 'CPU-only CHIMES requested with a binary linked to CUDA runtime libraries' >&2
+    exit 3
+  fi
 fi
 test ! -e "$WORK"
 mkdir "$WORK"
@@ -109,20 +126,25 @@ cp "$RANK_BIND" "$WORK/rank-bind.sh"
 
 module purge
 module load intel/tbb/2022.3 intel/compiler-rt/2025.3.0 intel/umf/1.0.2
-module load intel/compiler/2025.3.0 intel/mpi/2021.17 cuda/13.0.2
+module load intel/compiler/2025.3.0 intel/mpi/2021.17
+if [[ "$CHIMES_BACKEND" == hybrid ]]; then module load cuda/13.0.2; fi
 readonly CHIMES_REPORTER=$WORK/chimes_counts_reporter.so
 gcc -std=c11 -O2 -fPIC -shared "$CHIMES_REPORTER_SOURCE" -ldl -o "$CHIMES_REPORTER"
 
-gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | sed -n '1p')
-case "$gpu_name" in
-  *A10*|*A40*|*A100*|*H100*|*H200*) ;;
-  *) echo "Refusing GPU outside the approved Slurm partitions: $gpu_name" >&2; exit 2 ;;
-esac
-printf 'GPU=%s\nRUN_ID=%s\nBINARY=%s\n' "$gpu_name" "$RUN_ID" "$BINARY" \
-  | tee "$WORK/launch.txt"
+if [[ "$CHIMES_BACKEND" == hybrid ]]; then
+  gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | sed -n '1p')
+  case "$gpu_name" in
+    *A10*|*A40*|*A100*|*H100*|*H200*) ;;
+    *) echo "Refusing GPU outside the approved Slurm partitions: $gpu_name" >&2; exit 2 ;;
+  esac
+  printf 'GPU=%s\n' "$gpu_name" | tee "$WORK/launch.txt"
+else
+  printf 'GPU=none (CPU-only)\n' | tee "$WORK/launch.txt"
+fi
+printf 'RUN_ID=%s\nBINARY=%s\n' "$RUN_ID" "$BINARY" | tee -a "$WORK/launch.txt"
 printf 'SLURM_JOB_ID=%s PARTITION=%s NODELIST=%s GPUS=%s\n' \
   "$SLURM_JOB_ID" "${SLURM_JOB_PARTITION:-unknown}" "${SLURM_JOB_NODELIST:-unknown}" \
-  "${SLURM_JOB_GPUS:-${SLURM_JOB_GRES:-unknown}}" | tee -a "$WORK/launch.txt"
+  "${SLURM_JOB_GPUS:-${SLURM_JOB_GRES:-none}}" | tee -a "$WORK/launch.txt"
 
 test -f "$TABLE" -a -f "$GROUP_DIR/manifest.json"
 test -f "$SUN/include/cvode/cvode.h" -a -f "$HDF5_ROOT/include/hdf5.h"
@@ -257,7 +279,9 @@ if [[ "$PROFILE" == effective_population ]]; then
     >> "$WORK/inputs.sha256"
 fi
 
-export LD_LIBRARY_PATH="$CHIMES_INSTALL:$SUN/lib64:$SUN/lib:$HDF5_ROOT/lib:/opt/ohpc/pub/cuda/13.0.2/lib64:${LD_LIBRARY_PATH:-}"
+runtime_libs="$CHIMES_INSTALL:$SUN/lib64:$SUN/lib:$HDF5_ROOT/lib"
+if [[ "$CHIMES_BACKEND" == hybrid ]]; then runtime_libs="$runtime_libs:/opt/ohpc/pub/cuda/13.0.2/lib64"; fi
+export LD_LIBRARY_PATH="$runtime_libs:${LD_LIBRARY_PATH:-}"
 export OMP_NUM_THREADS="$OMP_THREADS" OMP_DYNAMIC=FALSE OMP_PROC_BIND=close OMP_PLACES=cores
 export OMP_STACKSIZE=512M KMP_STACKSIZE=512M I_MPI_FABRICS=shm I_MPI_PIN=0
 export SNRT_BACKEND="$TRANSPORT_BACKEND" SNRT_DUST_BACKEND="$MATERIAL_BACKEND" SNRT_AGN_MODEL=partition_reference_v1
