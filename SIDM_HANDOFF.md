@@ -1967,3 +1967,19 @@ Astra의 독립 read-only 결과 감사도 PASS했다. `artifact-sizes.json`은 
 ## 26. Active-SIDM ledger calibration의 코드상 선행조건
 
 완료된 stop-fix build worktree의 namelist 기본값과 guard를 다시 확인했다. `sidm_probability_guard` 기본값은 `.false.`이며 `sidm=`.true.`와 `sidm_kinetic_ledger=`.true.`를 함께 켤 때 이 guard를 명시적으로 `.true.`로 설정하지 않으면 초기화 단계에서 중단된다. Guard는 rate preflight 뒤 실제 산란을 수행하고 `SIDM_RATE_ACTUAL` 카운터를 남긴다. `sidm_estimator_diagnostics=.true.`는 별도로 rate-preflight 및 leaf estimator 로그를 기록한다. Kinetic ledger는 `OMP_NUM_THREADS=1`을 강제하므로 다음 run도 MPI 2 × OpenMP 1이어야 한다. 이 source-level 조건은 다음 package의 namelist·runner acceptance에 반영해야 한다. 활성화 후 기록량은 아직 측정하지 않았으므로 별도 크기 상한을 유지한다.
+
+## 27. 2026-10-26 active-SIDM 20-interval calibration: 확률 guard 중단
+
+Astra가 수정된 실행 패키지를 정적으로 PASS 판정했고 사용자가 제출을 승인했다. package SHA-256은 4e5733b1becec855a5bd849540fad5f239d3f74dab23284e9ea31e74ee21e853, 실행파일 SHA-256은 429e06231c68dd6eac4b1e70862d600b18f3d5b373619c42b4ac034732179018이다. Grammar `normal`에 job 1222562를 2 MPI × 1 OpenMP, 8 GiB, 1시간 한도로 제출했다.
+
+Job은 1:59 후 FAILED로 끝났다. RAMSES runner exit code는 137이고 MPI step은 CANCELLED+ (1:58, 0:9), batch exit은 9:0이다. sacct task MaxRSS는 684,152 KiB, batch MaxRSS는 7,300 KiB다. 이는 OOM이나 시간제한이 아니라 의도된 사전 산란 확률 guard의 MPI abort다.
+
+Ledger step 0과 1은 각각 PASS였고 최대 상대 M/P/K 잔차는 1.8609928931e-14와 7.6131368912e-15다. Coarse step 2는 BEGIN을 기록했지만 STATUS와 terminal certificate 없이 중단됐다. Level 14의 preflight rate는 coarse step 1에서 0이었고 step 2에서 1.999140e-8 s^-1로 증가했다. 이때 dt_phys=2.947497e8 s, P_bound=5.892458236, P_limit=0.1이어서 해당 level의 산란 전에 MPI_ABORT가 발생했다. 따라서 20구간 gate는 실패이며 validator와 run.complete는 생성되지 않았다. 이는 앞선 정상 종료 lifecycle 실패와는 다른, 안전 guard가 만든 의도된 중단이다.
+
+실행 전 bootstrap coarse step 0은 각 level의 dt=0, P_bound=0, 실제 Pmax=0으로 기록됐고 accepted event는 없었다. 완결된 step 1에서 7 events가 수락됐다. 미완결 step 2의 level 8/9에서 2 events가 더 수락됐으나 이들은 닫힌 ledger 구간의 결과로 세지 않는다. 총 sampled-pair 수는 step 1에서 315,980, 미완결 step 2에서 중단 전까지 315,991이었다. 기대 사건 합은 각각 6.55021과 6.54953이다.
+
+Full snapshot은 없었다. 부분 산출물을 보존했고 실행파일과 sink IC를 포함한 직접 측정 저장량은 10,092,037 B로 100 MiB 아래이며 particle IC symlink payload는 제외한다. 이 job은 열수송, 평형 또는 쌍성 경화를 측정하지 않았다.
+
+Astra의 독립 결과 감사는 이 gate를 FAIL로 확인했다. 원인은 이전 timestep 선택이 과거 rate bound에 의존하는 동안 새 leaf/입자 점유가 커져 rate가 급증한 것이다. Guard는 과도한 확률로 산란하기 전에 계산을 멈췄다. 다음 설계는 guard를 완화하지 않고 새로 활성화된 cell population에서도 적절한 timestep을 산란 및 해당 sweep의 write 전에 보장하는 방법을 다뤄야 한다. collisionless_courant_factor는 중력·입자 CFL을 낮추지만 절대 timestep 상한은 아니므로, 임의 값을 넣은 재실행을 보장된 해결로 간주하지 않는다. 새 timestep 설정이나 source 변경을 사용하는 계산은 별도 패키지와 승인을 거쳐야 한다.
+
+Astra는 재실행에 앞서 pinned geometry classifier, rate-bound helper, timestep helper를 함께 사용하는 결정론적 new-pair/zero-to-positive-rate regression으로 이 전이를 재현하라고 권고했다. 이 회귀 검증은 아직 만들거나 실행하지 않았다. 장기 계산을 위한 안전한 처리는 과거 rate를 사용하는 timestep predictor가 새 점유를 어떻게 처리할지 또는 유효한 rollback/subcycling이 가능한지를 설계해야 하며, 이미 실행된 하위-level 연산을 버리거나 확률 기준을 완화해서는 안 된다.
