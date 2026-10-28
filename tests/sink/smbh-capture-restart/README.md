@@ -274,6 +274,33 @@ full precision. The comparison now applies the existing relative tolerance to
 the periodic-equivalent coordinate, with a regression reproducing the Fortran
 CSV precision. Fixture tests pass (50 tests and 4 subtests).
 
+### Two-rank moving-pair fixture — runtime verified 2026-10-29
+
+The moving-pair fixture was rerun with two MPI ranks from clean source commit
+`227a7497c6b80620ce865e541d3af4321d8bc935`. The binary SHA-256 is
+`49d3d84ae2b5db6d08cde140b228eaf91678065fe9d5b86c79dd92f3e3133c7d`, and
+the sealed schema-3 manifest SHA-256 is
+`b683043635a7d9e5644b3c910cc781fdffe55616ee4020df0a1f4fc0b16a1400`. The
+manifest's `ic_sink` SHA-256 is
+`553cbbe7952c6f53feed39560f38a55c1a51e272e0bdffa26798d3f734445d90`, the
+nonzero-motion fixture hash. The preserved run is
+`/home/kjhan/BACKUP/smbh-capture-restart-mpi2-moving-227a7490-20261029-r1/`;
+its capture ledger SHA-256 is
+`01b62de80800fa5d281faf28624fb71dea83805d9721b807b60e053c5eca5771a`.
+
+The clean-worktree unit/preflight suite passed 44 tests plus 4 subtests, and
+the same worktree's postcheck independently passed on the runtime output. Both
+outputs report `ncpu=2` and are attached to the active restart branch. The
+schema-v2 ledger has one committed batch, one `BINARY`, one three-member
+`MULTIPLE`, two unique complete events, and zero duplicate/incomplete events
+or batches and invalid JSON lines. Every recorded pair has nonzero relative
+speed and angular momentum. The postcheck also verifies post-compaction mass,
+periodic COM position, COM velocity and momentum against the pre-compaction
+ledger, then checks sink-state continuity across restart. This is a synthetic
+restart/ledger regression, not a capture-rate or galaxy-merger physics
+validation. It does not close the nonperiodic-AMR-boundary or FOF-backend
+equivalence gaps. The Fortran source was unchanged by this fixture commit.
+
 ## 5. Optional execution under Slurm
 
 Slurm may use `/scratch`, but it needs a distinct preparation there (including
