@@ -118,6 +118,7 @@ contains
   !=======================================================================
   subroutine rans( N, StartVal, SeedArray )
     use amr_commons,only:ncpu
+    use iso_fortran_env, only: int64
     implicit none
     integer :: N
     integer :: StartVal
@@ -129,6 +130,7 @@ contains
     integer,dimension( IRandNumSize ) :: OutSeed
     integer,dimension( IBinarySize )  :: KBinary
 
+    integer(int64) :: SeedValue
     integer :: I
 
     if( StartVal .eq. IZero ) then
@@ -137,10 +139,14 @@ contains
        SeedArray( 1, 3 ) = DefaultSeed( 3 )
        SeedArray( 1, 4 ) = DefaultSeed( 4 )
     else
-       SeedArray( 1, 1 ) = abs( StartVal )
-       SeedArray( 1, 2 ) = IZero
-       SeedArray( 1, 3 ) = IZero
-       SeedArray( 1, 4 ) = IZero
+       ! Store the complete nonzero starting integer in the generator's
+       ! four base-4096 limbs.  Limbs are least-significant first here.
+       ! Widen before ABS so the most-negative default integer is safe.
+       SeedValue = abs( int( StartVal, int64 ) )
+       do I = 1, IRandNumSize
+          SeedArray( 1, I ) = int( mod( SeedValue, 4096_int64 ) )
+          SeedValue = SeedValue / 4096_int64
+       end do
     endif
     
     if( N .eq. 1 ) then
