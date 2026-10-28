@@ -15,17 +15,22 @@ evidence.
 ## Active bundle map
 
 [M5 wiring and bounded coupling evidence](m5_l8_interpolation_boundary_evidence_2026-09-16.md):
-current source inspection records the M_N material-tile adapter connection,
-while explicitly stating that a completed integrated M5/dust/CHIMES pass and
-cosmological production qualification have not been demonstrated. The
+source inspection records the M_N material-tile adapter connection. CPU
+integration evidence for the current commit is summarized in
+[real-source integration progress](real_source_integration_progress_2026-09-07.md):
+AGN-only source attribution and effective stellar-population profiles both
+completed with M5, live dust and CHIMES under reference-control inputs. The
+effective-population run exercised M5 order 5 on levels 2 and 3; the AGN-only
+run exercised the isolated AGN point source. These are bounded single-rank
+CPU executions, not production qualification. The
 [M1--M5 dispatch evidence](mn_order_dispatch_efficiency_2026-09-27.md) adds a
-source-active two-step coupled M5 run and bounded backend comparisons; this is
-not a full L8 completion or production qualification. The earlier
+source-active two-step coupled M5 run and bounded backend comparisons; none of
+these establishes full L8 or cosmological production qualification. The earlier
 `snrt_m5_full_connection_2026-09-15.md` entry referenced below is absent from
 this checkout and must not be treated as evidence. Existing physical-asset
 admission blockers remain in force.
 
-Correction from the current-source A40 integration smoke (2026-10-21,
+Historical current-source A40 integration smoke (2026-10-21,
 Slurm job430823): a fresh binary built from source HEAD
 `f459f6dc1febdaf1eb5c9ae25c97924be553e188` plus the recorded dirty working
 tree (`DUST_LIVE=1`, `CHIMES=1`, `USE_CUDA=1`) completed four coupled order-5
@@ -35,8 +40,7 @@ CUDA material batches on one A40; `Run completed`, zero raw snapshots and the
 `M5_COUPLED_AMR_INTERFACE_PASS` marker are recorded under
 `/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-amr-430823/` and the
 binary/build hashes under `.m5-current-source-active-dust-chimes-build-430823/`.
-This closes the bounded integrated source-active smoke previously missing
-from this record. It is still a one-rank, four-step reference-control test
+This was a one-rank, four-step reference-control test
 (CHIMES CPU backend, no restart comparison), not cosmological or production
 qualification; physical-asset admission blockers are unchanged.
 
@@ -314,9 +318,10 @@ dust-field and CR-field interactions explicitly deferred to long-term work.
 ## Classification rules
 
 Latest M5 wiring evidence: [current-source wiring reconciliation and L8 boundary](m5_l8_interpolation_boundary_evidence_2026-09-16.md), supplemented by the
-[2026-09-27 dispatch/coupled-run record](mn_order_dispatch_efficiency_2026-09-27.md).
-These establish source wiring and bounded tests, not a completed full L8
-M5/dust/CHIMES transaction or production readiness. The missing
+[2026-09-27 dispatch/coupled-run record](mn_order_dispatch_efficiency_2026-09-27.md)
+and the current-commit CPU source/dust/CHIMES executions described above.
+These establish bounded source coupling, not full L8 or cosmological production
+readiness; current-commit CUDA hybrid qualification remains pending. The missing
 `snrt_m5_full_connection_2026-09-15.md` artifact is not a valid current
 evidence target. Earlier intermediate reports remain historical.
 
