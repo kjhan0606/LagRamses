@@ -3,13 +3,17 @@
 # two-size dust + CHIMES. The AGN profile disables stellar photons so its M5
 # source ledger is attributable to the AGN; physical tables remain references.
 #SBATCH --job-name=m5-src-dust-chem
-#SBATCH --partition=a10,a40,a100,h100
-# For H200, override at submission: --partition=h200 --gres=gpu:H200:1
+# GPU defaults are deliberately typed; override both options for another card:
+# A10: --partition=a10 --gres=gpu:A10:1
+# A40: --partition=a40 --gres=gpu:A40:1
+# A100: --partition=a100 --gres=gpu:A100:1
+# H200: --partition=h200 --gres=gpu:H200:1
 # CPU-only CHIMES: submit on grammar with --partition=normal --gres=none and M5_CHIMES_BACKEND=cpu.
+#SBATCH --partition=h100
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:H100:1
 #SBATCH --mem=64G
 #SBATCH --time=02:00:00
 #SBATCH --output=/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-source-dust-chimes-%j.log
