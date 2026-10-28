@@ -1906,4 +1906,40 @@ contain zero `output_NNNNN` snapshots.
 These runs establish current-commit CPU coupling for the two source scopes,
 not production approval of the reference-control SED, AGN, dust or chemistry
 assets. The second run's AGN-to-M5 attribution is not inferred from its
-nonzero total source ledger. CUDA hybrid qualification remains separate.
+nonzero total source ledger. The bounded H100 hybrid reference result is
+recorded separately below; full CUDA production qualification remains open.
+
+### H100 CUDA-hybrid AGN/M5/dust/CHIMES integration (2026-10-29)
+
+Slurm build job `438624` completed successfully with `CHIMES_CUDA=1` from
+source commit `b1fc63c45bbe547616ccebf699ddeeea0dceaf5e`. The executable
+`.m5-ramses-momentum-build-438624/bin/ramses_m5_ramses_momentum_closure_v13d`
+has SHA256
+`25591837c5ff2113b3faf7db60630582c4087448c6c511a1cb0768f26d1921b4`; all
+binary and selected-source checksums in `build.sha256` and `source.sha256`
+verify.
+
+Slurm job `439096` completed on an NVIDIA H100 NVL in `00:40:20` (MPI=1,
+OMP=8). It used the AGN-only point-source profile with live two-size dust,
+M5 order 5, and CHIMES hybrid. Result:
+`M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS`, with 16,896 momentum-asserted
+cells, a nonzero M5 source ledger, and zero raw RAMSES outputs. The runtime log
+records an accreting thermally luminous AGN state and M5 commit/ledger entries;
+all failure-pattern checks are clear. The CHIMES runtime report is
+`gpu_calls=156929`, `cpu_fallback_calls=3121900`, `gpu_batches=46619`,
+`device_errors=0`, `peak_inflight_batches=1`, and `streams_used=1`; the worker
+mask is `255`. The runner's hybrid-runtime assertions were reached and passed.
+
+The run's effective namelist and sink IC hashes exactly match CPU reference
+job `1233106`. All runtime binary and physical-control input hashes verify.
+The one script-hash entry in the run manifest matches the runner as committed
+at source `b1fc63c`; the runner was subsequently changed in `d2f399c` only to
+make the default GPU request explicitly `h100`/`gpu:H100:1`. The effective
+Slurm submission for `439096` already used that typed H100 request.
+
+This is a bounded one-rank, three-step reference-control integration, not
+production input approval, full-L8/cosmological qualification, restart or
+multi-rank qualification, nor a speedup result. The single-stream, one
+peak-inflight-batch observation and the CPU fallback count are retained as
+runtime evidence; a controlled performance comparison would need matched
+hardware and repeated runs.

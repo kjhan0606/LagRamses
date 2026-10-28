@@ -22,7 +22,11 @@ AGN-only source attribution and effective stellar-population profiles both
 completed with M5, live dust and CHIMES under reference-control inputs. The
 effective-population run exercised M5 order 5 on levels 2 and 3; the AGN-only
 run exercised the isolated AGN point source. These are bounded single-rank
-CPU executions, not production qualification. The
+CPU executions, not production qualification. An H100 CUDA-hybrid AGN-only
+M5/live-dust/CHIMES reference integration also passed on source
+`b1fc63c`; it verifies actual device RHS calls, not production assets, full L8,
+cosmological, restart, multi-rank or performance qualification. Details and
+hashes are in the same progress record. The
 [M1--M5 dispatch evidence](mn_order_dispatch_efficiency_2026-09-27.md) adds a
 source-active two-step coupled M5 run and bounded backend comparisons; none of
 these establishes full L8 or cosmological production qualification. The earlier
@@ -319,9 +323,10 @@ dust-field and CR-field interactions explicitly deferred to long-term work.
 
 Latest M5 wiring evidence: [current-source wiring reconciliation and L8 boundary](m5_l8_interpolation_boundary_evidence_2026-09-16.md), supplemented by the
 [2026-09-27 dispatch/coupled-run record](mn_order_dispatch_efficiency_2026-09-27.md)
-and the current-commit CPU source/dust/CHIMES executions described above.
-These establish bounded source coupling, not full L8 or cosmological production
-readiness; current-commit CUDA hybrid qualification remains pending. The missing
+and the current-source CPU and H100 CUDA-hybrid source/dust/CHIMES executions
+described above. These establish bounded source coupling, not full L8 or
+cosmological production readiness. Full hybrid restart/multi-rank and
+production-input qualification remain pending. The missing
 `snrt_m5_full_connection_2026-09-15.md` artifact is not a valid current
 evidence target. Earlier intermediate reports remain historical.
 
