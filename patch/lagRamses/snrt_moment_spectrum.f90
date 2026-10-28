@@ -24,7 +24,8 @@ contains
     real(mn_dp),intent(out)::a(:),b(:)
     integer,intent(out)::ierr
     real(mn_dp)::lower(size(n)),upper(size(n)),lower_gap(size(n)),upper_gap(size(n))
-    real(mn_dp)::scale(size(n)),roundoff(size(n))
+    real(mn_dp)::scale(size(n)),roundoff(size(n)),group_scale,group_ulp,subnormal_floor
+    logical::subnormal_pair(size(n))
     ierr=mn_bad_input
     if(size(n)<1.or.size(n)/=size(e).or.size(a)/=size(n).or.size(b)/=size(n))return
     a=0._mn_dp;b=0._mn_dp
@@ -44,6 +45,11 @@ contains
     endif
     lower_gap=e-lower;upper_gap=upper-e
     scale=max(abs(e),abs(lower),abs(upper))
+    ! Independent moment transport can leave a few subnormal N/E units in an
+    ! angular bin after its physical signal has underflowed. Their quotient is
+    ! not a meaningful group mean. Permit endpoint projection only when the
+    ! whole packet is below the receiver's 528-ULP group-sum resolution;
+    ! angular_write books the E change as a projection residual.
     ! The material receiver sums up to 128 positive spectral-node contributions
     ! independently for N and E. The operation-count envelope covers the
     ! observed 9-ULP endpoint cancellation. Its energy correction is booked as
@@ -53,7 +59,12 @@ contains
     if(any(.not.ieee_is_finite(roundoff)))then
        ierr=mn_band_err_nonfinite;return
     endif
-    if(any(lower_gap < -roundoff).or.any(upper_gap < -roundoff))then
+    group_scale=maxval(scale)
+    group_ulp=group_scale-nearest(group_scale,-1._mn_dp)
+    subnormal_floor=real(mn_band_roundoff_ulps,mn_dp)*group_ulp
+    subnormal_pair=scale<=subnormal_floor
+    if(any((lower_gap < -roundoff).and..not.subnormal_pair).or. &
+         any((upper_gap < -roundoff).and..not.subnormal_pair))then
        ierr=mn_band_err_outside_edges;return
     endif
     a=lower_gap/(hi-lo)

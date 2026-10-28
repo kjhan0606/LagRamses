@@ -22,22 +22,35 @@ program snrt_moment_spectrum_smoke
   if(8*epsilon(1._mn_dp)*max(e(1),hi*n(1))/(hi-lo)/=0._mn_dp) &
        error stop 'regression fixture does not underflow the former tolerance'
 
-  ! The measured nine-ULP endpoint envelope is admitted, but an excursion
-  ! beyond the 528-ULP operation-count bound remains a hard spectral failure.
-  e(1)=lo*n(1)
-  do k=1,9
-     e(1)=nearest(e(1),-1._mn_dp)
-  enddo
-  call mn_band_split_angular(n,e,lo,hi,a,b,status)
-  if(status/=mn_ok)error stop 'measured endpoint roundoff was rejected'
-  if(a(1)/=0._mn_dp.or.b(1)/=n(1))error stop 'near-edge lower packet was not conserved'
+  ! Independent N/E transport can leave a meaningless subnormal ray: its
+  ! apparent mean is below the 2 keV group edge. Keep N at the lower endpoint;
+  ! the caller records the tiny E projection residual, never gas heating.
+  n=[3*tiny_positive,0._mn_dp,2._mn_dp]
+  e=[4000*tiny_positive,0._mn_dp,8000._mn_dp]
+  call mn_band_split_angular(n,e,2000._mn_dp,10000._mn_dp,a,b,status)
+  if(status/=mn_ok)error stop 'subnormal unresolved ray was rejected'
+  if(a(1)/=0._mn_dp.or.b(1)/=n(1))error stop 'subnormal ray did not project to lower endpoint'
+  if(10000._mn_dp*a(1)+2000._mn_dp*b(1)<=e(1)) &
+       error stop 'subnormal projection did not retain its positive energy residual'
+  n=[4096*tiny_positive,4096*tiny_positive,2._mn_dp]
+  e=[lo*n(1),hi*n(2),24._mn_dp]
 
-  e(1)=lo*n(1)
-  do k=1,1024
-     e(1)=nearest(e(1),-1._mn_dp)
+  ! The measured nine-ULP endpoint envelope is admitted, but a 1,024-ULP
+  ! violation at a resolved packet remains a hard spectral failure.
+  e(3)=lo*n(3)
+  do k=1,9
+     e(3)=nearest(e(3),-1._mn_dp)
   enddo
-  call mn_band_split_angular(n,e,lo,hi,a,b,status)
-  if(status/=mn_band_err_outside_edges)error stop 'multi-ULP subnormal band violation was not classified'
+  call mn_band_split_angular(n(3:3),e(3:3),lo,hi,a(3:3),b(3:3),status)
+  if(status/=mn_ok)error stop 'measured endpoint roundoff was rejected'
+  if(a(3)/=0._mn_dp.or.b(3)/=n(3))error stop 'near-edge lower packet was not conserved'
+
+  e(3)=lo*n(3)
+  do k=1,1024
+     e(3)=nearest(e(3),-1._mn_dp)
+  enddo
+  call mn_band_split_angular(n(3:3),e(3:3),lo,hi,a(3:3),b(3:3),status)
+  if(status/=mn_band_err_outside_edges)error stop 'multi-ULP resolved band violation was not classified'
 
   e(1)=tiny_positive
   n(1)=0._mn_dp

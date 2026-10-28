@@ -10,7 +10,7 @@ trap 'rm -rf "$build_dir"' EXIT
 fc="${FC:-gfortran}"
 fc_name="${fc##*/}"
 if [[ "$fc_name" == "ifx" || "$fc_name" == "mpiifx" ]]; then
-  flags=(-fpp -DNDIM=3 -DNPRE=8 -DNVAR=18 -module "$build_dir" -I"$build_dir")
+  flags=(-fpp -no-ftz -DNDIM=3 -DNPRE=8 -DNVAR=18 -module "$build_dir" -I"$build_dir")
   openmp_flags=(-qopenmp)
 else
   flags=(-cpp -ffree-line-length-none -DNDIM=3 -DNPRE=8 -DNVAR=18 -J"$build_dir" -I"$build_dir")
