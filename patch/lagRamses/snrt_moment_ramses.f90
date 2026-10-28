@@ -1492,7 +1492,9 @@ contains
          if(band_on)then
             call mn_band_split_angular(rn(:,q),re(:,q),snrt_group_edges_ev(q),snrt_group_edges_ev(q+1),a,b,status)
             if(status/=0)then
-               write(*,*)'M_N band split rejected group/status/minA/minB=',q,status,minval(a),minval(b)
+               write(*,*)'M_N band split rejected group/status/minN/maxN/minE/maxE/zeroN_E=',q,status, &
+                    minval(rn(:,q)),maxval(rn(:,q)),minval(re(:,q)),maxval(re(:,q)), &
+                    count(rn(:,q)==0._dp.and.re(:,q)/=0._dp)
                return
             endif
          else

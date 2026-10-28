@@ -7,6 +7,8 @@ module snrt_moment_spectrum
   implicit none
   private
   public :: mn_band_split,mn_band_split_angular,mn_band_join,mn_band_reconstruct
+  integer,parameter,public :: mn_band_err_nonfinite=11,mn_band_err_negative=12
+  integer,parameter,public :: mn_band_err_zero_n_energy=13,mn_band_err_outside_edges=14
 contains
   subroutine mn_band_split_angular(n,e,lo,hi,a,b,ierr)
     ! The material receiver independently sums positive N and E packets.
@@ -24,21 +26,34 @@ contains
     if(size(n)<1.or.size(n)/=size(e).or.size(a)/=size(n).or.size(b)/=size(n))return
     a=0._mn_dp;b=0._mn_dp
     if(.not.all(ieee_is_finite([lo,hi])).or.lo<=0.or.hi<=lo)return
-    if(any(.not.ieee_is_finite(n)).or.any(.not.ieee_is_finite(e)))return
-    if(any(n<0).or.any(e<0).or.any(n==0.and.e/=0))return
+    if(any(.not.ieee_is_finite(n)).or.any(.not.ieee_is_finite(e)))then
+       ierr=mn_band_err_nonfinite;return
+    endif
+    if(any(n<0).or.any(e<0))then
+       ierr=mn_band_err_negative;return
+    endif
+    if(any(n==0.and.e/=0))then
+       ierr=mn_band_err_zero_n_energy;return
+    endif
     lower=lo*n;upper=hi*n
-    if(any(.not.ieee_is_finite(lower)).or.any(.not.ieee_is_finite(upper)))return
+    if(any(.not.ieee_is_finite(lower)).or.any(.not.ieee_is_finite(upper)))then
+       ierr=mn_band_err_nonfinite;return
+    endif
     lower_gap=e-lower;upper_gap=upper-e
     scale=max(abs(e),abs(lower),abs(upper))
     ! epsilon*scale underflows to zero for subnormal radiation packets. Use
     ! representable spacing instead, so a one-ULP endpoint cancellation is
     ! admitted at every magnitude while finite out-of-band states still fail.
     roundoff=8*(scale-nearest(scale,-1._mn_dp))
-    if(any(.not.ieee_is_finite(roundoff)))return
-    if(any(lower_gap < -roundoff).or.any(upper_gap < -roundoff))return
+    if(any(.not.ieee_is_finite(roundoff)))then
+       ierr=mn_band_err_nonfinite;return
+    endif
+    if(any(lower_gap < -roundoff).or.any(upper_gap < -roundoff))then
+       ierr=mn_band_err_outside_edges;return
+    endif
     a=lower_gap/(hi-lo)
     if(any(.not.ieee_is_finite(a)))then
-       a=0._mn_dp;b=0._mn_dp;return
+       ierr=mn_band_err_nonfinite;a=0._mn_dp;b=0._mn_dp;return
     endif
     a=max(0._mn_dp,min(n,a))
     b=n-a
