@@ -9,7 +9,7 @@ module snrt_moment_ramses
   use snrt_state, only: snrt_ngroups,snrt_hydrogen_ii,snrt_helium_ii,snrt_helium_iii,snrt_neutral_fraction
   use snrt_moment_live
   use snrt_moment_transport, only: mn_ok,mn_reconstruct,mn_project
-  use snrt_moment_spectrum, only: mn_band_split_angular,mn_band_join
+  use snrt_moment_spectrum, only: mn_band_split_angular,mn_band_join,mn_band_err_outside_edges
   use snrt_moment_amr
   use snrt_moment_dispatch
   use snrt_moment_material
@@ -1486,6 +1486,8 @@ contains
       real(dp),intent(out)::n(:,:),e(:,:),dn,de
       integer,intent(out)::status
       real(dp)::a(mn_live_basis%nq),b(mn_live_basis%nq),na,ea
+      real(dp)::lower_gap(mn_live_basis%nq),upper_gap(mn_live_basis%nq)
+      real(dp)::edge_scale(mn_live_basis%nq),edge_ulp(mn_live_basis%nq)
       integer::q
       dn=0;de=0
       do q=1,ng
@@ -1495,6 +1497,15 @@ contains
                write(*,*)'M_N band split rejected group/status/minN/maxN/minE/maxE/zeroN_E=',q,status, &
                     minval(rn(:,q)),maxval(rn(:,q)),minval(re(:,q)),maxval(re(:,q)), &
                     count(rn(:,q)==0._dp.and.re(:,q)/=0._dp)
+               if(status==mn_band_err_outside_edges)then
+                  lower_gap=re(:,q)-snrt_group_edges_ev(q)*rn(:,q)
+                  upper_gap=snrt_group_edges_ev(q+1)*rn(:,q)-re(:,q)
+                  edge_scale=max(abs(re(:,q)),abs(snrt_group_edges_ev(q)*rn(:,q)), &
+                       abs(snrt_group_edges_ev(q+1)*rn(:,q)))
+                  edge_ulp=edge_scale-nearest(edge_scale,-1._dp)
+                  write(*,*)'M_N band split edge gap in ULP lower/upper=', &
+                       minval(lower_gap/edge_ulp),minval(upper_gap/edge_ulp)
+               endif
                return
             endif
          else
