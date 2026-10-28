@@ -116,9 +116,20 @@ def assert_close(actual: float, expected: float, context: str) -> None:
         fail(f"{context}: expected {expected:.17g}, found {actual:.17g}")
 
 
-def validate_sink_state(run_dir: Path) -> None:
-    """Fail-closed conservation and restart-continuity checks for this fixture."""
+def validate_sink_state(run_dir: Path, capture_events: list[dict]) -> None:
+    """Check post-compaction sinks against their pre-compaction ledger COMs."""
     seeds = parse_seed_sinks(run_dir / "ic_sink")
+    events_by_primary = {}
+    for event in capture_events:
+        primary = event["primary_sink_id"]
+        if primary in events_by_primary:
+            fail(f"capture ledger repeats surviving primary sink ID {primary}")
+        events_by_primary[primary] = event
+    if set(events_by_primary) != EXPECTED_PRIMARY_IDS:
+        fail(
+            "capture ledger primary IDs disagree with the expected merged sinks: "
+            f"{sorted(events_by_primary)}"
+        )
     snapshots = {
         index: parse_sink_snapshot(run_dir / f"output_{index:05d}" / f"sink_{index:05d}.csv")
         for index in (1, 2)
@@ -128,22 +139,25 @@ def validate_sink_state(run_dir: Path) -> None:
             fail(f"output_{index:05d}: expected surviving sink IDs {sorted(EXPECTED_PRIMARY_IDS)}, found {sorted(snapshot)}")
         for group in EXPECTED_GROUPS:
             primary = max(group)
-            expected_mass = sum(seeds[sink_id][0] for sink_id in group)
-            expected_position = tuple(
-                sum(seeds[sink_id][0] * seeds[sink_id][1][axis] for sink_id in group) / expected_mass
-                for axis in range(3)
-            )
-            expected_momentum = tuple(
-                sum(seeds[sink_id][0] * seeds[sink_id][2][axis] for sink_id in group)
-                for axis in range(3)
-            )
+            event = events_by_primary[primary]
+            expected_mass = event["total_mass_code"]
+            expected_position = event["com_position_code"]
+            expected_velocity = event["com_velocity_code"]
+            periodic_box = event["periodic_box_size_code"]
             mass, position, velocity, _, _ = snapshot[primary]
             assert_close(mass, expected_mass, f"output_{index:05d} sink {primary} mass")
             for axis in range(3):
-                assert_close(position[axis], expected_position[axis],
-                             f"output_{index:05d} sink {primary} position[{axis}]")
-                assert_close(mass * velocity[axis], expected_momentum[axis],
-                             f"output_{index:05d} sink {primary} momentum[{axis}]")
+                delta = position[axis] - expected_position[axis]
+                if delta > 0.5 * periodic_box[axis]:
+                    delta -= periodic_box[axis]
+                elif delta < -0.5 * periodic_box[axis]:
+                    delta += periodic_box[axis]
+                assert_close(expected_position[axis] + delta, expected_position[axis],
+                             f"output_{index:05d} sink {primary} periodic COM position[{axis}]")
+                assert_close(velocity[axis], expected_velocity[axis],
+                             f"output_{index:05d} sink {primary} COM velocity[{axis}]")
+                assert_close(mass * velocity[axis], expected_mass * expected_velocity[axis],
+                             f"output_{index:05d} sink {primary} COM momentum[{axis}]")
         assert_close(sum(row[0] for row in snapshot.values()),
                      sum(row[0] for row in seeds.values()),
                      f"output_{index:05d} total sink mass")
@@ -356,6 +370,50 @@ def validate_fixture_geometry() -> None:
              if abs(rows[i][1] - rows[j][1]) <= link}
     if edges != {(0, 1), (2, 3), (3, 4)}:
         fail(f"unexpected FoF edges {sorted(edges)}")
+    try:
+        validate_fixture_kinematics(rows)
+    except ValueError as error:
+        fail(str(error))
+
+
+def validate_fixture_kinematics(rows: list[list[float]]) -> None:
+    """Require moving members with zero group COM momentum and nonzero L."""
+    for group in ((0, 1), (2, 3, 4)):
+        members = [rows[index] for index in group]
+        total_mass = sum(row[0] for row in members)
+        momentum = [
+            sum(row[0] * row[4 + axis] for row in members)
+            for axis in range(3)
+        ]
+        if any(abs(value) > 1.0e-12 for value in momentum):
+            raise ValueError(
+                f"capture fixture group {group} must have zero initial COM momentum"
+            )
+        centre = [
+            sum(row[0] * row[1 + axis] for row in members) / total_mass
+            for axis in range(3)
+        ]
+        centre_velocity = [value / total_mass for value in momentum]
+        angular_momentum = [0.0, 0.0, 0.0]
+        for row in members:
+            displacement = [row[1 + axis] - centre[axis] for axis in range(3)]
+            relative_velocity = [
+                row[4 + axis] - centre_velocity[axis] for axis in range(3)
+            ]
+            cross = (
+                displacement[1] * relative_velocity[2]
+                - displacement[2] * relative_velocity[1],
+                displacement[2] * relative_velocity[0]
+                - displacement[0] * relative_velocity[2],
+                displacement[0] * relative_velocity[1]
+                - displacement[1] * relative_velocity[0],
+            )
+            for axis in range(3):
+                angular_momentum[axis] += row[0] * cross[axis]
+        if math.sqrt(sum(value * value for value in angular_momentum)) <= 1.0e-12:
+            raise ValueError(
+                f"capture fixture group {group} must carry nonzero internal angular momentum"
+            )
 
 
 def prepare(args: argparse.Namespace) -> None:
@@ -627,7 +685,6 @@ def postcheck(args: argparse.Namespace) -> None:
     stage1_log = (run_dir / "stage1.log").read_text(encoding="utf-8", errors="replace")
     if not re.search(r"init_sink:\s*loaded\s+5\s+sinks\s+from", stage1_log):
         fail("stage1.log does not prove exactly five seed sinks were loaded")
-    validate_sink_state(run_dir)
     for index in (1, 2):
         validate_particle_text_header(
             run_dir / f"output_{index:05d}" / f"header_{index:05d}.txt"
@@ -657,7 +714,18 @@ def postcheck(args: argparse.Namespace) -> None:
     expected_classes = {2: "BINARY", 3: "MULTIPLE"}
     if any(row.get("classification") != expected_classes.get(row.get("nmember")) for row in events):
         fail("event classification does not match member count")
-    print("postcheck=PASS binary=1 multiple=1 members=2+3 active_restart_branch=verified")
+    validate_sink_state(run_dir, events)
+    event_ids = {row["event_uid"] for row in events}
+    pairs = [row for row in records if row.get("record_type") == "pair"]
+    for event_uid in event_ids:
+        event_pairs = [row for row in pairs if row.get("event_uid") == event_uid]
+        if not event_pairs or any(
+            row["relative_speed_code"] <= 0.0
+            or not any(value != 0.0 for value in row["relative_angular_momentum_code"])
+            for row in event_pairs
+        ):
+            fail(f"event {event_uid}: expected moving pairs with nonzero angular momentum")
+    print("postcheck=PASS binary=1 multiple=1 members=2+3 moving_pair_kinematics=verified active_restart_branch=verified")
 
 
 def main() -> None:

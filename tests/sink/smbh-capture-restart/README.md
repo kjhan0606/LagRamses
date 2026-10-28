@@ -211,6 +211,69 @@ correct but trivial; it does not validate sink motion or a new capture after
 restart. It also does not validate nonperiodic AMR boundaries or a physical
 galaxy-merger capture rate.
 
+### Latest clean-HEAD two-rank rerun — 2026-10-12
+
+The smoke was rerun from clean detached source commit
+`56bcd0d9c9715e7d0419aaf61df7ee3490105947`, using the pinned Intel MPI
+2021.17 toolchain and binary SHA-256
+`3eb8b58beed20783387da1773d5bef76dec0667214e9bef0317ec21f997d2c53`.
+The schema-3 preflight manifest SHA-256 was
+`94bc870eb7d797eaa6d78cc8c7772e5be740d231f65a8bddca0f8f28229fb604`.
+The preserved run is
+`/home/kjhan/BACKUP/smbh-capture-restart-mpi2-56bcd0d0/`; its ledger SHA-256
+is `7270ed5699e72c3f86f6fc7b1c2b0ea5fa3ea65c831196b2a241010cd2c1f0bd`.
+Both outputs have `COMPLETE`, report `ncpu=2`, and advance coarse steps 1 then
+2. The postcheck passed with one committed batch, two unique complete events
+(one `BINARY`, one `MULTIPLE` with 2+3 members), zero duplicate or incomplete
+batches/events, zero invalid JSON lines, and a validator-selected active
+restart branch. Mass and sink-state restart-continuity checks passed. This is
+the latest clean-HEAD two-rank smoke; the zero-velocity momentum and
+nonperiodic-boundary limitations above still apply.
+
+### Moving-pair fixture — runtime verified 2026-10-12
+
+The working-tree `ic_sink` now gives each capture group nonzero internal
+tangential velocities while keeping each group's initial centre-of-mass
+momentum zero. The preparation gate checks those two properties, and the
+ledger postcheck now requires every recorded pair to have nonzero relative
+speed and angular momentum. Post-compaction mass, periodic COM position, COM
+velocity, and momentum are checked against the pre-compaction event; the
+restart output is then checked for sink-state continuity. The run uses the
+same clean-HEAD binary as the two-rank test because the Fortran source is
+unchanged, with the fixture variant separately hash-bound in its manifest.
+
+The first Slurm submission, job `420719`, remained pending under
+`QOSMaxGRESPerUser` and was cancelled before starting; it touched no solver
+outputs. A first serial attempt on lageunha then stopped before initialization
+because `libimf.so` was missing; that failed directory is preserved at
+`/gpfs/kjhan/lagramses_capture_restart_smoke/moving-pair-56bcd0d0-20261012/`
+and contains no `output_*` directories. Loading the pinned Intel compiler
+runtime, TBB, UMF, compiler, and MPI modules resolved the dynamic-library
+dependency. The successful serial run used a fresh directory:
+`/gpfs/kjhan/lagramses_capture_restart_smoke/moving-pair-56bcd0d0-20261012-r2/`.
+
+The binary is from clean source commit
+`56bcd0d9c9715e7d0419aaf61df7ee3490105947`, SHA-256
+`3eb8b58beed20783387da1773d5bef76dec0667214e9bef0317ec21f997d2c53`. The
+prepared `ic_sink` SHA-256 is
+`553cbbe7952c6f53feed39560f38a55c1a51e272e0bdffa26798d3f734445d90`; the r2
+manifest SHA-256 is
+`e03d6fedfe206e10ac54fc21e8984e69b7ff74f14975cf388e86ec64d497893c`.
+The effective schedule wrote only outputs at coarse steps 1 and 2
+(`noutput=1`, `tout=1.0d100`, `foutput=1`, `fbackup=1000000`). The preflight
+reserved 2 GB for outputs plus 1 GiB reserve.
+
+Both outputs have `COMPLETE`. The ledger and restart postchecks pass: one
+committed batch, one `BINARY`, one 3-member `MULTIPLE`, two unique complete
+events, no duplicate/incomplete records or invalid JSON, nonzero relative
+speed and angular momentum for every pair, conserved post-compaction mass,
+periodic COM position, velocity and momentum, and sink-state continuity across
+restart. The first working-tree postcheck exposed output quantization: RAMSES
+sink CSV coordinates are printed to ten decimal places while the ledger stores
+full precision. The comparison now applies the existing relative tolerance to
+the periodic-equivalent coordinate, with a regression reproducing the Fortran
+CSV precision. Fixture tests pass (50 tests and 4 subtests).
+
 ## 5. Optional execution under Slurm
 
 Slurm may use `/scratch`, but it needs a distinct preparation there (including
