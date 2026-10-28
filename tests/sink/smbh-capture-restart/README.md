@@ -340,3 +340,33 @@ and manifest identities, and all effective input hashes. Any input edit,
 binary replacement, unexpected output/log/ledger, source drift, or inadequate
 space aborts before RAMSES. The fixture is not an MPI scaling or scientific
 binary-formation test.
+
+## 6. Differential FoF backend unit test
+
+The active sink merge selects the sequential FoF implementation below 300
+sinks and the OMP+MPI tree implementation at or above 300. The moving-pair
+restart fixture has only five sinks, so it does not exercise that tree path.
+The standalone test-only driver calls both backends on an identical nine-sink
+fixture and compares component membership, independent of group labels. The
+fixture covers periodic wrapping, transitive links, an isolated sink, and
+components crossing both OpenMP-thread and MPI-rank partitions.
+
+Submit from the lagRamses repository root:
+
+```bash
+sbatch tests/sink/smbh-capture-restart/run_fof_backend_equivalence.slurm
+```
+
+The job compiles the current `patch/lagRamses/kjhan.f90` with `_KJHAN_TEST`,
+then runs two MPI ranks with two OpenMP threads each. Intel MPI is bound to
+Slurm's PMI2 plugin using `I_MPI_PMI_LIBRARY=/usr/lib64/libpmi2.so` and
+`srun --mpi=pmi2`. Logs are written to `/gpfs/kjhan/fof-equivalence-<job>.out`
+and `.err`.
+
+Job `1234486` completed with exit 0. Its output reports that the sequential
+and OMP+MPI partitions both match the expected four components. Source hash:
+`28e2e7e228457810dce2d3911f6980e9dda90c08d2776cd05603a8a9d293d357`; driver
+hash: `e3d3818f7bc347fb157561c766eb94dc2f6d1a109e9add07c650e18fae400b07`.
+This is a direct backend-level grouping regression, not a full `merge_sink`
+dispatch test: `_KJHAN_TEST` omits the binding-energy `vrel_merge` filter, and
+the production threshold and canonicalization remain unchanged.
