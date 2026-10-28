@@ -52,6 +52,13 @@ fi
 "$fc" "${flags[@]}" "${openmp_flags[@]}" -c \
   "$repo_root/patch/lagRamses/snrt_moment_transport.f90" \
   -o "$build_dir/snrt_moment_transport.o"
+"$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/snrt_moment_spectrum.f90" \
+  -o "$build_dir/snrt_moment_spectrum.o"
+"$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/snrt_moment_spectrum_smoke.f90" \
+  -o "$build_dir/snrt_moment_spectrum_smoke.o"
+"$fc" "$build_dir/snrt_moment_transport.o" "$build_dir/snrt_moment_spectrum.o" \
+  "$build_dir/snrt_moment_spectrum_smoke.o" -o "$build_dir/snrt_moment_spectrum_smoke"
+"$build_dir/snrt_moment_spectrum_smoke"
 "$fc" "${flags[@]}" "${openmp_flags[@]}" -c \
   "$repo_root/patch/lagRamses/snrt_moment_live.f90" \
   -o "$build_dir/snrt_moment_live.o"
