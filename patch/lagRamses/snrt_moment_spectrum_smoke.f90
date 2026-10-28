@@ -11,7 +11,7 @@ program snrt_moment_spectrum_smoke
   ! and number are subnormal, where epsilon*scale rounds the old tolerance to
   ! zero despite the discrepancy being only one ULP.
   tiny_positive=nearest(0._mn_dp,1._mn_dp)
-  n=[64._mn_dp*tiny_positive,64._mn_dp*tiny_positive,2._mn_dp]
+  n=[4096._mn_dp*tiny_positive,4096._mn_dp*tiny_positive,2._mn_dp]
   e=[nearest(lo*n(1),-1._mn_dp),nearest(hi*n(2),1._mn_dp),24._mn_dp]
   call mn_band_split_angular(n,e,lo,hi,a,b,status)
   if(status/=mn_ok)error stop 'one-ULP subnormal endpoint was rejected'
@@ -22,9 +22,18 @@ program snrt_moment_spectrum_smoke
   if(8*epsilon(1._mn_dp)*max(e(1),hi*n(1))/(hi-lo)/=0._mn_dp) &
        error stop 'regression fixture does not underflow the former tolerance'
 
-  ! More than the declared ULP envelope remains a hard spectral failure.
+  ! The measured nine-ULP endpoint envelope is admitted, but an excursion
+  ! beyond the 528-ULP operation-count bound remains a hard spectral failure.
   e(1)=lo*n(1)
-  do k=1,16
+  do k=1,9
+     e(1)=nearest(e(1),-1._mn_dp)
+  enddo
+  call mn_band_split_angular(n,e,lo,hi,a,b,status)
+  if(status/=mn_ok)error stop 'measured endpoint roundoff was rejected'
+  if(a(1)/=0._mn_dp.or.b(1)/=n(1))error stop 'near-edge lower packet was not conserved'
+
+  e(1)=lo*n(1)
+  do k=1,1024
      e(1)=nearest(e(1),-1._mn_dp)
   enddo
   call mn_band_split_angular(n,e,lo,hi,a,b,status)
@@ -34,7 +43,7 @@ program snrt_moment_spectrum_smoke
   n(1)=0._mn_dp
   call mn_band_split_angular(n,e,lo,hi,a,b,status)
   if(status/=mn_band_err_zero_n_energy)error stop 'zero-number energy was not classified'
-  n(1)=64._mn_dp*tiny_positive
+  n(1)=4096._mn_dp*tiny_positive
 
   ! The arithmetic allowance must not admit physically out-of-band energy.
   e(3)=lo*n(3)-1.e-8_mn_dp

@@ -9,6 +9,9 @@ module snrt_moment_spectrum
   public :: mn_band_split,mn_band_split_angular,mn_band_join,mn_band_reconstruct
   integer,parameter,public :: mn_band_err_nonfinite=11,mn_band_err_negative=12
   integer,parameter,public :: mn_band_err_zero_n_energy=13,mn_band_err_outside_edges=14
+  ! Bound accumulation error for the receiver's 128-node dust spectrum plus
+  ! the products and final N/E combination (four ULP/node plus scalar work).
+  integer,parameter :: mn_band_roundoff_ulps=528
 contains
   subroutine mn_band_split_angular(n,e,lo,hi,a,b,ierr)
     ! The material receiver independently sums positive N and E packets.
@@ -41,10 +44,12 @@ contains
     endif
     lower_gap=e-lower;upper_gap=upper-e
     scale=max(abs(e),abs(lower),abs(upper))
-    ! epsilon*scale underflows to zero for subnormal radiation packets. Use
-    ! representable spacing instead, so a one-ULP endpoint cancellation is
-    ! admitted at every magnitude while finite out-of-band states still fail.
-    roundoff=8*(scale-nearest(scale,-1._mn_dp))
+    ! The material receiver sums up to 128 positive spectral-node contributions
+    ! independently for N and E. The operation-count envelope covers the
+    ! observed 9-ULP endpoint cancellation. Its energy correction is booked as
+    ! a projection residual, never deposited as heat. ULP spacing remains
+    ! nonzero when epsilon*scale would underflow for subnormal packets.
+    roundoff=real(mn_band_roundoff_ulps,mn_dp)*(scale-nearest(scale,-1._mn_dp))
     if(any(.not.ieee_is_finite(roundoff)))then
        ierr=mn_band_err_nonfinite;return
     endif
