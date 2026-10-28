@@ -1876,3 +1876,34 @@ tout=1e30, foutput=2, fbackup=1000000. Each contains two dump directories
 prelaunch free space 167 TB. All prior runs and dumps are preserved.
 No physical model/table changes, multi-node/performance qualification,
 single-rank multi-device pool, commit or push are claimed here.
+
+## Current-commit M5/source/dust/CHIMES CPU integration (2026-10-29)
+
+Both bounded executions below used commit `e63fc6d9235848088f60a458321548d61670c83e`
+and CPU binary SHA256 `2b8fc0a09a3c81475b796b7f4cb2b1976a7b9c2670dcff15de17381fcae0f017`
+(`CHIMES_CUDA=0`). Each run's recorded input checksums verify successfully.
+Both scripts assert that no raw RAMSES output is produced; both run directories
+contain zero `output_NNNNN` snapshots.
+
+- Job `1233106`, grammar `normal`, MPI=1/OMP=8, completed in 45:41. Its
+  effective namelist is `.m5-source-dust-chimes-1233106/effective.nml`.
+  This is the AGN-only source-attribution profile: stellar SED disabled,
+  thermal luminous accretion recorded, and the nonzero M5 source ledger is
+  therefore attributable to the AGN point source. M5 order 5 committed after
+  substep counts 16, 16 and 1; live dust mass and CPU CHIMES were enabled.
+  Result: `M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS`, 16,896 cells in the
+  momentum-assertion coverage, reference controls remain NONPRODUCTION.
+- Job `1233681`, grammar `normal`, MPI=1/OMP=8 on `grammar013`, completed in
+  1:52 (RAMSES-reported elapsed 96.92 s). Its effective namelist is
+  `.m5-effective-amr-1233681/effective.nml`. The stellar SED and
+  `common_imf_mixed_evolution` population were active; the log records
+  `effective_ssp` SNIa accounting and 417 cumulative new stars. M5 order 5
+  committed on both level 2 and level 3 across the four-step AMR-interface
+  run (56 coarse-leaf and 64 fine-leaf cells). Result:
+  `M5_COUPLED_AMR_INTERFACE_PASS`. The AGN sink/accretion path was active and
+  luminous, but this run does not independently attribute M5 photons to AGN.
+
+These runs establish current-commit CPU coupling for the two source scopes,
+not production approval of the reference-control SED, AGN, dust or chemistry
+assets. The second run's AGN-to-M5 attribution is not inferred from its
+nonzero total source ledger. CUDA hybrid qualification remains separate.
