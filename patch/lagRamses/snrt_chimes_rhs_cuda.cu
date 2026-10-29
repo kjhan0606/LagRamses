@@ -137,6 +137,7 @@ std::atomic<unsigned long long> invalid_device_outputs{0};
 std::atomic<unsigned long long> active_batches{0},peak_active_batches{0},used_stream_mask{0};
 std::atomic<unsigned long long> used_worker_mask{0};
 std::atomic<unsigned long long> compact_batches{0},full_batches{0},result_bytes{0};
+std::atomic<unsigned long long> rhs_diag_reasons{0};
 
 /* Count batches submitted to CUDA but not yet observed complete. This is an
  * in-flight queue-depth measure, not proof of simultaneous kernel execution. */
@@ -459,6 +460,37 @@ struct TileRun {
  snrt_chimes_tile_cell_fn callback=nullptr;void *context=nullptr;
 };
 thread_local TileRun *tile_run=nullptr;
+enum ChimesGpuDiagReason {
+ GPU_DIAG_THREAD_POLICY=0, GPU_DIAG_TILE_SLOT, GPU_DIAG_BACKEND_STATE,
+ GPU_DIAG_RETRY, GPU_DIAG_PHOTONS, GPU_DIAG_SPECIES_COUNT,
+ GPU_DIAG_THERMAL, GPU_DIAG_TEAM, GPU_DIAG_MOLECULAR_FLAG,
+ GPU_DIAG_SPECIES_MAP, GPU_DIAG_CASE_AB, GPU_DIAG_INPUT_STATE,
+ GPU_DIAG_BATCH_TAIL, GPU_DIAG_STREAM_BUSY, GPU_DIAG_TILE_REQUEST,
+ GPU_DIAG_REASON_COUNT
+};
+void chimes_gpu_diag_once(ChimesGpuDiagReason reason,const char *label,const UserData *d){
+ const char *env=std::getenv("SNRT_CHIMES_GPU_DIAG");
+ if(!env || !*env || !std::strcmp(env,"0") || reason<0 || reason>=GPU_DIAG_REASON_COUNT)return;
+ const unsigned long long bit=1ull<<reason;
+ if(rhs_diag_reasons.fetch_or(bit)&bit)return;
+ const auto *c=d?d->myGlobalVars:nullptr;
+ const auto *g=d?d->myGasVars:nullptr;
+ double photon_max=std::numeric_limits<double>::quiet_NaN();
+ if(c && g && g->isotropic_photon_density && c->N_spectra>=0 && c->N_spectra<=9){
+   photon_max=0.;
+   for(int b=0;b<c->N_spectra;b++)photon_max=std::max(photon_max,g->isotropic_photon_density[b]);
+ }
+ std::fprintf(stderr,
+   "CHIMES_GPU_DIAG reason=%s tid=%d team=%d backend=%d retry=%d tile=%d streams=%d "
+   "spectra=%d species=%d expected_species=%d therm=%d mol=%d caseAB=%d,%d "
+   "photon_max=%.17g T=%.17g nH=%.17g\n",
+   label,omp_get_thread_num(),omp_in_parallel()?omp_get_num_threads():1,cell_backend,
+   retry_cell?1:0,tile_run?1:0,cuda_get_n_streams(),c?c->N_spectra:-1,
+   c?c->totalNumberOfSpecies:-1,ns,g?g->ThermEvolOn:-1,d?d->mol_flag_index:-1,
+   d?d->case_AB_index[0]:-9,d?d->case_AB_index[1]:-9,photon_max,
+   g?g->temperature:std::numeric_limits<double>::quiet_NaN(),
+   g?g->nH_tot:std::numeric_limits<double>::quiet_NaN());
+}
 thread_local std::vector<TileFiber> tile_fibers;
 std::mutex mutex;std::condition_variable changed;std::vector<Request*> pending;
 bool select_compact(const std::vector<Request*> &requests){
@@ -625,6 +657,7 @@ bool serve_request(Request &q,int team){
    if(batch.size()<4 && !required){
      // A short tail is cheaper and more predictable on CPU. Complete every
      // queued caller in this tail together; no stream launch is worthwhile.
+     chimes_gpu_diag_once(GPU_DIAG_BATCH_TAIL,"batch-tail",batch.front()->d);
      for(auto *r:batch)r->done=true;
      while(!pending.empty() && batch.size()<4){
        Request *next=pending.front();pending.erase(pending.begin());
@@ -641,6 +674,7 @@ bool serve_request(Request &q,int team){
    // The staged path instead reserves a lease for the whole cohort, so it
    // never waits here and cannot discard work due to per-cell lease churn.
    if(slot<0){
+     chimes_gpu_diag_once(GPU_DIAG_STREAM_BUSY,"stream-unavailable",batch.front()->d);
      lock.lock();
      for(auto *r:batch)r->done=true;
      changed.notify_all();
@@ -744,29 +778,39 @@ extern "C" int snrt_chimes_dark_rhs_gpu(UserData *d){
  gpu_net_cooling_ready=0;
  if(!enabled)return 0;
  if(cpu_direct)return 0; // native CPU lane: no per-RHS shared atomic
- if(gpu_thread0_only && omp_get_thread_num()!=0){cell_backend=0;fallback++;return 0;}
- if(tile_run && tile_run->slot<0 && !tile_run->shared){cell_backend=0;fallback++;return 0;}
- if(cell_backend<=-2 || cell_backend==0){fallback++;return 0;}
+ if(gpu_thread0_only && omp_get_thread_num()!=0){chimes_gpu_diag_once(GPU_DIAG_THREAD_POLICY,"worker-policy",d);cell_backend=0;fallback++;return 0;}
+ if(tile_run && tile_run->slot<0 && !tile_run->shared){chimes_gpu_diag_once(GPU_DIAG_TILE_SLOT,"tile-slot-unavailable",d);cell_backend=0;fallback++;return 0;}
+ if(cell_backend<=-2 || cell_backend==0){chimes_gpu_diag_once(GPU_DIAG_BACKEND_STATE,"backend-state",d);fallback++;return 0;}
  // A discarded GPU trajectory must stay discarded until the bridge starts
  // its whole-cell CPU retry. CVODE may call f again while unwinding an
  // unsuccessful Jacobian/Newton solve; never resume device arithmetic there.
- if(retry_cell)return -1;
+ if(retry_cell){chimes_gpu_diag_once(GPU_DIAG_RETRY,"retry-cell",d);return -1;}
 #ifdef SNRT_CHIMES_RHS_TESTING
  if(cell_backend==1 && drop_after && ++cell_calls==drop_after){retry_cell=true;drops++;return -1;}
 #endif
- auto decline=[&](){if(cell_backend==1){retry_cell=true;return -1;}cell_backend=0;fallback++;return 0;};
+ auto decline=[&](ChimesGpuDiagReason reason,const char *label){
+   chimes_gpu_diag_once(reason,label,d);
+   if(cell_backend==1){retry_cell=true;return -1;}
+   cell_backend=0;fallback++;return 0;
+ };
  auto *c=d->myGlobalVars;auto *g=d->myGasVars;
  int team=omp_in_parallel()?omp_get_num_threads():1;
  // Keep the full CVODE state dimension for hot/atomic transition solves, but
  // allow the dark device RHS when retained spectra contain only CHIMES's
  // log-floor sentinel for an exact-zero input. Resolved radiation stays CPU.
- if(!zero_incident_photon_field(c,g) || c->totalNumberOfSpecies!=ns || g->ThermEvolOn!=1 ||
-    (!tile_run && team<4) || (d->mol_flag_index!=0 && d->mol_flag_index!=1))return decline();
- for(int s=0;s<ns;s++)if(c->speciesIndices[s]!=s)return decline();
- if(d->case_AB_index[0]<0||d->case_AB_index[0]>1||d->case_AB_index[1]<0||d->case_AB_index[1]>1)return decline();
+ if(!zero_incident_photon_field(c,g))return decline(GPU_DIAG_PHOTONS,"nonzero-or-invalid-photons");
+ if(c->totalNumberOfSpecies!=ns)return decline(GPU_DIAG_SPECIES_COUNT,"species-count");
+ if(g->ThermEvolOn!=1)return decline(GPU_DIAG_THERMAL,"thermal-evolution-off");
+ if(!tile_run && team<4)return decline(GPU_DIAG_TEAM,"omp-team-too-small");
+ if(d->mol_flag_index!=0 && d->mol_flag_index!=1)return decline(GPU_DIAG_MOLECULAR_FLAG,"molecular-flag");
+ for(int s=0;s<ns;s++)if(c->speciesIndices[s]!=s)return decline(GPU_DIAG_SPECIES_MAP,"species-map");
+ if(d->case_AB_index[0]<0||d->case_AB_index[0]>1||d->case_AB_index[1]<0||d->case_AB_index[1]>1)
+   return decline(GPU_DIAG_CASE_AB,"case-ab-index");
  Request q{};q.d=d;q.required=cell_backend==1;fill_input(q.input,d);
- if(!(q.input.t>0) || !(q.input.td>0) || !(q.input.nh>0) || !std::isfinite(q.input.t))return decline();
+ if(!(q.input.t>0) || !(q.input.td>0) || !(q.input.nh>0) || !std::isfinite(q.input.t))
+   return decline(GPU_DIAG_INPUT_STATE,"invalid-thermochemical-input");
  if(!(tile_run?serve_tile_request(q):serve_request(q,team))){
+   chimes_gpu_diag_once(GPU_DIAG_TILE_REQUEST,"tile-or-queue-request-failed",d);
    if(cell_backend==1){retry_cell=true;return -1;}
    cell_backend=0;fallback++;
    return 0;
