@@ -180,16 +180,20 @@ With no backend variables set, CPU is the default. `hybrid` selects the
 level-queue CPU/GPU scheduler automatically and requires `CHIMES_CUDA=1`
 and a GPU allocation. It does not implement a device-resident CVODE controller.
 The device chemistry RHS supports dark chemistry. A nonzero `N_spectra` is
-eligible only when every retained photon-group density is exactly zero; this
-keeps the full CVODE state dimension for hot/atomic transition solves while
-still allowing their dark RHS and cooling work on the GPU. Any nonzero photon
-field stays on the CPU. The separate M5 spectral photo operator also remains
-a CPU path. The earlier blanket `N_spectra != 0` rejection forced zero-photon
-transition solves with retained spectrum slots onto the CPU; commit `ef01f5f`
-removes that restriction without changing nonzero-radiation behavior. The
-M5+dust+CHIMES restart result from job `440742` was numerically restart
-consistent, but its resumed leg recorded zero CHIMES GPU calls. The corrected
-backend and stricter per-rank runner check are awaiting a repeat run, so that
+eligible only when every retained photon-group density is no greater than
+`DBL_MIN * (1 + 256*epsilon)`. CHIMES maps zero input to `DBL_MIN` before
+integrating logarithmic photon variables, and the `exp(log(DBL_MIN))` round
+trip can be slightly above the floor. This keeps the
+full CVODE state dimension for hot/atomic transition solves while allowing
+their dark RHS and cooling work on the GPU. Resolved photon fields remain on
+the CPU; the separate M5 spectral photo operator also remains a CPU path. The
+earlier blanket `N_spectra != 0` rejection forced zero-photon transition
+solves with retained spectrum slots onto the CPU. The first retest (job
+`440761`) still fell back because it exposed the log-floor roundoff; the
+follow-up narrow sentinel rule is pending rebuild and integrated verification.
+The earlier M5+dust+CHIMES restart result from job `440742` was numerically restart
+consistent, but its resumed leg recorded zero CHIMES GPU calls. The follow-up
+sentinel rule and stricter per-rank runner check are awaiting a repeat run, so that
 earlier result does not qualify hybrid restart execution. The cooperative
 tile/level queue is currently called by the radiation-off dark-material
 runtime; M5's `material_tile` instead uses its OpenMP dynamic cell loop and the

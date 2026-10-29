@@ -27,6 +27,7 @@ void snrt_chimes_rate_cache_invalidate(void);
 #include <cfloat>
 #include <cstdint>
 #include <cstddef>
+#include <limits>
 #include <thread>
 #include <cuda_profiler_api.h>
 #include <nvtx3/nvToolsExt.h>
@@ -655,9 +656,16 @@ bool serve_request(Request &q,int team){
 bool zero_incident_photon_field(const globalVariables *c,const gasVariables *g){
  if(c->N_spectra==0)return true;
  if(c->N_spectra<0 || c->N_spectra>9 || !g->isotropic_photon_density)return false;
+ // CHIMES evolves log(photon density), replacing an exact input zero with
+ // CHIMES_FLT_MIN. Its exp(log(floor)) round trip can lie slightly above the
+ // floor, so admit only that narrow sentinel neighborhood as zero. This does
+ // not admit physically resolved photons; negative and nonfinite values
+ // remain hard CPU fallbacks.
+ const double zero_floor=static_cast<double>(CHIMES_FLT_MIN)*
+   (1.0+256.0*std::numeric_limits<double>::epsilon());
  for(int b=0;b<c->N_spectra;b++){
    const double photons=g->isotropic_photon_density[b];
-   if(!std::isfinite(photons) || photons!=0.)return false;
+   if(!std::isfinite(photons) || photons<0. || photons>zero_floor)return false;
  }
  return true;
 }
@@ -750,8 +758,8 @@ extern "C" int snrt_chimes_dark_rhs_gpu(UserData *d){
  auto *c=d->myGlobalVars;auto *g=d->myGasVars;
  int team=omp_in_parallel()?omp_get_num_threads():1;
  // Keep the full CVODE state dimension for hot/atomic transition solves, but
- // allow the dark device RHS when every retained spectrum is exactly empty.
- // Nonzero radiation still uses the host photo-reaction path.
+ // allow the dark device RHS when retained spectra contain only CHIMES's
+ // log-floor sentinel for an exact-zero input. Resolved radiation stays CPU.
  if(!zero_incident_photon_field(c,g) || c->totalNumberOfSpecies!=ns || g->ThermEvolOn!=1 ||
     (!tile_run && team<4) || (d->mol_flag_index!=0 && d->mol_flag_index!=1))return decline();
  for(int s=0;s<ns;s++)if(c->speciesIndices[s]!=s)return decline();
