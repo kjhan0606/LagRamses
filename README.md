@@ -179,18 +179,21 @@ export SNRT_CHIMES_COMPUTE_BACKEND=hybrid  # CPU CVODE/LU + asynchronous GPU dar
 With no backend variables set, CPU is the default. `hybrid` selects the
 level-queue CPU/GPU scheduler automatically and requires `CHIMES_CUDA=1`
 and a GPU allocation. It does not implement a device-resident CVODE controller.
-The current device chemistry RHS supports the dark network only: cells with
-`N_spectra != 0` (photo/radiation-dependent CHIMES chemistry) are explicitly
-kept on the CPU, and the separate M5 spectral photo operator is also a CPU
-CVODE path. Some split dark solves locally set `N_spectra=0`, so the dark-only
-restriction alone does not explain why the recorded restart leg had zero GPU
-RHS calls. The existing M5+dust+CHIMES restart PASS establishes coupled
-restart consistency, not GPU acceleration of photo chemistry; that run did not
-record per-cell fallback reasons, and the restart-leg dispatch cause remains
-unresolved. The cooperative tile/level queue is currently called by the
-radiation-off dark-material runtime; M5's `material_tile` instead uses its
-OpenMP dynamic cell loop and the per-RHS cohort dispatcher. The reason this
-M5 route produced no GPU RHS calls after restore is not established.
+The device chemistry RHS supports dark chemistry. A nonzero `N_spectra` is
+eligible only when every retained photon-group density is exactly zero; this
+keeps the full CVODE state dimension for hot/atomic transition solves while
+still allowing their dark RHS and cooling work on the GPU. Any nonzero photon
+field stays on the CPU. The separate M5 spectral photo operator also remains
+a CPU path. The earlier blanket `N_spectra != 0` rejection forced zero-photon
+transition solves with retained spectrum slots onto the CPU; commit `ef01f5f`
+removes that restriction without changing nonzero-radiation behavior. The
+M5+dust+CHIMES restart result from job `440742` was numerically restart
+consistent, but its resumed leg recorded zero CHIMES GPU calls. The corrected
+backend and stricter per-rank runner check are awaiting a repeat run, so that
+earlier result does not qualify hybrid restart execution. The cooperative
+tile/level queue is currently called by the radiation-off dark-material
+runtime; M5's `material_tile` instead uses its OpenMP dynamic cell loop and the
+per-RHS cohort dispatcher.
 On the paired manual `lageunha` Ada smoke (same binary/inputs, MPI2/OMP4),
 CHIMES CPU vs hybrid elapsed times differed by less than 1% in both continuous
 and resumed legs; this shows no end-to-end speedup and does not qualify
