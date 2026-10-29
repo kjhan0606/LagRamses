@@ -1035,7 +1035,11 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
  int active_brokers=0;
  if(enabled){
    active_brokers=gpu_thread0_only?1:(brokers_explicit?std::min(level_gpu_brokers,workers):workers);
-   if(workers>1 && cells<16*workers) active_brokers=0;
+   // A hybrid window needs at least one 16-cell GPU cohort and 16 cells for
+   // the CPU consumers. Scale this floor with broker count, not total OMP
+   // team size; otherwise a useful 32-cell / 4-worker M5 tile is CPU-only.
+   if(active_brokers>0 && workers>active_brokers && cells<16*(active_brokers+1))
+     active_brokers=0;
  }
  pending.clear();
  std::atomic<int> shared_launcher{0};
@@ -1091,7 +1095,12 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
        prepared=true;
      }catch(...){prepared=false;}
    }
-   const int reserve_limit=active_brokers?std::min(128,std::max(1,cells/active_brokers)):0;
+   // Keep work for the native CPU consumers when the tile is smaller than
+   // the broker's 128-fiber window. Without this share, a one-broker tile of
+   // 32 cells reserves all 32 before any CPU worker can participate.
+   const int reserve_divisor=active_brokers+(active_brokers<workers?1:0);
+   const int reserve_limit=active_brokers?
+     std::min(128,std::max(1,cells/std::max(1,reserve_divisor))):0;
    // Prefer a full configured batch when each broker owns enough independent
    // continuations. Other workers keep consuming CPU cells while this broker
    // gathers candidates; the final short batch is still submitted at drain.
@@ -1113,6 +1122,7 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
      if(cell>=cells)break;
      initial[i]=cell;
    }
+#pragma omp barrier
    cudaStream_t stream=nullptr;
    if(!fiber){
      cpu_direct=true;
