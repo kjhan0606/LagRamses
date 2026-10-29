@@ -1073,7 +1073,9 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
      try{
        tile_fibers.resize(128);
        for(auto &fiber:tile_fibers){
-         fiber.stack.resize(256*1024);fiber.done=true;fiber.global_cell=-1;
+         // M5 material callbacks keep sizable automatic angular/material
+         // work arrays live across a suspended CHIMES RHS continuation.
+         fiber.stack.resize(1024*1024);fiber.done=true;fiber.global_cell=-1;
          fiber.waiting=nullptr;fiber.queued=false;
        }
      }catch(...){prepared=false;}
@@ -1089,7 +1091,7 @@ extern "C" int snrt_chimes_rhs_level_run(int cells,snrt_chimes_tile_cell_fn call
      try{
        tile_fibers.resize(128);
        for(auto &fiber:tile_fibers){
-         fiber.stack.resize(256*1024);fiber.done=true;fiber.global_cell=-1;
+         fiber.stack.resize(1024*1024);fiber.done=true;fiber.global_cell=-1;
          fiber.waiting=nullptr;fiber.queued=false;
        }
        prepared=true;
