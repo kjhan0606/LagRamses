@@ -1943,3 +1943,35 @@ multi-rank qualification, nor a speedup result. The single-stream, one
 peak-inflight-batch observation and the CPU fallback count are retained as
 runtime evidence; a controlled performance comparison would need matched
 hardware and repeated runs.
+
+### A40 CUDA-hybrid effective-population AMR integration (2026-10-29)
+
+Slurm job `439307` completed on A40 node `syn06` in `00:02:07` wall time
+(RAMSES elapsed `109.06 s`; MPI=1, OMP=8). It used the same verified CUDA
+binary from source commit `b1fc63c45bbe547616ccebf699ddeeea0dceaf5e` and
+SHA256 `25591837c5ff2113b3faf7db60630582c4087448c6c511a1cb0768f26d1921b4`.
+The job was moved from the H100 partition to typed A40 GRES while pending;
+the execution log confirms `GPU=NVIDIA A40`, partition `a40`, node `syn06`.
+
+The effective-population profile ran four steps with M5 order 5, live
+two-size dust, and CHIMES hybrid across levels 2 and 3. The log shows eight
+level-3 grids, M5 commits at both levels, nonzero M5 source/absorption ledgers
+after stellar births, and 417 cumulative new stars. The AGN coarse-state
+ledger records positive accretion and bolometric luminosity; the mixed-source
+run does not independently attribute the M5 ledger to AGN. CHIMES reports
+`gpu_calls=3567`, `cpu_fallback_calls=169126`, `gpu_batches=1137`,
+`device_errors=0`, one warm table upload, `peak_inflight_batches=1`, and one
+stream (`worker_mask=255`). These counters confirm the device path but are not
+a GPU/CPU speedup measurement. The run elapsed-time breakdown assigns 97.8%
+to cooling. NaN checks remain zero, fine-MG convergence succeeds, the runner
+emits `M5_COUPLED_AMR_INTERFACE_PASS`, and no raw RAMSES snapshots were
+created.
+
+Every path listed in
+`.m5-effective-amr-439307/inputs.sha256` verifies, including the effective
+namelist, sink IC, source/chemistry/dust controls, tables, runtime libraries,
+reporter, runner and executable. All physical source and dust controls remain
+explicitly `reference_controls=NONPRODUCTION`; this pass does not approve
+those assets. It establishes bounded one-rank A40 hybrid AMR coupling, not
+full-L8/cosmological, restart, multi-rank, production-input, or performance
+qualification.
