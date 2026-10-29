@@ -744,8 +744,11 @@ extern "C" int snrt_chimes_rhs_configure_mode(int use_cuda){
    std::fprintf(stderr,"Unknown SNRT_CHIMES_CELL_SCHEDULER=%s; expected cohort|level_queue\n",scheduler);return 1;
  }
  const char *compute_backend=std::getenv("SNRT_CHIMES_COMPUTE_BACKEND");
- level_queue_enabled=(scheduler && !std::strcmp(scheduler,"level_queue")) ||
-   (compute_backend && !std::strcmp(compute_backend,"hybrid"));
+ // An explicit scheduler choice must override the backend-derived default;
+ // otherwise hybrid silently forces level_queue and cohort cannot be used as
+ // a matched control or an intentional compatibility path.
+ if(scheduler && *scheduler) level_queue_enabled=!std::strcmp(scheduler,"level_queue");
+ else level_queue_enabled=compute_backend && !std::strcmp(compute_backend,"hybrid");
  const char *broker_env=std::getenv("SNRT_CHIMES_GPU_BROKERS");
  level_gpu_brokers=1;
  brokers_explicit=false;

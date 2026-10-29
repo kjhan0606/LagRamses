@@ -29,8 +29,17 @@ readonly RUN_ID=${M5_RUN_ID:-${SLURM_JOB_ID:-}}
 readonly OMP_THREADS=${SLURM_CPUS_PER_TASK:-${M5_OMP_THREADS:-8}}
 readonly MPI_RANKS=${SLURM_NTASKS:-${M5_MPI_RANKS:-1}}
 readonly CHIMES_BACKEND=${M5_CHIMES_BACKEND:-cpu}
+CELL_SCHEDULER=${M5_CHIMES_CELL_SCHEDULER:-}
+if [[ -z "$CELL_SCHEDULER" ]]; then
+  if [[ "$CHIMES_BACKEND" == hybrid ]]; then CELL_SCHEDULER=level_queue; else CELL_SCHEDULER=cohort; fi
+fi
+readonly CELL_SCHEDULER
 readonly TRANSPORT_BACKEND=${M5_TRANSPORT_BACKEND:-auto}
 readonly MATERIAL_BACKEND=${M5_MATERIAL_BACKEND:-auto}
+case "$CELL_SCHEDULER" in
+  cohort|level_queue) ;;
+  *) echo 'M5_CHIMES_CELL_SCHEDULER must be cohort or level_queue' >&2; exit 2 ;;
+esac
 test -n "${SLURM_JOB_ID:-}" || { echo 'This runner must be submitted through Slurm' >&2; exit 2; }
 if [[ "$CHIMES_BACKEND" == hybrid ]]; then
   case "${SLURM_JOB_PARTITION:-}" in
@@ -303,8 +312,9 @@ unset SNRT_DRIVER_TEST_SEED_SOURCE SNRT_RT_ENABLE SNRT_RT_TX_TEST_FAIL_STAGE SNR
 unset SNRT_CHIMES_CVODE_BACKEND SNRT_CHIMES_RHS_BACKEND SNRT_CHIMES_CELL_SCHEDULER
 unset SNRT_CHIMES_GPU_BROKERS SNRT_CHIMES_GPU_WORKER SNRT_CHIMES_GPU_BATCH_CELLS
 unset SNRT_CHIMES_GPU_RESULT SNRT_CHIMES_GPU_COOLING
+export SNRT_CHIMES_CELL_SCHEDULER="$CELL_SCHEDULER"
 if [[ "$CHIMES_BACKEND" == hybrid ]]; then
-  export SNRT_CHIMES_CELL_SCHEDULER=level_queue SNRT_CHIMES_GPU_WORKER=any
+  export SNRT_CHIMES_GPU_WORKER=any
   export SNRT_CHIMES_GPU_BROKERS=1 SNRT_CHIMES_GPU_BATCH_CELLS=64
   export SNRT_CHIMES_GPU_RESULT=compact SNRT_CHIMES_GPU_COOLING=1
 fi
@@ -322,6 +332,7 @@ printf 'MPI=%s OMP=%s; real_BH_accretion_sink; stellar_SED=%s; AGN/dust contract
   | tee -a "$WORK/launch.txt"
 printf 'TRANSPORT_BACKEND=%s MATERIAL_BACKEND=%s\n' "$TRANSPORT_BACKEND" "$MATERIAL_BACKEND" \
   | tee -a "$WORK/launch.txt"
+printf 'CHIMES_cell_scheduler=%s\n' "$CELL_SCHEDULER" | tee -a "$WORK/launch.txt"
 printf 'AMR_INTERFACE_CHECK=%s\n' "$AMR_INTERFACE" | tee -a "$WORK/launch.txt"
 # Explicit OMP_PLACES is needed: generic "cores" can be reconstructed over
 # the whole shared allocation during MPI/OMP initialization even when srun
@@ -399,7 +410,29 @@ grep -Fq 'CHIMES built in double precision.' run.log
 grep -Fq 'SNRT M_N live AMR transport' run.log
 grep -Eq 'SNRT_MN_COMMIT level/order/substeps=.*[[:space:]]5[[:space:]]' run.log
 awk '$1=="SNRT_MN_LEDGER" && $3+0>0 && $4+0>0 && $9+0>0 {found=1} END {exit !found}' run.log
-grep -Eq 'SNRT PERF DARK' run.log
+if [[ "$CELL_SCHEDULER" == level_queue ]]; then
+  queue_gpu_required=0
+  if [[ "$CHIMES_BACKEND" == hybrid ]]; then queue_gpu_required=1; fi
+  # Level-queue continuations deliberately suppress per-cell dark timers:
+  # fiber suspension makes those thread-local timings ambiguous. Require the
+  # authoritative M5 material queue report instead, including full cell
+  # completion; hybrid mode must also show a GPU broker.
+  awk -v need_gpu="$queue_gpu_required" '
+    $1=="CHIMES_LEVEL_QUEUE" {
+      cells=0; completed=0; brokers=0
+      for(i=2;i<=NF;i++) {
+        split($i,field,"=")
+        if(field[1]=="cells") cells=field[2]+0
+        else if(field[1]=="completed") completed=field[2]+0
+        else if(field[1]=="gpu_brokers") brokers=field[2]+0
+      }
+      if(cells>0 && completed==cells && (!need_gpu || brokers>0)) found=1
+    }
+    END {exit !found}
+  ' run.log
+else
+  grep -Eq 'SNRT PERF DARK' run.log
+fi
 if [[ "$PROFILE" == effective_population ]]; then
   grep -Eq 'Stellar population model id:[[:space:]]*2' run.log
   grep -Fq 'SNRT stellar population binding: common_imf_mixed_evolution' run.log
