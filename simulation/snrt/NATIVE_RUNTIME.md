@@ -2584,7 +2584,7 @@ It removes the incompatible hard BPASS SED and writes the model restrictions
 into the run README. Native evidence is recorded in
 `provenance/dust_remaining_implementation_2026-09-09.md`.
 
-### Relative-motion spatial operator (runtime connection still pending)
+### Relative-motion spatial operator (standalone kernel and later live connection)
 
 `dust_multifluid` supplies a conservative gas + pressureless-grain spatial
 operator and its transactional transport/implicit-drag composition. Total
@@ -2594,13 +2594,22 @@ all component kinetic energy. CR advection and pressure work, gas-owned
 chemical tracers and grain-owned energy/population carriers are supported.
 Grain thermal/excitation energies remain outside mixture hydrodynamic E.
 
-The first-order Rusanov face and periodic driver are checked using seven
+The first-order Rusanov face and periodic driver were checked using seven
 components and 128 PAH carriers, including opposite flows with zero net mass
-flux. Stiff local drag stability does not establish asymptotic-preserving
-spatial accuracy or multi-stream dust physics. This is not a selectable
-RAMSES relative-motion model yet: it must replace the co-advection face
-interpretation together with pressure/CFL/source/chemistry/radiation impulse
-and AMR/MPI/restart wiring. No dormant namelist switch has been added.
+flux. Those tests establish the standalone kernel only. Stiff local drag
+stability does not establish asymptotic-preserving spatial accuracy or
+multi-stream dust physics.
+
+The subsequent live connection is implemented and exercised in the bounded
+kind-7 comparison: the RAMSES driver carries per-phase momenta through
+transport, absorption impulse, material/source updates, AMR synchronization,
+HDF5 restart and MPI/OpenMP evolution. Its measured scope and restrictions
+are recorded in
+`provenance/kind7_dust_process_implementation_2026-09-11.md`. It is a
+noncosmological CPU/OpenMP comparison with explicit collision cross section,
+version-4 gas-exchange contract, no sinks/AGN, and first-order operator
+splitting; it does not establish cosmological/subcycling convergence or
+multi-stream grain physics.
 
 The primary transport now has an optional `dust_moment(leaf,group,3)`
 output: the first angular moment of accepted dust photon **number**, after
@@ -2616,9 +2625,12 @@ absorption shares and the number/energy/momentum code-unit scales. It uses
 physical c, not reduced c. Hydro E receives mechanical work only; the
 remaining energy is returned for the separate solid/PAH heat receiver.
 This absorption-only adapter does not implement scattering/IR recoil or
-photoelectron energy partition. Its C/Fortran receiver and actual hybrid
-GPU/CPU paths are tested, but the hydro driver does **not yet request or
-apply** this optional moment. This is not live relative-motion admission.
+photoelectron energy partition. Its optional aggregate moment interface is
+distinct from the later live relative-motion path, which accumulates
+per-phase spectral energy and directional moments through the CHIMES receiver
+and applies the resulting phase impulse. The live path's scope and measured
+limits are documented in
+`provenance/kind7_dust_process_implementation_2026-09-11.md`.
 
 ### Optional PAH hydrogen-state comparison
 
