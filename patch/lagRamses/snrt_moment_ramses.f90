@@ -46,7 +46,7 @@ module snrt_moment_ramses
        chimes_live_cold_stage,chimes_live_grain_scatter,chimes_live_fe_uv_stage
   use snrt_chimes, only: chimes_ns,chimes_boltzmann,chimes_group_binding,chimes_last_split_wall
 #endif
-  use iso_c_binding, only: c_int,c_double,c_funptr,c_null_funptr,c_funloc
+  use iso_c_binding, only: c_int,c_double,c_ptr,c_funptr,c_null_funptr,c_funloc,c_loc,c_f_pointer
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use omp_lib, only: omp_get_wtime
 #ifndef WITHOUTMPI
@@ -68,6 +68,19 @@ module snrt_moment_ramses
        integer(c_int)::ierr
      end function
   end interface
+#if defined(DUST_LIVE) && defined(SNRT_CHIMES_CUDA)
+  interface
+     integer(c_int) function mn_chimes_level_requested() bind(C,name='snrt_chimes_rhs_level_requested')
+       import c_int
+     end function
+     integer(c_int) function mn_chimes_level_run(n,callback,context) bind(C,name='snrt_chimes_rhs_level_run')
+       import c_int,c_funptr,c_ptr
+       integer(c_int),value::n
+       type(c_funptr),value::callback
+       type(c_ptr),value::context
+     end function
+  end interface
+#endif
 #ifdef DUST_LIVE
   type :: material_stage_packet
      ! Pre-CHIMES work is kept in the packet while a tile is assembled.
@@ -89,6 +102,12 @@ module snrt_moment_ramses
      real(dp),allocatable :: phase_mass(:,:),phase_old(:,:,:),phase_next(:,:,:),phase_work(:,:)
      real(dp),allocatable :: electrons(:),hydrogen(:),molecular_h2(:),carbon(:),carbon_ion(:)
      real(dp),allocatable :: gas_momentum(:),irproj(:,:)
+  end type
+#endif
+#if defined(DUST_LIVE) && defined(SNRT_CHIMES_CUDA)
+  type,bind(C) :: material_tile_context
+     integer(c_int) :: first,count
+     real(c_double) :: cell_dt
   end type
 #endif
 contains
@@ -114,6 +133,13 @@ contains
     ! GPU batch policy; this is only the caller-owned write-set bound.
     integer,parameter :: material_tile_width=256
     integer,allocatable :: accepted(:),owners(:)
+#ifdef DUST_LIVE
+    type(material_stage_packet),allocatable :: material_packet_work(:)
+    integer(c_int),allocatable,target :: material_codes_work(:)
+#ifdef SNRT_CHIMES_CUDA
+    type(material_tile_context),target :: material_context
+#endif
+#endif
     logical :: atomic_on,band_on,chimes_on
     character(len=16) :: perf_env,perf_all_env
     integer :: perf_status,perf_all_status
@@ -1247,42 +1273,72 @@ contains
       integer,intent(in) :: first,last
       real(dp),intent(in) :: cell_dt
       integer,intent(out) :: status
-      type(material_stage_packet),allocatable :: packet(:)
-      integer,allocatable :: prep_codes(:)
       integer :: nc,j,index,status_cell,stage_first,stage_last,offset,stage_n
       real(dp) :: perf_start,prep_s,perf_chimes(2)
 #ifdef SNRT_CHIMES
       logical :: perf_cold
       real(dp),allocatable :: perf_chimes_cell(:,:)
 #endif
+#ifdef SNRT_CHIMES_CUDA
+      logical :: use_level_queue
+      integer(c_int) :: dispatch_status
+#endif
 
       status=1;nc=last-first+1
       if(nc<1.or.nc>2*material_tile_width)return
       perf_start=omp_get_wtime()
+#ifdef SNRT_CHIMES_CUDA
+      use_level_queue=mn_chimes_level_requested()/=0
+#endif
 #ifdef SNRT_CHIMES
       perf_cold=perf_diagnostic.and.(perf_all.or.myid==1).and.snrt_chimes_cold_enabled()
+#ifdef SNRT_CHIMES_CUDA
+      ! Per-cell CHIMES timers are thread-private, but a broker can suspend
+      ! several cell continuations on one OpenMP worker. Do not attribute the
+      ! last resumed continuation's timing to a different staged cell.
+      if(use_level_queue)perf_cold=.false.
+#endif
       if(perf_cold)then
          allocate(perf_chimes_cell(2,nc));perf_chimes_cell=0
       endif
 #endif
-      allocate(packet(nc),prep_codes(nc))
+      allocate(material_packet_work(nc),material_codes_work(nc))
+      material_codes_work=0_c_int
+#ifdef SNRT_CHIMES_CUDA
+      if(use_level_queue)then
+         material_context%first=int(first,c_int)
+         material_context%count=int(nc,c_int)
+         material_context%cell_dt=cell_dt
+         dispatch_status=mn_chimes_level_run(int(nc,c_int),c_funloc(material_level_cell),c_loc(material_context))
+         if(dispatch_status/=0)then
+            status=int(dispatch_status)
+            deallocate(material_packet_work,material_codes_work)
+            return
+         endif
+      else
+#endif
 !$omp parallel do schedule(dynamic,1) private(index,status_cell)
       do j=1,nc
          index=first+j-1
 #ifdef SNRT_CHIMES
          if(perf_cold)chimes_last_split_wall=0
 #endif
-         call material_cell(index,cell_dt,status_cell,packet(j),.true.)
-         prep_codes(j)=status_cell
+         call material_cell(index,cell_dt,status_cell,material_packet_work(j),.true.)
+         material_codes_work(j)=int(status_cell,c_int)
 #ifdef SNRT_CHIMES
          if(perf_cold.and.status_cell==0)perf_chimes_cell(:,j)=chimes_last_split_wall
 #endif
       enddo
 !$omp end parallel do
+#ifdef SNRT_CHIMES_CUDA
+      endif
+#endif
       do j=1,nc
-         if(prep_codes(j)==0)cycle
-         status=prep_codes(j)
+         if(material_codes_work(j)==0_c_int.and.material_packet_work(j)%valid)cycle
+         status=int(material_codes_work(j))
+         if(status==0)status=1
          write(*,*)'M_N material preparation rejected cell/status=',mesh%cells(first+j-1),status
+         deallocate(material_packet_work,material_codes_work)
          return
       enddo
       prep_s=omp_get_wtime()-perf_start
@@ -1307,14 +1363,33 @@ contains
                  ' over_5_s=',count(perf_chimes_cell(1,offset+1:offset+stage_n)>5d0)
          endif
 #endif
-         call material_tile_commit(stage_first,stage_last,cell_dt,packet(offset+1:offset+stage_n), &
+         call material_tile_commit(stage_first,stage_last,cell_dt,material_packet_work(offset+1:offset+stage_n), &
               prep_s,perf_chimes,status)
-         if(status/=0)return
+         if(status/=0)then
+            deallocate(material_packet_work,material_codes_work)
+            return
+         endif
          ! Charge the shared preparation time once, to keep tile sums valid.
          prep_s=0
       enddo
+      deallocate(material_packet_work,material_codes_work)
       status=0
     end subroutine
+
+#ifdef SNRT_CHIMES_CUDA
+    subroutine material_level_cell(cell_index,c_context) bind(C)
+      integer(c_int),value :: cell_index
+      type(c_ptr),value :: c_context
+      type(material_tile_context),pointer :: work
+      integer :: j,status_cell
+      call c_f_pointer(c_context,work)
+      j=int(cell_index)+1
+      if(j<1.or.j>int(work%count))return
+      call material_cell(int(work%first)+int(cell_index),real(work%cell_dt,dp),status_cell, &
+           material_packet_work(j),.true.)
+      material_codes_work(j)=int(status_cell,c_int)
+    end subroutine
+#endif
 
     subroutine material_tile_commit(first,last,cell_dt,packet,prep_s,perf_chimes,status)
       integer,intent(in) :: first,last
