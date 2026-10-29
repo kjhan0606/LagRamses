@@ -1389,6 +1389,7 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
         # order. Compare cell state at the SAME physical coordinate, never
         # file row number. This does not relax the numerical tolerance.
         grid_permutations = {}
+        grid_coordinates = {}
         for level in a["amr"]:
             xyz_a = np.column_stack([a[f"amr/{level}/xg_{i}"][:] for i in (1, 2, 3)])
             xyz_b = np.column_stack([b[f"amr/{level}/xg_{i}"][:] for i in (1, 2, 3)])
@@ -1398,6 +1399,7 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
             assert set(rows_b) == {tuple(row) for row in xyz_a}, level
             permutation = np.array([rows_b[tuple(row)] for row in xyz_a])
             grid_permutations[level] = permutation
+            grid_coordinates[level] = xyz_a
             for key in ("son_flag", "cpu_map"):
                 x = np.asarray(a[f"amr/{level}/{key}"]).reshape(-1, 8)
                 y = np.asarray(b[f"amr/{level}/{key}"]).reshape(-1, 8)[permutation]
@@ -1456,11 +1458,29 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
                 outside = delta > limit
                 outside_count = int(np.count_nonzero(outside))
                 ratio = delta / limit
+                max_index = (
+                    tuple(int(i) for i in np.unravel_index(int(np.argmax(ratio)), ratio.shape))
+                    if ratio.size else ()
+                )
+                max_location: dict[str, object] = {"array_index": list(max_index)}
+                if level in grid_permutations and len(max_index) == 3:
+                    grid_row, cell_in_grid, component = max_index
+                    max_location.update({
+                        "level": level,
+                        "left_grid_row": grid_row,
+                        "right_grid_row": int(grid_permutations[level][grid_row]),
+                        "cell_in_grid": cell_in_grid,
+                        "component_in_dataset": component,
+                        "grid_center_xyz": [
+                            float(value) for value in grid_coordinates[level][grid_row]
+                        ],
+                    })
                 summary = {
                     "name": name,
                     "max_absolute": float(np.max(delta)) if delta.size else 0.0,
                     "max_tolerance_ratio": float(np.max(ratio)) if ratio.size else 0.0,
                     "elements_outside_tolerance": outside_count,
+                    "max_tolerance_location": max_location,
                 }
                 differences.append(summary)
                 if outside_count:
