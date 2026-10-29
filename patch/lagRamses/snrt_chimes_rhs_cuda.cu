@@ -655,9 +655,21 @@ bool serve_request(Request &q,int team){
    }
    const bool required=std::any_of(batch.begin(),batch.end(),[](Request *r){return r->required;});
    if(batch.size()<4 && !required){
-     // A short tail is cheaper and more predictable on CPU. Complete every
-     // queued caller in this tail together; no stream launch is worthwhile.
-     chimes_gpu_diag_once(GPU_DIAG_BATCH_TAIL,"batch-tail",batch.front()->d);
+     // Flush a short tail to an idle GPU. A full four-thread cohort is a
+     // throughput preference, not a correctness or device-admission rule;
+     // after restart, uneven CVODE trajectories can otherwise strand every
+     // eligible RHS below this threshold for an entire material stage.
+     chimes_gpu_diag_once(GPU_DIAG_BATCH_TAIL,"batch-tail-candidate",batch.front()->d);
+     const int tail_slot=cuda_acquire_stream();
+     if(tail_slot>=0){
+       lock.unlock();
+       execute(batch,tail_slot);
+       lock.lock();
+       for(auto *r:batch)r->done=true;
+       changed.notify_all();
+       return q.ok!=0;
+     }
+     chimes_gpu_diag_once(GPU_DIAG_STREAM_BUSY,"stream-unavailable",batch.front()->d);
      for(auto *r:batch)r->done=true;
      while(!pending.empty() && batch.size()<4){
        Request *next=pending.front();pending.erase(pending.begin());
