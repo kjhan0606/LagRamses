@@ -1353,6 +1353,7 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
     profile's predeclared rtol=1e-12/atol=1e-25 for floating state; integer,
     source identity and contract attributes must match exactly.
     """
+    rtol, atol = 1e-12, 1e-25
     scopes = ("hydro/", "snrt/", "gravity/", "particles/", "sinks/")
     for path in (left, right, checkpoint):
         assert path.is_file() and (path.parent / "COMPLETE").is_file(), path
@@ -1433,6 +1434,7 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
         assert names == objects(b, h5py.Dataset) and names
         assert all(any(name.startswith(scope) for name in names) for scope in scopes)
         differences = []
+        tolerance_violations = []
         for name in names:
             x, y = np.asarray(a[name]), np.asarray(b[name])
             assert x.shape == y.shape and x.dtype == y.dtype, name
@@ -1448,8 +1450,21 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
             if x.dtype.kind in "fiuc":
                 assert np.all(np.isfinite(x)) and np.all(np.isfinite(y)), name
             if not np.array_equal(x, y):
-                assert x.dtype.kind == "f" and np.allclose(x, y, rtol=1e-12, atol=1e-25), name
-                differences.append({"name": name, "max_absolute": float(np.max(np.abs(x-y)))})
+                assert x.dtype.kind == "f", name
+                delta = np.abs(x-y)
+                limit = atol + rtol*np.abs(y)
+                outside = delta > limit
+                outside_count = int(np.count_nonzero(outside))
+                ratio = delta / limit
+                summary = {
+                    "name": name,
+                    "max_absolute": float(np.max(delta)) if delta.size else 0.0,
+                    "max_tolerance_ratio": float(np.max(ratio)) if ratio.size else 0.0,
+                    "elements_outside_tolerance": outside_count,
+                }
+                differences.append(summary)
+                if outside_count:
+                    tolerance_violations.append(summary)
         groups = objects(a, h5py.Group)
         assert groups == objects(b, h5py.Group)
         attribute_count = 0
@@ -1463,11 +1478,30 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
             x, y = a["header"].attrs[key], b["header"].attrs[key]
             assert np.allclose(x, y, rtol=1e-12, atol=0), key
             clocks[key] = bool(np.array_equal(x, y))
-        return {"status": "M5_COUPLED_RESTART_PASS", "moment_order": 5,
+        status = ("M5_COUPLED_RESTART_FAIL_NUMERIC_TOLERANCE"
+                  if tolerance_violations else "M5_COUPLED_RESTART_PASS")
+        violations_by_scope: dict[str, dict[str, int | float]] = {}
+        for violation in tolerance_violations:
+            scope = str(violation["name"]).split("/", 1)[0]
+            summary = violations_by_scope.setdefault(
+                scope, {"datasets": 0, "elements_outside_tolerance": 0,
+                        "max_tolerance_ratio": 0.0}
+            )
+            summary["datasets"] += 1
+            summary["elements_outside_tolerance"] += int(
+                violation["elements_outside_tolerance"]
+            )
+            summary["max_tolerance_ratio"] = max(
+                float(summary["max_tolerance_ratio"]),
+                float(violation["max_tolerance_ratio"]),
+            )
+        return {"status": status, "moment_order": 5,
                 "compared_datasets": len(names),
                 "bitwise_datasets": len(names)-len(differences)-int(np.any(relabelled)),
                 "floating_differences": differences, "exact_contract_attributes": attribute_count,
-                "clock_bitwise": clocks, "rtol": 1e-12, "atol": 1e-25,
+                "tolerance_violations": tolerance_violations,
+                "tolerance_violations_by_scope": violations_by_scope,
+                "clock_bitwise": clocks, "rtol": rtol, "atol": atol,
                 "grid_identity": "exact_level_and_xyz_with_exact_son_and_owner",
                 "reordered_grids": {level: int(np.count_nonzero(p != np.arange(len(p))))
                                     for level, p in grid_permutations.items()},
@@ -1489,7 +1523,12 @@ def main() -> None:
     if args.compare_m5_coupled is not None:
         if args.source_checkpoint is None or args.fortran_runtime:
             parser.error("coupled comparison needs --source-checkpoint and cannot run synthetic fixtures")
-        print(json.dumps(compare_m5_coupled(*args.compare_m5_coupled, args.source_checkpoint), indent=2))
+        result = compare_m5_coupled(
+            *args.compare_m5_coupled, args.source_checkpoint
+        )
+        print(json.dumps(result, indent=2), flush=True)
+        if result["status"] != "M5_COUPLED_RESTART_PASS":
+            raise SystemExit(1)
         return
     if args.source_checkpoint is not None:
         parser.error("--source-checkpoint needs --compare-m5-coupled")

@@ -462,19 +462,19 @@ shopt -s nullglob
 raw_outputs=(output_[0-9][0-9][0-9][0-9][0-9])
 if [[ "$VERIFY_RESTART" == 1 ]]; then
   test "${raw_outputs[*]}" = 'output_00001 output_00002'
-  python3 -B "$ROOT/simulation/snrt/tests/p0_hdf5_stellar_restart.py" \
-    --compare-m5-coupled "$WORK/continuous/output_00002/data_00002.h5" \
-      "$WORK/resumed/output_00002/data_00002.h5" \
-    --source-checkpoint "$WORK/continuous/output_00001/data_00001.h5" \
-    > "$WORK/restart-comparison.json"
-  # Hash/size collection belongs on the compute node. Keep raw data until
-  # the driver has inspected the result, including ordinary-source debit.
+  # Record exact raw inputs before comparison: a numerical failure must still
+  # leave enough provenance to identify and reproduce the three compared dumps.
   sha256sum "$WORK/continuous/output_00001/data_00001.h5" \
     "$WORK/continuous/output_00002/data_00002.h5" \
     "$WORK/resumed/output_00002/data_00002.h5" > "$WORK/raw.sha256"
   stat -c '%s %n' "$WORK/continuous/output_00001/data_00001.h5" \
     "$WORK/continuous/output_00002/data_00002.h5" \
     "$WORK/resumed/output_00002/data_00002.h5" > "$WORK/raw-bytes.txt"
+  python3 -B "$ROOT/simulation/snrt/tests/p0_hdf5_stellar_restart.py" \
+    --compare-m5-coupled "$WORK/continuous/output_00002/data_00002.h5" \
+      "$WORK/resumed/output_00002/data_00002.h5" \
+    --source-checkpoint "$WORK/continuous/output_00001/data_00001.h5" \
+    > "$WORK/restart-comparison.json"
   printf 'M5_COUPLED_RESTART_EXECUTION_PASS profile=effective_population CHIMES_backend=%s raw_dumps_retained=3 pending_driver_evaluation=true\n' "$CHIMES_BACKEND" \
     | tee "$WORK/result.txt"
   exit 0
