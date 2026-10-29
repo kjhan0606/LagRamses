@@ -651,6 +651,16 @@ bool serve_request(Request &q,int team){
    changed.notify_all();
  }
 }
+
+bool zero_incident_photon_field(const globalVariables *c,const gasVariables *g){
+ if(c->N_spectra==0)return true;
+ if(c->N_spectra<0 || c->N_spectra>9 || !g->isotropic_photon_density)return false;
+ for(int b=0;b<c->N_spectra;b++){
+   const double photons=g->isotropic_photon_density[b];
+   if(!std::isfinite(photons) || photons!=0.)return false;
+ }
+ return true;
+}
 }
 extern "C" int snrt_chimes_rhs_configure_mode(int use_cuda){
  if(use_cuda!=0 && use_cuda!=1)return 1;
@@ -739,7 +749,10 @@ extern "C" int snrt_chimes_dark_rhs_gpu(UserData *d){
  auto decline=[&](){if(cell_backend==1){retry_cell=true;return -1;}cell_backend=0;fallback++;return 0;};
  auto *c=d->myGlobalVars;auto *g=d->myGasVars;
  int team=omp_in_parallel()?omp_get_num_threads():1;
- if(c->N_spectra!=0 || c->totalNumberOfSpecies!=ns || g->ThermEvolOn!=1 ||
+ // Keep the full CVODE state dimension for hot/atomic transition solves, but
+ // allow the dark device RHS when every retained spectrum is exactly empty.
+ // Nonzero radiation still uses the host photo-reaction path.
+ if(!zero_incident_photon_field(c,g) || c->totalNumberOfSpecies!=ns || g->ThermEvolOn!=1 ||
     (!tile_run && team<4) || (d->mol_flag_index!=0 && d->mol_flag_index!=1))return decline();
  for(int s=0;s<ns;s++)if(c->speciesIndices[s]!=s)return decline();
  if(d->case_AB_index[0]<0||d->case_AB_index[0]>1||d->case_AB_index[1]<0||d->case_AB_index[1]>1)return decline();

@@ -372,13 +372,13 @@ if [[ "$VERIFY_RESTART" == 1 ]]; then
     "$WORK/continuous/effective.nml" "$WORK/resumed/effective.nml" | tee -a "$WORK/launch.txt"
   run_m5_case "$WORK/continuous"
   grep -q 'Run completed' "$WORK/continuous/run.log"
-  if [[ "$CHIMES_BACKEND" == hybrid ]]; then check_hybrid_process_reports "$WORK/continuous/run.log" 1; fi
+  if [[ "$CHIMES_BACKEND" == hybrid ]]; then check_hybrid_process_reports "$WORK/continuous/run.log" "$MPI_RANKS"; fi
   test -f "$WORK/continuous/output_00001/COMPLETE"
   test -f "$WORK/continuous/output_00002/COMPLETE"
   ln -s "$WORK/continuous/output_00001" "$WORK/resumed/output_00001"
   run_m5_case "$WORK/resumed"
   grep -q 'Run completed' "$WORK/resumed/run.log"
-  if [[ "$CHIMES_BACKEND" == hybrid ]]; then check_hybrid_process_reports "$WORK/resumed/run.log" 0; fi
+  if [[ "$CHIMES_BACKEND" == hybrid ]]; then check_hybrid_process_reports "$WORK/resumed/run.log" "$MPI_RANKS"; fi
   grep -Fq 'SNRT_HDF5_RADIATION_RESTORE_PASS' "$WORK/resumed/run.log"
   if grep -Eiq 'ERROR:|Aborting|forrtl:|failed to converge|nonfinite|NaN_CHK.*=[[:space:]]*[1-9]|M_N.*(rejected|failed)|CHIMES cold-stage rejection|SNRT_CHIMES_COLD_RECEIVER_REJECT|SNRT DUST_LIVE pre-commit validation failed' "$WORK/resumed/run.log"; then
     echo 'FAIL: restarted runtime rejected; all evidence retained' >&2; exit 3
