@@ -487,6 +487,57 @@ subroutine cosmic_ray_hdf5_identity(grp,writing)
   endif
 end subroutine cosmic_ray_hdf5_identity
 
+subroutine delayed_cooling_hdf5_identity(grp,writing)
+  use amr_commons, only: myid,dp
+  use amr_parameters, only: delayed_cooling,delayed_cooling_model,t_diss
+  use delayed_cooling_runtime, only: delayed_cooling_model_id, &
+       delayed_cooling_legacy_accumulating
+  use ramses_hdf5_io
+  implicit none
+  integer(HID_T),intent(in)::grp
+  logical,intent(in)::writing
+  real(dp)::values(3),saved(3)
+  integer::status,bad,all_bad,info,model
+  logical::exists
+  include 'mpif.h'
+
+  model=delayed_cooling_model_id(delayed_cooling_model)
+  values=0d0
+  if(delayed_cooling)then
+     values(1)=1d0
+     values(2)=real(model,dp)
+     values(3)=t_diss
+  endif
+  bad=0
+  if(writing)then
+     call hdf5_write_attr_1d_dp(grp,'delayed_cooling_identity',values,size(values))
+  else
+     exists=.false.
+     call h5aexists_f(grp,'delayed_cooling_identity',exists,status)
+     if(status/=0)bad=1
+     if(exists.and.status==0)then
+        call hdf5_read_attr_1d_dp_checked(grp,'delayed_cooling_identity',saved,size(saved),status)
+        if(status/=0)then
+           bad=1
+        else if(any(saved/=values))then
+           bad=1
+        endif
+     else if(delayed_cooling.and.model/=delayed_cooling_legacy_accumulating)then
+        ! Historical checkpoints used the mass-proxy/exponential semantics.
+        ! They can only be resumed through that explicitly selected model.
+        bad=1
+     endif
+     call MPI_ALLREDUCE(bad,all_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+     if(all_bad/=0.or.info/=0)then
+        if(myid==1)write(*,*)'ERROR: delayed-cooling model/t_diss restart identity mismatch; ', &
+             'old checkpoints require delayed_cooling_model=legacy_accumulating'
+        call MPI_ABORT(MPI_COMM_WORLD,12,info)
+     else if(.not.exists.and.delayed_cooling.and.myid==1)then
+        write(*,*)'WARNING: accepting legacy HDF5 checkpoint without delayed-cooling identity'
+     endif
+  endif
+end subroutine delayed_cooling_hdf5_identity
+
 subroutine backup_header_hdf5()
   use amr_commons
   use hydro_commons
@@ -505,6 +556,7 @@ subroutine backup_header_hdf5()
   call hdf5_create_group('/header', grp_id)
   call cosmic_ray_hdf5_identity(grp_id,.true.)
   call dust_mass_hdf5_identity(grp_id,.true.)
+  call delayed_cooling_hdf5_identity(grp_id,.true.)
 
   ! Grid parameters
   call hdf5_write_attr_int(grp_id, 'ncpu', ncpu)

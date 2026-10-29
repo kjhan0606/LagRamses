@@ -1685,6 +1685,13 @@ def generate_run(ui=None, write_text=save_text):
             ('eps_star', 0.02), ('T2_star', 1.0e4), ('T2thres_SF', 1.0e4),
             ('yieldtablefilename', 'CHANGE_ME/yield_table.asc'),
         ])
+        if values.get('delayed_cooling'):
+            record(values, physics_extra, 'PHYSICS_PARAMS', [
+                ('delayed_cooling', True),
+                ('delayed_cooling_model', values.get('delayed_cooling_model',
+                                                       default_of('delayed_cooling_model'))),
+                ('t_diss', values.get('t_diss', default_of('t_diss'))),
+            ])
         nml_text = merge_into_group(nml_text, 'PHYSICS_PARAMS',
                                      physics_extra['PHYSICS_PARAMS'], values)
         nml_text = merge_into_group(nml_text, 'STELLAR_ENRICHMENT_PARAMS',

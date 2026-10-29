@@ -405,6 +405,9 @@ subroutine feedbk(ind_grid,ind_part,ind_grid_part,mej,nbsn1,nbsn2,zej,ceej,ESN1,
   use amr_commons
   use pm_commons
   use hydro_commons
+  use hydro_parameters, only: smallr
+  use delayed_cooling_runtime, only: delayed_cooling_model_id, &
+       delayed_cooling_first_event_fixed, delayed_cooling_fixed_after_source
   use random
 #include "amr_index.h"
   implicit none
@@ -423,7 +426,7 @@ subroutine feedbk(ind_grid,ind_part,ind_grid_part,mej,nbsn1,nbsn2,zej,ceej,ESN1,
   real(dp)::SN_BOOST,dx_min
   real(dp)::ESN1,ESN2,vol_loc
   real(dp)::ERAD,RAD_BOOST,tauIR,eta_sig
-  real(dp)::sigma_d,delta_x,tau_factor,rad_factor
+  real(dp)::sigma_d,delta_x,tau_factor,rad_factor,rho_before
   real(dp)::dx,dx_loc,scale,current_time
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   logical::error
@@ -590,11 +593,21 @@ subroutine feedbk(ind_grid,ind_part,ind_grid_part,mej,nbsn1,nbsn2,zej,ceej,ESN1,
              &          +vp(ind_part(j),2)**2 &
              &          +vp(ind_part(j),3)**2)
         ! Update hydro variable in NGP cell                                                                                               
-        unew(indp(j),1)=unew(indp(j),1)+mloss(j)
+        rho_before=unew(indp(j),1)
+        unew(indp(j),1)=rho_before+mloss(j)
         unew(indp(j),2)=unew(indp(j),2)+mloss(j)*vp(ind_part(j),1)
         unew(indp(j),3)=unew(indp(j),3)+mloss(j)*vp(ind_part(j),2)
         unew(indp(j),4)=unew(indp(j),4)+mloss(j)*vp(ind_part(j),3)
         unew(indp(j),5)=unew(indp(j),5)+mloss(j)*ekinetic(j)+nbsn1(j)*ESN1/vol_loc+nbsn2(j)*ESN2/vol_loc
+        if(delayed_cooling)then
+           if(delayed_cooling_model_id(delayed_cooling_model)==delayed_cooling_first_event_fixed)then
+              unew(indp(j),idelay)=delayed_cooling_fixed_after_source( &
+                   unew(indp(j),idelay),rho_before,unew(indp(j),1), &
+                   nbsn2(j)>0d0,t_diss,smallr)
+           else
+              unew(indp(j),idelay)=unew(indp(j),idelay)+mloss(j)
+           endif
+        endif
      endif
   end do
   ! Add metals
@@ -613,14 +626,6 @@ subroutine feedbk(ind_grid,ind_part,ind_grid_part,mej,nbsn1,nbsn2,zej,ceej,ESN1,
      enddo
   endif
 
-  ! Add delayed cooling switch variable                                                                                                   
-  if(delayed_cooling)then
-     do j=1,np
-        if(ok(j))then
-           unew(indp(j),idelay)=unew(indp(j),idelay)+mloss(j)
-        endif
-     end do
-  endif
 #endif
   
 end subroutine feedbk

@@ -359,6 +359,7 @@ module amr_parameters
   logical ::metal=.false.
   logical ::haardt_madau=.false.
   logical ::delayed_cooling=.false.
+  character(len=32)::delayed_cooling_model='first_event_fixed'
   logical ::smbh=.false.
   logical ::agn=.false.
   logical::convert_birth_times=.false. ! Convert stellar birthtimes: conformal-> proper

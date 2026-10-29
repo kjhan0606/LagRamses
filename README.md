@@ -404,6 +404,19 @@ This repository also hosts the HR5 high-redshift SMBH, dual-AGN, and JWST
 little-red-dot simulation programme. Its active scientific scope is recorded
 in [`docs/lrd_zoom_simulation_design.md`](./docs/lrd_zoom_simulation_design.md).
 
+### Delayed-cooling feedback
+
+`PHYSICS_PARAMS` supports `delayed_cooling_model='first_event_fixed'` (the
+default) and `legacy_accumulating`, plus `t_diss` in Myr. The fixed model starts
+one cooling-suppression timer at the first SNII/PISN event; later feedback does
+not extend its deadline. The timer is stored in the existing `idelay` scalar
+as density times remaining Myr, so no additional per-cell array is allocated.
+Cell mixing therefore follows the conservative, mass-weighted scalar
+approximation, and timer decrement is operator-split with the cooling step.
+HDF5 restart headers record the selected model and duration. Checkpoints made
+before that identity was added can be resumed only with the explicit
+`legacy_accumulating` model.
+
 - `simulation/` contains reproducible configurations, source ledgers,
   analysis tools, test fixtures, and Slurm submission scripts.
 - `manifests/` records immutable locations and SHA256 hashes for large assets;

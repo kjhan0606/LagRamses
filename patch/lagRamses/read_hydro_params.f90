@@ -7,6 +7,7 @@ subroutine read_hydro_params(nml_ok)
   use hydro_commons
   use cosmic_ray_physics
   use dust_mass_physics
+  use delayed_cooling_runtime, only: delayed_cooling_model_id
 #ifdef DUST_DYNAMICS
   use snrt_dust_contract, only: snrt_dust_contract_loaded,snrt_dust_contract_load_from_environment, &
        snrt_dust_contract_version,snrt_dust_contract_exchange_enabled
@@ -93,6 +94,7 @@ subroutine read_hydro_params(nml_ok)
        & ,m_star,t_star,n_star,T2_star,g_star,del_star,eps_star,jeans_ncells &
        & ,rbubble,f_ek,ndebris,f_w,mass_gmc,kappa_IR &
        & ,J21,a_spec,z_ave,z_reion,ind_rsink,delayed_cooling,T2max &
+       & ,delayed_cooling_model &
        & ,self_shielding,smbh,agn,yieldtablefilename &
        & ,units_density,units_time,units_length,neq_chem,ir_feedback,ir_eff,t_diss,t_sne &
        & ,T2thres_SF, sn2_real_delay, fstar_min, M_SNII       &
@@ -227,6 +229,14 @@ subroutine read_hydro_params(nml_ok)
   rewind(1)
   read(1,NML=physics_params,END=105)
 105 continue
+  if(delayed_cooling_model_id(delayed_cooling_model)<0)then
+     if(myid==1)write(*,*)'ERROR: delayed_cooling_model must be first_event_fixed or legacy_accumulating'
+     call clean_stop
+  endif
+  if(delayed_cooling.and.(.not.ieee_is_finite(t_diss).or.t_diss<=0d0))then
+     if(myid==1)write(*,*)'ERROR: delayed cooling requires finite t_diss > 0 Myr'
+     call clean_stop
+  endif
 #ifdef SOLVERmhd
   if(hydro.and.(use_sgs.or.dust_relative_motion))then
      write(*,*)'ERROR: gas MHD does not yet admit SGS or separate dust dynamics'
@@ -237,6 +247,10 @@ subroutine read_hydro_params(nml_ok)
      call clean_stop
   endif
 #endif
+  if(myid==1.and.delayed_cooling)then
+     write(*,'(A,A)')' Delayed cooling model: ',trim(delayed_cooling_model)
+     write(*,'(A,ES12.4,A)')' Delayed cooling duration: ',t_diss,' Myr'
+  endif
 #ifdef PHASE0_STELLAR_ENRICHMENT
   rewind(1)
   call read_enrichment_namelist(1,stellar_nml_iostat)

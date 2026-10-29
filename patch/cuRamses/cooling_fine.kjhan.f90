@@ -132,6 +132,9 @@ subroutine coolfine1(ind_grid,ngrid,ilevel,cooling_status)
 #endif
   use dust_mass_physics, only: dust_mass_enabled,dust_cooling,dust_gas_elements
   use dust_element_cooling, only: wss09_step
+  use delayed_cooling_runtime, only: delayed_cooling_model_id, &
+       delayed_cooling_first_event_fixed, delayed_cooling_remaining_myr, &
+       delayed_cooling_fixed_after_step
   use amr_commons
   use hydro_commons
   use cooling_module
@@ -159,7 +162,7 @@ subroutine coolfine1(ind_grid,ngrid,ilevel,cooling_status)
   real(dp)::polytropic_constant,dx_phys_cm
   real(dp),dimension(1:3)::skip_loc
   real(kind=8)::dx,dx_loc,scale,vol_loc
-  integer::irad
+  integer::irad,delayed_model
 
   integer,dimension(1:nvector)::ind_cell,ind_leaf
   real(kind=8),dimension(1:nvector)::nH,T2,T2_new,delta_T2,ekk,err,emag
@@ -186,6 +189,7 @@ subroutine coolfine1(ind_grid,ngrid,ilevel,cooling_status)
   endif
 #endif
 
+  delayed_model=delayed_cooling_model_id(delayed_cooling_model)
   cooling_status=0
   ! Mesh spacing in that level
   dx=0.5D0**ilevel
@@ -465,7 +469,12 @@ subroutine coolfine1(ind_grid,ngrid,ilevel,cooling_status)
            gr_len(i)=dx_loc
            gr_cool(i)=1
            if(delayed_cooling)then
-              if(uold(ind_leaf(i),idelay)/gr_rho(i)>1d-3)gr_cool(i)=0
+              if(delayed_model==delayed_cooling_first_event_fixed)then
+                 if(delayed_cooling_remaining_myr(uold(ind_leaf(i),idelay), &
+                      uold(ind_leaf(i),1),smallr)>0d0)gr_cool(i)=0
+              else
+                 if(uold(ind_leaf(i),idelay)/gr_rho(i)>1d-3)gr_cool(i)=0
+              endif
            endif
         enddo
         call grackle_neq_step(nleaf,gr_rho(1:nleaf),gr_u(1:nleaf),gr_s(1:nleaf,:), &
@@ -563,8 +572,14 @@ subroutine coolfine1(ind_grid,ngrid,ilevel,cooling_status)
         ! Turn off cooling in blast wave regions
         if(delayed_cooling)then
            do i=1,nleaf
-              cooling_switch = uold(ind_leaf(i),idelay)/max(uold(ind_leaf(i),1),smallr)
-              if(cooling_switch > 1d-3)then
+              if(delayed_model==delayed_cooling_first_event_fixed)then
+                 cooling_switch=delayed_cooling_remaining_myr( &
+                      uold(ind_leaf(i),idelay),uold(ind_leaf(i),1),smallr)
+              else
+                 cooling_switch = uold(ind_leaf(i),idelay)/max(uold(ind_leaf(i),1),smallr)
+              endif
+              if((delayed_model==delayed_cooling_first_event_fixed.and.cooling_switch>0d0).or. &
+                   (delayed_model/=delayed_cooling_first_event_fixed.and.cooling_switch>1d-3))then
                  delta_T2(i) = MAX(delta_T2(i),real(0,kind=dp))
               endif
            end do
@@ -596,11 +611,19 @@ subroutine coolfine1(ind_grid,ngrid,ilevel,cooling_status)
 
      ! Update delayed cooling switch
      if(delayed_cooling)then
-        t_blast=t_diss*1d6*(365.*24.*3600.)
-        damp_factor=exp(-dtcool/t_blast)
-        do i=1,nleaf
-           uold(ind_leaf(i),idelay)=uold(ind_leaf(i),idelay)*damp_factor
-        end do
+        if(delayed_model==delayed_cooling_first_event_fixed)then
+           do i=1,nleaf
+              uold(ind_leaf(i),idelay)=delayed_cooling_fixed_after_step( &
+                   uold(ind_leaf(i),idelay),uold(ind_leaf(i),1), &
+                   dtcool/(1d6*365d0*24d0*3600d0),smallr)
+           end do
+        else
+           t_blast=t_diss*1d6*(365.*24.*3600.)
+           damp_factor=exp(-dtcool/t_blast)
+           do i=1,nleaf
+              uold(ind_leaf(i),idelay)=uold(ind_leaf(i),idelay)*damp_factor
+           end do
+        endif
      endif
 
   end do

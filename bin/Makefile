@@ -373,7 +373,7 @@ VPATH = $(PATCH):../patch/cuda:../patch/oct_tree:../patch/cuRamses:../$(SOLVER):
 # All objects
 MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons.o amr_index.o random.o pm_parameters.o pm_commons.o poisson_parameters.o \
 	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
-	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o \
+	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o delayed_cooling_runtime.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
 	 cosmic_ray_physics.o dust_mass_physics.o dust_phase_state.o dust_drag.o dust_multifluid.o \
          dust_composition_material.o dust_composition_optics.o dust_element_cooling.o \
@@ -809,6 +809,8 @@ cosmic_ray_smoke: cosmic_ray_physics.o ../patch/lagRamses/cosmic_ray_smoke.f90
 	$(F90) -fpp -I. ../patch/lagRamses/cosmic_ray_smoke.f90 cosmic_ray_physics.o -o $@
 poisson_commons.o: poisson_parameters.o
 stellar_enrichment_contract.o: stellar_enrichment_config.o
+cooling_fine.kjhan.o feedback.kjhan3.o stellar_ramses_runtime.o \
+read_hydro_params.o backup_hdf5.o restore_hdf5.o: delayed_cooling_runtime.o
 stellar_snia_dtd.o: stellar_enrichment_config.o
 stellar_snia_population_contract.o: stellar_enrichment_config.o stellar_snia_dtd.o
 stellar_snia_physical_contract.o: stellar_enrichment_config.o

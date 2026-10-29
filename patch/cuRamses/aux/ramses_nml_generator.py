@@ -376,6 +376,11 @@ PARAMS = [
     ParamDef('f_w',       'real', 0.0,     'PHYSICS_PARAMS', S_FEED, 'SN mass loading factor'),
     ParamDef('f_ek',      'real', 0.0,     'PHYSICS_PARAMS', S_FEED, 'SN kinetic energy fraction'),
     ParamDef('delayed_cooling','bool',False,'PHYSICS_PARAMS',S_FEED, 'Delayed cooling after SN'),
+    ParamDef('delayed_cooling_model','str','first_event_fixed','PHYSICS_PARAMS',S_FEED,
+             'Delayed-cooling timer semantics',visible_when='delayed_cooling==True',
+             choices=['first_event_fixed','legacy_accumulating']),
+    ParamDef('t_diss','real',20.0,'PHYSICS_PARAMS',S_FEED,
+             'Delayed-cooling duration [Myr]',visible_when='delayed_cooling==True'),
     ParamDef('rbubble',   'real', 0.0,     'PHYSICS_PARAMS', S_FEED, 'SN bubble radius [cells]'),
     ParamDef('ndebris',   'int',  0,       'PHYSICS_PARAMS', S_FEED, 'Number of SN debris particles'),
     ParamDef('mass_gmc',  'real', 0.0,     'PHYSICS_PARAMS', S_FEED, 'GMC mass [Msun]'),
@@ -729,6 +734,18 @@ def validate_params(values):
             'mg_dynamic_hybrid is experimental and currently supports the 3-D red/black MG smoother only'))
 
     transport = str(values.get('radiation_transport','none')).strip("'\"")
+    delayed_model = str(values.get('delayed_cooling_model','first_event_fixed')).strip("'\"").lower()
+    if delayed_model not in ('first_event_fixed','legacy_accumulating'):
+        msgs.append(ValidationMsg('ERROR',
+            'delayed_cooling_model must be first_event_fixed or legacy_accumulating'))
+    if values.get('delayed_cooling'):
+        try:
+            delayed_duration = float(values.get('t_diss',20.0))
+        except (TypeError,ValueError):
+            delayed_duration = float('nan')
+        if not math.isfinite(delayed_duration) or delayed_duration <= 0.0:
+            msgs.append(ValidationMsg('ERROR',
+                'delayed_cooling requires a finite t_diss > 0 Myr'))
     if str(values.get('cooling_method','original')).strip("'\"")=='grackle_neq':
         if values.get('gpu_hydro'):
             msgs.append(ValidationMsg('ERROR','grackle_neq requires CPU closure-consistent hydro; GPU Poisson remains available'))
@@ -1299,6 +1316,8 @@ def format_namelist(values, emit_defaults=False):
         # backend/interpolation choices must not depend on hidden build defaults.
         if not emit_defaults:
             explicit_run_choice = (p.name.lower() in ('radiation_transport','gpu_hydro') or
+                                   (values.get('delayed_cooling',False) and
+                                    p.name.lower() in ('delayed_cooling_model','t_diss')) or
                                    (p.name.lower() in ('interpol_var','interpol_type') and
                                     p.name.lower() in values))
             if val == p.default and not explicit_run_choice:

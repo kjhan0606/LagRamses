@@ -29,6 +29,8 @@ module stellar_ramses_runtime
 #endif
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use omp_lib, only: omp_lock_kind, omp_init_lock, omp_set_lock, omp_unset_lock
+  use delayed_cooling_runtime, only: delayed_cooling_model_id, &
+       delayed_cooling_first_event_fixed, delayed_cooling_fixed_after_source
   use amr_commons
   use pm_commons
   use hydro_commons
@@ -1216,6 +1218,16 @@ contains
     call omp_set_lock(stellar_feedback_locks(lock_index))
     current_row = unew(target_cell,1:nvar)
     proposed_row = current_row + staged_delta
+    if (delayed_cooling .and. runtime_field_map%delayed_cooling_index > 0 .and. &
+         delayed_cooling_model_id(delayed_cooling_model)==delayed_cooling_first_event_fixed) then
+       proposed_row(runtime_field_map%delayed_cooling_index) = &
+            delayed_cooling_fixed_after_source( &
+                 current_row(runtime_field_map%delayed_cooling_index), &
+                 current_row(runtime_field_map%density_index), &
+                 proposed_row(runtime_field_map%density_index), &
+                 staged_delta(runtime_field_map%delayed_cooling_index)>0d0, &
+                 t_diss,smallr)
+    endif
     if (.not. all(ieee_is_finite(current_row)) .or. &
          .not. all(ieee_is_finite(proposed_row))) then
        call omp_unset_lock(stellar_feedback_locks(lock_index))
