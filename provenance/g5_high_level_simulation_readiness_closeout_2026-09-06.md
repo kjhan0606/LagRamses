@@ -440,3 +440,38 @@ release, (2) build and qualify a binary from the exact clean release commit,
 and (3) pass launch admission with an actual-root native environment/selected-
 asset manifest. Public availability is not treated as a license. This audit
 does not approve or waive any physical input and creates no new gate.
+
+### Current-source CPU M5+dust+CHIMES mixed-AMR smoke — 2026-10-30
+
+The M5 source-active runner now checks its effective `noutput`, `aout`,
+`tout`, `foutput`, and `fbackup` policy for both run profiles before launch.
+The change is commit `24f62e7`.
+
+CPU build job `1243592` completed in 4:03 on grammar `normal` with
+`CHIMES_CUDA=0`, `USE_CUDA=0`, `SNRT=1`, `DUST_LIVE=1`, `CHIMES=1`,
+`HDF5=1`, and `NVAR=187`. Its clean source worktree is bound to commit
+`24f62e7f362e79b1c6b5ffc8fc304715e3c71a9b`; the binary SHA-256 is
+`561e4ee63e2dc422990e2453260b05f047c3fe2a1107f2b8035abd2ae01395b2`.
+The build's peak RSS was `26902024K`.
+
+Run job `1243595` completed on grammar `normal` (MPI 1, OpenMP 4) in 154.44 s
+of RAMSES runtime, with peak step RSS `786996K`. The effective-population
+profile exercised M5 order 5, source-active mixed AMR, live two-size dust and
+CPU CHIMES for four coarse steps. Levels 2 and 3 each committed four times;
+the run had 56 coarse and 64 fine leaf cells. Across eight photon-ledger rows,
+the six positive-source rows have maximum residual/source ratio `3.32e-15`;
+zero-source rows have zero residual. No recoverable CVODE warning, CHIMES
+cell rejection, nonfinite state, or nonconvergence marker was found. The runner reported
+`M5_COUPLED_AMR_INTERFACE_PASS`.
+
+The checked effective namelist has `noutput=1`, future `aout=2.0d0`,
+`tout=1.0d30`, and `foutput=fbackup=1000000`; no raw dump was produced. Its
+SHA-256 is `dbd00a880b477d0bdd4b905c68dae69582d81774cae317d0f100ecd5c1999dc9`.
+The run's input inventory SHA-256 is
+`376a7c404503cd62eace0bec674d8deea6956571b0ead174698fbf6679b55095`.
+
+This closes a current-source CPU integration smoke and its output-schedule
+preflight coverage. It remains a bounded nonproduction run: AGN/dust/source
+contracts are reference controls, no CUDA execution was performed, and the
+native release-candidate manifest, external-data terms, and physical-release
+conditions remain open.
