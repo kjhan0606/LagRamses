@@ -60,3 +60,40 @@ the declared reference profile. It does not establish production physical
 calibration or GPU/hybrid runtime behavior. H100 CUDA build job `441960`
 passed, and hybrid integrated runtime job `442061` is pending Slurm GRES
 capacity at the time of this record.
+
+## M5 AMR slope OpenMP trial — 2026-10-30
+
+The M5 slope/sample cell loops were parallelized in commit
+`598a302b0303c0d763d4daa597b507b175f3df5e`. CPU build job `1244335`
+passed with `CHIMES_CUDA=0`. The same three-step AGN-reference profile then
+completed as job `1244378` on `grammar017`: 1 MPI rank, 8 OpenMP threads,
+16 GiB requested, 1,344,664 KiB peak RSS, and 53:44 Slurm elapsed (the RAMSES
+timer reports 3,213.772 s). Its result sentinel is
+`M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS`, with `raw_outputs=0`.
+
+Against job `1244059` on `grammar029` (1 MPI rank, 8 OpenMP threads, 16 GiB,
+55:04 elapsed), the three M5 commits were:
+
+| M5 operation | Baseline (s) | OpenMP trial (s) | Change |
+|---|---:|---:|---:|
+| 16 substeps, source-free | 449.093 | 416.516 | -7.3% |
+| 16 substeps, source-active | 2,360.983 | 2,310.713 | -2.1% |
+| 1 substep | 437.222 | 442.189 | +1.1% |
+| Total M5 | 3,247.298 | 3,169.418 | -2.4% |
+
+Full RAMSES elapsed changed from 3,291.5 s to 3,213.772 s (-2.36%), while
+accounted CPU time increased from 4:22:04 to 4:24:42 (+1.0%). The runs used
+different compute nodes, so this is not a controlled same-node speedup; the
+measured full-run difference is below the project's useful-improvement bar
+and is not claimed as a confirmed performance gain. The source-active photon,
+radiation-energy and M5 dispatch counts match exactly between runs. In the
+trial, the dispatch counter records 51,019,776 CPU face operations and zero
+GPU face operations during the active 16-substep commit.
+
+The existing `SNRT PERF TILE stage_s` timer measures
+`snrt_dust_live_moment_tile`, not `sample_slopes`; it cannot isolate this code
+change. This trial verifies compilation and coupled CPU execution only. It
+does not qualify GPU/hybrid behavior, production physical inputs, or
+production-scale scaling. Keep the small timing change provisional and direct
+the next performance work toward the dominant M5 transport path, using a
+representative CPU/GPU allocation when available.
