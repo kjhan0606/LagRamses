@@ -128,7 +128,7 @@ if [[ "$CHIMES_BACKEND" == hybrid ]]; then
     exit 3
   }
 else
-  if ldd "$BINARY" | rg 'lib(cudart|cuda)\.so'; then
+  if ldd "$BINARY" | grep -E 'lib(cudart|cuda)\.so'; then
     echo 'CPU-only CHIMES requested with a binary linked to CUDA runtime libraries' >&2
     exit 3
   fi
