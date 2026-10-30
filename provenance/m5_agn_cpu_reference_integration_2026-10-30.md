@@ -367,3 +367,46 @@ reference controls, and declares `source_scope=AGN_only_point_source` and
 `reference_controls=NONPRODUCTION`. Raw outputs were suppressed in both runs;
 the run directories retain only compact inputs, logs, sidecars and result
 sentinels. This supersedes the in-progress status recorded immediately above.
+
+## Current-runtime-source effective-population hybrid integration — 2026-10-30
+
+A40 job `442357` completed on `syn05` with exit code 0 (3:04 Slurm elapsed;
+1 MPI rank, 8 OpenMP threads, one typed A40, 64 GiB requested; application
+step MaxRSS 1,025,736 KiB). It used the `effective_population` profile with
+stellar SED enabled, a real accreting BH sink, M5 order 5, live dust, CHIMES
+hybrid level-queue execution, and 256 passing momentum assertions. Four
+coarse steps completed; the process reported 170.060 s total elapsed. The
+output policy suppressed RAMSES dumps (`raw_outputs=0`).
+
+The executable is the CUDA-enabled build from job `442271`, source commit
+`a572d1dbfd12ecf4b2ce68773ff53f13b103dfa5`, using the reference CHIMES library
+SHA256 `64ad78dbd531621904a9fc00dea2c81d8068198fa245fff659bede9ca4d24ab2`.
+The current branch changes after that source commit touch only the integration
+run script under `simulation/snrt/runs`; the runtime Fortran/C++ source is
+unchanged. The run's `inputs.sha256` also binds the executable, effective
+namelist, sink IC, SED source, CHIMES tables, group tables and selected
+contracts.
+
+The level queue completed all 64 cells at each M5 commit with eight workers
+and one GPU broker. CHIMES counters report 61,258 GPU calls, zero CPU
+fallbacks, 2,150 batches, zero device errors, two warm-table uploads, and a
+peak of two in-flight batches. The M5 source ledger is nonzero after startup;
+the runner completed its M5/dust/CHIMES and momentum checks. The stellar
+population binding is `common_imf_mixed_evolution`, and the configured SNIa
+accounting is `effective_ssp`. The run formed 64 new stars at each coarse
+step, reaching 256 total. The AGN sidecar records positive BH accretion and
+bolometric luminosity with `JET` feedback mode at coarse steps 2–4; each
+record's efficiency contract is valid.
+
+The result line says `AGN_state=not_requested` because the runner's explicit
+AGN-state pass condition is scoped to the separate `agn_reference` profile.
+It does not mean the effective-population run had no AGN activity; the
+sidecar evidence above records that activity. The four-step horizon is only
+about 0.206 Myr, so this run does not establish a new SNII or SNIa explosion
+and deposition event. It verifies the current-runtime-source combined stellar-radiation,
+AGN, dust and CHIMES execution path under its declared controls.
+
+This evidence is not production qualification. The admitted run explicitly
+uses the reference stellar spectral, nine-group, AGN and dust contracts
+(`reference_controls=NONPRODUCTION`). It must not be used to claim those
+physical inputs are production-approved. No raw dumps were retained.
