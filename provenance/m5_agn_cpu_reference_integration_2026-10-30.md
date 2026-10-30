@@ -178,3 +178,60 @@ completed and at least one GPU broker, the pass sentinel, and no raw output
 dumps. Per-cell CVODE performance rows remain intentionally disabled for the
 level-queue continuation path; this run verifies hybrid execution, not a
 per-cell CVODE timing profile or production calibration.
+
+## Current-source CPU revalidation and trace-recovery candidate — 2026-10-30
+
+CPU reference job `1244668` completed on `grammar029` (`normal`) in 53:37:
+1 MPI rank, 8 OpenMP threads, 16 GiB requested, 4:26:29 accounted CPU and
+1,326,388 KiB peak RSS. It used the CPU executable built by `1244657` from
+`c116941e7ac1774a61a8e7be80b0ad6c5e94a6f5`, SHA256
+`a4c15b4da13c9e00b0a1e140e72479a69a77f38605d2235c297da05f55310140`.
+Between that source commit and the current `de49876`, the only tracked changes
+are provenance and the opt-in build script; the physical source is unchanged.
+
+The runner emitted
+`M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS`, with M5 order 5, live dust,
+CPU CHIMES and a nonzero AGN source ledger. The AGN sidecar records the expected
+sequence: inactive at coarse steps 0–1, thermally luminous accretion at step 2
+(`dM_BH=1.0104259799605118e-8` code units,
+`L_bol=3.0561937668561012e40 erg/s`), then jet mode at step 3. The active M5
+photon-ledger residual is `1.7888835600560e-17`; all 16,896 reported
+momentum-assertion cells passed. The runner found no raw outputs and no positive
+`NaN_CHK` state counters.
+
+The three level-3, order-5 M5 commits took 401.936, 2,315.817 and 447.083 s
+(16, 16 and 1 substeps), totaling 3,164.836 s of the 3,217 s Slurm elapsed.
+Across 66 tile records, the existing summed per-cell CHIMES timers reported
+6,195.181 s for spectral photo solves and 57.501 s for dark solves; these cell
+times overlap across OpenMP workers and are not wall time. Photo rows counted
+444,629 CVODE steps, 590,818 RHS calls and 411,048 linear iterations; 9 cells
+exceeded 5 s and the maximum was 10.996 s. This localizes CHIMES solver work
+to the spectral photo path, while the full-run wall time remains dominated by
+the coupled M5/material commits. The dark-trace recovery candidate is a
+robustness change, not a speedup for this dominant photo path.
+
+The non-cosmological smoke profile has two `SFRD=NaN` diagnostic lines when
+`SFR=0`; this is outside the RAMSES state NaN checks and did not fail the
+runner. Keep it classified as an undefined SFR-density diagnostic for this
+profile, not as evidence of production SFRD validation.
+
+Trace library build `1244720` completed on `grammar` in 4:17 with
+`M5_BUILD_CUDA=0` and `M5_CHIMES_LIBRARY_MODE=trace`. Its build record pins
+CHIMES base commit `a58e5c0311993b51abc63d84fff2958a0104f6d6`, the six-file
+source-diff SHA256 `e33eac86687d16ed5894c55d4d3f0125771608df27cc5cece66a00a574d55dd9`,
+and trace-patch SHA256
+`dd625057b6f58549646c69a1ac78e400a8dab5e540ed079216efba6e867035c4`. Its
+exported symbol list exactly matches the reference library and `ldd` resolves
+all dependencies. Candidate `libchimes.so` SHA256 is
+`e59e7d5365681631186bb0dad4e95594c29c4561bac668dcb5e6c716197cc3e2`; the
+adjacent reference copy is preserved and hashes to
+`64ad78dbd531621904a9fc00dea2c81d8068198fa245fff659bede9ca4d24ab2`.
+The production/default library selection remains `reference`.
+
+Integrated trace job `1244750` now uses that exact candidate library and the
+same AGN-reference runtime profile on the CPU-only `normal` queue. It was
+submitted to start after the reference run terminates (regardless of its exit
+status) and the trace build succeeds. At this record update it is running;
+no trace-integrated verdict is claimed yet. GPU hybrid jobs `442109`/`442110`
+remain a separate `syntax` H100 chain pending `QOSGrpGRES` and its build
+dependency.
