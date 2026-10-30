@@ -241,9 +241,86 @@
     "raw_outputs": 0,
     "scope": "selected noncosmological source-active mixed-level execution; not AMR restart equivalence, resolution convergence, cosmological qualification or all-rank reproducibility"
   },
+  "current_reference_control_backend_matrix_2026-10-30": {
+    "status": "both_backends_pass_reference_control_only",
+    "source_commit": "a18e9ede0f9e7fc3a5ca3a2479fd2893401f55af",
+    "profile": "effective_population M5 order 5, live dust, CHIMES; four coarse steps; MPI=1; OMP=8; AGN radiation not requested",
+    "effective_namelist_sha256_both_runs": "82a664e4f80a44a7f31442a26425e767a77ee8a259c31ee29cd219d85aa68919",
+    "physical_input_identity": "Per-run inventories confirm identical IC, stellar SED, CHIMES data, nine photon groups, spectral/molecular tables, yields, SNIA contract, and dust/secondary/group contracts. Per-run artifact paths and executable hashes differ by design.",
+    "hybrid": {
+      "build_job": 441855,
+      "build_partition": "a40",
+      "build_result": "M5_MOMENTUM_CLOSURE_BUILD_PASS; CHIMES_CUDA=1",
+      "binary": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-ramses-momentum-build-441855/bin/ramses_m5_ramses_momentum_closure_v13d",
+      "binary_sha256": "fc2e1e999374af6e8f7572a5ce12c6f1e46ab494cd532bcdaf374fc05bf7e58b",
+      "build_record_sha256": "c3d8495dd15ecdfeac3cc6a4304f01b1bbb3f30958e3459a4fb10b97ec4cad29",
+      "run_job": 441860,
+      "slurm_state": "COMPLETED",
+      "exit_code": "0:0",
+      "partition": "a40",
+      "node": "syn05",
+      "gpu": "NVIDIA A40",
+      "allocation": "1 GPU, 8 CPUs, 64 GiB",
+      "elapsed_seconds": 154,
+      "result": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-441860/result.txt",
+      "result_sha256": "1b01c1a81ebf72ebbb9df982915717b57a0c37a193fdbd911e09724af4731973",
+      "run_log": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-441860/run.log",
+      "run_log_sha256": "1f35d33e2b8520690104ba027f14f7117f7951862751861e1249f32621e20a6a",
+      "input_inventory": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-441860/inputs.sha256",
+      "input_inventory_sha256": "5bcda1b195878b5411e64959d7bb0bdcde9db848a2056d10bd401b2df9d33daf",
+      "chimes_gpu_calls": 61258,
+      "chimes_cpu_fallback_calls": 0,
+      "chimes_gpu_batches": 2150,
+      "chimes_device_errors": 0,
+      "chimes_peak_inflight_batches": 2,
+      "chimes_streams_used": 1,
+      "dust_ir_scattering_gpu_batches": true,
+      "m5_dispatch_reported_cells": {
+        "closure_cpu": [8704, 22016, 21024, 20896],
+        "closure_gpu": [0, 2048, 3040, 3168],
+        "face_cpu": [0, 368640, 368640, 368640],
+        "face_gpu": [0, 0, 0, 0]
+      }
+    },
+    "cpu": {
+      "build_job": 1243782,
+      "build_partition": "normal",
+      "build_result": "M5_MOMENTUM_CLOSURE_BUILD_PASS; CHIMES_CUDA=0",
+      "binary": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-ramses-momentum-build-1243782/bin/ramses_m5_ramses_momentum_closure_v13d",
+      "binary_sha256": "0b8bfe3b296455d57e59a6bf6be2e065a2e7cc74997fc3c3d10bf1ba478419bd",
+      "build_record_sha256": "eb14513718accd0e09ff37fd4f07b0385638067cec422fb2ef843687da58bd77",
+      "cuda_runtime_linked": false,
+      "run_job": 1243798,
+      "slurm_state": "COMPLETED",
+      "exit_code": "0:0",
+      "partition": "normal",
+      "node": "grammar016",
+      "gpu": "none",
+      "allocation": "8 CPUs, 64 GiB",
+      "elapsed_seconds": 69,
+      "result": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-1243798/result.txt",
+      "result_sha256": "09bd5c1727ef49a3869961c023753d906096682bdd415c54da85c9e25f729c4c",
+      "run_log": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-1243798/run.log",
+      "run_log_sha256": "cea5981e358c9497e878a40100ba997d6bd6f5131ee82218c008f0dfb910cdf9",
+      "input_inventory": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-1243798/inputs.sha256",
+      "input_inventory_sha256": "27494192834715ec1f09ee88e7f6c0872bfdfbad764f15bda118ff9fd3199135"
+    },
+    "comparison": {
+      "printed_source_absorbed_photon_count_ledgers_equal": true,
+      "maximum_relative_gas_heat_difference": 5.062e-10,
+      "maximum_relative_dust_heat_difference": 1.781e-10,
+      "wall_times_seconds": {
+        "hybrid": 154,
+        "cpu": 69
+      },
+      "performance_interpretation": "Not a speed comparison: this small reference smoke ran on different clusters with different CPU/GPU hardware and CPU cohort versus hybrid level-queue scheduling. The elapsed times do not establish a general backend speed ratio."
+    },
+    "raw_outputs": 0,
+    "release_qualification": "Not admitted: reference-control inputs remain nonproduction, upstream data terms remain unresolved, AGN radiation was not selected, and the paired smokes do not qualify scale, cosmology, or production performance."
+  },
   "release_conditions_remaining": [
     "Record selected external-data license/provenance for this exact release; no approval inferred from public availability.",
-    "Build the release binary from the exact clean release commit and qualify that artifact; build 430084 from 5ea1cb6 passed a nonproduction A40 integration smoke only.",
+    "Build the release binary from an exact clean release commit and qualify that artifact; builds 441855/1243782 from a18e9ed and runs 441860/1243798 passed only bounded reference-control integration smokes, while the release commit remains unset.",
     "Promote only after an actual-root native environment/selected-asset release manifest passes the existing launch preflight; the old-root G0 manifest is historical."
   ],
   "approval_request": {
