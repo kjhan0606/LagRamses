@@ -20,12 +20,31 @@ RUNTIME = (PATCH / "stellar_ramses_runtime.f90").read_text(encoding="utf-8")
 BRIDGE = (PATCH / "stellar_ramses_bridge.f90").read_text(encoding="utf-8")
 FIELD_MAP = (PATCH / "stellar_ramses_field_map.f90").read_text(encoding="utf-8")
 MAKEFILE = (ROOT.parents[1] / "bin" / "Makefile").read_text(encoding="utf-8")
+COOLING_SOURCE = ROOT.parents[1] / "patch" / "cuRamses" / "cooling_fine.kjhan.f90"
+COOLING = COOLING_SOURCE.read_text(encoding="utf-8")
 
 
 def _deposit_subroutine() -> str:
     start = RUNTIME.index("subroutine deposit_one_star")
     end = RUNTIME.index("end subroutine deposit_one_star", start)
     return RUNTIME[start:end]
+
+
+def _make_selected_source(source_name: str) -> Path:
+    assignments: dict[str, str] = {}
+    for line in MAKEFILE.splitlines():
+        lhs, separator, rhs = line.partition("=")
+        if separator and lhs.strip() in {"PATCH", "SOLVER", "VPATH"}:
+            assignments[lhs.strip()] = rhs.strip()
+    for name in ("PATCH", "SOLVER", "VPATH"):
+        assert name in assignments, f"Makefile assignment missing: {name}"
+    search_path = assignments["VPATH"].replace("$(PATCH)", assignments["PATCH"])
+    search_path = search_path.replace("$(SOLVER)", assignments["SOLVER"])
+    for entry in search_path.split(":"):
+        candidate = (ROOT.parents[1] / "bin" / entry / source_name).resolve()
+        if candidate.is_file():
+            return candidate
+    raise AssertionError(f"VPATH source not found: {source_name}")
 
 
 def _assert_source_contract() -> None:
@@ -40,6 +59,9 @@ def _assert_source_contract() -> None:
     assert "omp_set_lock" in deposit and "omp_unset_lock" in deposit
     assert "runtime_field_map%energy_index = ndim + 2" in RUNTIME
     assert "runtime_field_map%delayed_cooling_index = idelay" in RUNTIME
+    assert "delayed_cooling_fixed_after_source(" in deposit
+    assert "current_row(runtime_field_map%delayed_cooling_index)" in deposit
+    assert "staged_delta(runtime_field_map%delayed_cooling_index)>0d0" in deposit
     assert "unew(target_cell,5)" not in deposit
     assert "unew(target_cell,1:nvar) = proposed_row" in deposit
     assert "current_row = unew(target_cell,1:nvar)" in deposit
@@ -79,6 +101,13 @@ def _assert_source_contract() -> None:
     assert "owner_rank(target) /= local_rank" not in BRIDGE
     assert "delayed_cooling_index" in FIELD_MAP
     assert "energy_index = inener" not in FIELD_MAP
+
+    # Verify the actual cooling implementation selected by Makefile VPATH is
+    # the one that decays the first-event-fixed deadline at each cooling step.
+    assert "cooling_fine.kjhan.o" in MAKEFILE
+    assert _make_selected_source("cooling_fine.kjhan.f90") == COOLING_SOURCE.resolve()
+    assert "delayed_cooling_remaining_myr" in COOLING
+    assert "delayed_cooling_fixed_after_step" in COOLING
 
 
 def _field_map_and_virtual_target() -> None:
@@ -190,7 +219,7 @@ def main() -> int:
     print(
         "STELLAR_FEEDBACK_TRANSACTION_TEST_OK "
         "staged_delta=true failure_model_identity=true virtual_rows=true "
-        "counterstreaming=true same_cell_model=true"
+        "counterstreaming=true same_cell_model=true delayed_cooling_wiring=true"
     )
     return 0
 
