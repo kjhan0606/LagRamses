@@ -18,7 +18,8 @@ from build_lc18_native_wind import ELEMENTS, SOLAR_MASS_CGS
 
 def build_lowmass(*, solar_coordinate: float, wind_speed_km_s: float,
                   lifetime_model: str, remnant_policy: str,
-                  max_remnant_difference_msun: float, imf_id: int = 2):
+                  max_remnant_difference_msun: float, imf_id: int = 2,
+                  source_root: Path = source.DEFAULT_ROOT):
     if not math.isfinite(solar_coordinate) or not .01 <= solar_coordinate <= .03:
         raise ValueError('supply an explicit project solar coordinate in [.01,.03], not an arbitrary birth-Z grid')
     if not math.isfinite(wind_speed_km_s) or not 0 < wind_speed_km_s < 29979.2458:
@@ -29,9 +30,10 @@ def build_lowmass(*, solar_coordinate: float, wind_speed_km_s: float,
         raise ValueError('explicit remnant difference bound in (0,.1] Msun required')
     if imf_id not in (0,1,2,4):
         raise ValueError('unsupported IMF')
-    report = source.audit_sukhbold2016_candidate()
+    source_root = Path(source_root).resolve()
+    report = source.audit_sukhbold2016_candidate(root=source_root)
     contract = json.loads(source.DEFAULT_CONTRACT.read_text())
-    base = source.DEFAULT_ROOT / 'sukhbold2016_ccsn'
+    base = source_root / 'sukhbold2016_ccsn'
     models = {float(m): r for m,r in report['z96_grid']['models'].items()}
     # The W18 file uses w*(w2015) labels for its four WH15 low-mass
     # progenitors; the existing w2015 parser extracts these PHOTB fields.
@@ -114,12 +116,15 @@ def main():
     p.add_argument('--remnant-policy',choices=('stable_segment_residual',),required=True)
     p.add_argument('--max-remnant-difference-msun',type=float,required=True)
     p.add_argument('--imf-id',type=int,choices=(0,1,2,4),default=2)
+    p.add_argument('--source-root',type=Path,default=source.DEFAULT_ROOT,
+                   help='parent of the pinned sukhbold2016_ccsn source directory')
     a=p.parse_args()
     if a.output_dir.exists():
         p.error('existing output directory refused')
     table,history=build_lowmass(solar_coordinate=a.solar_coordinate,wind_speed_km_s=a.wind_speed_km_s,
         lifetime_model=a.lifetime_model,remnant_policy=a.remnant_policy,
-        max_remnant_difference_msun=a.max_remnant_difference_msun,imf_id=a.imf_id)
+        max_remnant_difference_msun=a.max_remnant_difference_msun,imf_id=a.imf_id,
+        source_root=a.source_root)
     a.output_dir.mkdir(parents=True,exist_ok=False)
     for name,text in [('yields.dat',table),('history.nml',history)]:
         with (a.output_dir/name).open('x') as f:

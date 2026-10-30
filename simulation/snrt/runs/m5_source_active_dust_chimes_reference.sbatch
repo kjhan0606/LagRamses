@@ -25,6 +25,13 @@ readonly ASSETS=/gpfs/kjhan/LRD_JWST
 readonly PROFILE=${M5_SOURCE_PROFILE:-agn_reference}
 readonly VERIFY_RESTART=${M5_VERIFY_RESTART:-0}
 readonly AMR_INTERFACE=${M5_AMR_INTERFACE_CHECK:-0}
+readonly REQUESTED_STELLAR_PACKAGE=${M5_STELLAR_PACKAGE:-}
+# Extend the effective-SSP profile to stellar terminal events when requested.
+# Final-dump capture is limited to one output for post-run state inspection.
+NSTEP_MAX=3
+if [[ "$PROFILE" == effective_population ]]; then NSTEP_MAX=${M5_EFFECTIVE_NSTEP:-4}; fi
+readonly NSTEP_MAX
+readonly CAPTURE_FINAL_DUMP=${M5_CAPTURE_FINAL_DUMP:-0}
 readonly RUN_ID=${M5_RUN_ID:-${SLURM_JOB_ID:-}}
 readonly OMP_THREADS=${SLURM_CPUS_PER_TASK:-${M5_OMP_THREADS:-8}}
 readonly MPI_RANKS=${SLURM_NTASKS:-${M5_MPI_RANKS:-1}}
@@ -76,8 +83,38 @@ case "$AMR_INTERFACE" in
   1) test "$PROFILE" = effective_population; test "$VERIFY_RESTART" = 0 ;;
   *) echo 'M5_AMR_INTERFACE_CHECK must be 0 or 1' >&2; exit 2 ;;
 esac
+if [[ "$PROFILE" == effective_population ]]; then
+  [[ "$NSTEP_MAX" =~ ^[1-9][0-9]{0,2}$ ]] && ((NSTEP_MAX<=512)) || {
+    echo 'M5_EFFECTIVE_NSTEP must be an integer from 1 through 512' >&2; exit 2;
+  }
+else
+  [[ "$CAPTURE_FINAL_DUMP" == 0 ]] || {
+    echo 'M5_CAPTURE_FINAL_DUMP requires the effective_population profile' >&2; exit 2;
+  }
+fi
+case "$CAPTURE_FINAL_DUMP" in
+  0|1) ;;
+  *) echo 'M5_CAPTURE_FINAL_DUMP must be 0 or 1' >&2; exit 2 ;;
+esac
+if [[ "$VERIFY_RESTART" == 1 || "$AMR_INTERFACE" == 1 ]]; then
+  [[ "$NSTEP_MAX" == 4 && "$CAPTURE_FINAL_DUMP" == 0 ]] || {
+    echo 'Restart and AMR-interface contracts require the original four-step, no-final-dump profile' >&2
+    exit 2
+  }
+fi
+if [[ "$CAPTURE_FINAL_DUMP" == 1 && "$NSTEP_MAX" -le 4 ]]; then
+  echo 'Final-dump capture is reserved for an extended effective_population run' >&2
+  exit 2
+fi
 case "$PROFILE" in
   agn_reference)
+    STELLAR_PACKAGE=''
+    STELLAR_INPUT=''
+    STELLAR_HISTORY=''
+    STELLAR_YIELDS=''
+    STELLAR_NODES=''
+    STELLAR_BASE_SOURCE=''
+    STELLAR_BINDING=''
     TEMPLATE=$ROOT/simulation/snrt/config/snrt_stellar_agn_dust_reference_smoke.nml
     WORK=$ROOT/.m5-source-dust-chimes-$RUN_ID
     SOURCE_IC=$ROOT/simulation/snrt/config/snrt_agn_accretion_smoke.ic_sink
@@ -95,12 +132,19 @@ case "$PROFILE" in
       WORK=$ROOT/.m5-effective-amr-$RUN_ID
     fi
     SOURCE_IC=$ASSETS/.effective-coupled.Q9Kw29/short/ic_sink
-    SED=$ASSETS/.effective-population.gQodLz/inputs/source.nml
+    : "${REQUESTED_STELLAR_PACKAGE:?set M5_STELLAR_PACKAGE to the generated source-package directory}"
+    STELLAR_PACKAGE=$(realpath "$REQUESTED_STELLAR_PACKAGE")
+    STELLAR_INPUT=$STELLAR_PACKAGE/input-v5
+    STELLAR_HISTORY=$STELLAR_INPUT/history.nml
+    STELLAR_YIELDS=$STELLAR_INPUT/yields.dat
+    STELLAR_NODES=$STELLAR_INPUT/nodes.dat
+    STELLAR_BASE_SOURCE=$STELLAR_INPUT/source.nml
+    STELLAR_BINDING=$STELLAR_PACKAGE/effective-ssp-binding.json
+    SED=$STELLAR_PACKAGE/source-effective-ssp.nml
     # Reuse the evaluated effective profile, not a newly chosen stellar model.
     printf '%s  %s\n' \
       1cc6534578fcaffa84c02d0dbc037973d32691aa059efc738bc9249dfa2cd358 "$TEMPLATE" \
       c9c1d969915a7987d24c23ac9facd39855d53bc7bb94f5ad5aff90ea6c40ea37 "$SOURCE_IC" \
-      19504d2845e4ea8faf46ddced0c2e01e561dda3dfa804449221bb559ede2aea9 "$SED" \
       | sha256sum --check --strict
     ;;
   *) echo "Unknown M5_SOURCE_PROFILE: $PROFILE" >&2; exit 2 ;;
@@ -175,12 +219,81 @@ test -f "$TABLE" -a -f "$GROUP_DIR/manifest.json"
 test -f "$SUN/include/cvode/cvode.h" -a -f "$HDF5_ROOT/include/hdf5.h"
 test -f "$ASSETS/.chimes-spectral.TrQxAG/bank-final/atomic_shells.h5"
 test -f "$ASSETS/.chimes-molecular.U6ZQCr/bank/molecular_nodes.h5"
-test -f "$ASSETS/.effective-population.gQodLz/inputs/history.nml"
-test -f "$ASSETS/.mixed-lowmass.Rbb2fZ/input-v5/yields.dat"
+if [[ "$PROFILE" == effective_population ]]; then
+  test -d "$STELLAR_INPUT"
+  test -f "$STELLAR_INPUT/manifest.json" -a -f "$STELLAR_HISTORY"
+  test -f "$STELLAR_YIELDS" -a -f "$STELLAR_NODES" -a -f "$STELLAR_BASE_SOURCE"
+  test -f "$SED" -a -f "$STELLAR_BINDING"
+  python3 -B - "$STELLAR_PACKAGE" "$SNIA_CONTRACT" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import re
+import sys
+
+package, snia_contract = map(Path, sys.argv[1:])
+inputs = package / "input-v5"
+manifest_path = inputs / "manifest.json"
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+binding_path = package / "effective-ssp-binding.json"
+binding = json.loads(binding_path.read_text(encoding="utf-8"))
+
+def sha(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+if manifest.get("model") != "parsec_mixed_lowmass_truncated_v1":
+    raise SystemExit("stellar source package model identity mismatch")
+if manifest.get("imf_id") != 1 or manifest.get("imf_denominator") != [0.08, 600]:
+    raise SystemExit("stellar source package is not normalized for Kroupa IMF id 1")
+for name, expected in manifest.get("output_sha256", {}).items():
+    if sha(inputs / name) != expected:
+        raise SystemExit(f"stellar source package hash mismatch: {name}")
+
+base_path = inputs / "source.nml"
+effective_path = package / "source-effective-ssp.nml"
+base = base_path.read_text(encoding="ascii")
+effective = effective_path.read_text(encoding="ascii")
+if not re.search(r"\bimf_id=1, population_id=0, binary_fraction=0\b", base):
+    raise SystemExit("base SED does not identify Kroupa single-star evolution")
+if re.sub(r"\bpopulation_id=0, binary_fraction=0\b",
+          "population_id=2, binary_fraction=0", base, count=1) != effective:
+    raise SystemExit("effective-SSP SED is not the declared population-only overlay")
+history = (inputs / "history.nml").read_text(encoding="ascii")
+if not re.search(r"\binput_imf_id=1\b", history):
+    raise SystemExit("stellar history IMF does not match the Kroupa package")
+source_hash = re.search(r"source_sha256='([0-9a-f]{64})'", base)
+if source_hash is None or sha(inputs / "nodes.dat") != source_hash.group(1):
+    raise SystemExit("SED source hash does not match its node history")
+
+checks = {
+    "source_package_manifest_sha256": sha(manifest_path),
+    "source_package_model": manifest["model"],
+    "source_package_imf_id": manifest["imf_id"],
+    "source_package_node_history_sha256": sha(inputs / "nodes.dat"),
+    "source_namelist_sha256": sha(base_path),
+    "effective_ssp_namelist_sha256": sha(effective_path),
+    "snia_runtime_contract_sha256": sha(snia_contract),
+}
+for key, value in checks.items():
+    if binding.get(key) != value:
+        raise SystemExit(f"stellar runtime binding mismatch: {key}")
+if binding.get("population_id_overlay") != {"from": 0, "to": 2}:
+    raise SystemExit("effective-SSP population overlay mismatch")
+if binding.get("status") != "reference_control_not_production_approval":
+    raise SystemExit("stellar source package lost its reference-only status")
+print("M5_STELLAR_PACKAGE_BINDING_PASS model=PARSEC_mixed_lowmass imf=Kroupa population=effective_SSP status=reference_control")
+PY
+fi
 for i in {1..9}; do test -f "$GROUP_DIR/group_$(printf '%02d' "$i").hdf5"; done
 cp -- "$TEMPLATE" "$WORK/effective.nml"
 cp -- "$SOURCE_IC" "$WORK/ic_sink"
 if [[ "$PROFILE" == effective_population ]]; then
+  test "$(grep -Ec '^[[:space:]]*nstepmax=4$' "$WORK/effective.nml")" -eq 1
+  sed -i "s/^[[:space:]]*nstepmax=4$/  nstepmax=$NSTEP_MAX/" "$WORK/effective.nml"
   test "$(grep -Ec '^[[:space:]]*rt=\.false\.$' "$WORK/effective.nml")" -eq 1
   test "$(grep -Ec '^[[:space:]]*foutput=2$' "$WORK/effective.nml")" -eq 1
   sed -i \
@@ -189,7 +302,15 @@ if [[ "$PROFILE" == effective_population ]]; then
     "$WORK/effective.nml"
   grep -Fq "population_model='effective_ssp'" "$WORK/effective.nml"
   grep -Fq 'use_snia=.true.' "$WORK/effective.nml"
-  grep -Fq 'nstepmax=4' "$WORK/effective.nml"
+  grep -Eq "^[[:space:]]*nstepmax=$NSTEP_MAX$" "$WORK/effective.nml"
+  history_path_count=$(grep -Ec '^[[:space:]]*high_mass_history_path=' "$WORK/effective.nml")
+  [[ "$history_path_count" == 1 ]] || {
+    echo "Expected one high_mass_history_path in effective template, found $history_path_count" >&2
+    exit 3
+  }
+  sed -i "s|^[[:space:]]*high_mass_history_path=.*$|  high_mass_history_path='$STELLAR_HISTORY'|" \
+    "$WORK/effective.nml"
+  grep -Fqx "  high_mass_history_path='$STELLAR_HISTORY'" "$WORK/effective.nml"
   test -f "$SNIA_CONTRACT"
 else
 test "$(grep -Fc "radiation_transport='snrt_sn'" "$WORK/effective.nml")" -eq 1
@@ -220,7 +341,7 @@ dust_settings=$(printf '%s\n' \
 stellar_settings=$(printf '%s\n' \
   "  fate_policy='user_selected_model_v1'" \
   "  high_mass_preset='source_consistent'" \
-  "  high_mass_history_path='$ASSETS/.effective-population.gQodLz/inputs/history.nml'")
+  "  high_mass_history_path='$STELLAR_HISTORY'")
 awk -v dust="$dust_settings" -v stellar="$stellar_settings" \
   'index($0,"cooling_method") {print; print dust; next}
    index($0,"feedback_mode") {print; print stellar; next}
@@ -254,16 +375,24 @@ grep -Fq 'dust_mass_enabled=.true.' "$WORK/effective.nml"
 grep -Fq 'cooling=.true.' "$WORK/effective.nml"
 grep -Fq 'var_region(1,20)=0.000753012048192771d0' "$WORK/effective.nml"
 fi
+if [[ "$CAPTURE_FINAL_DUMP" == 1 ]]; then
+  test "$(grep -Ec '^[[:space:]]*foutput=1000000$' "$WORK/effective.nml")" -eq 1
+  sed -i "s/^[[:space:]]*foutput=1000000$/  foutput=$NSTEP_MAX/" "$WORK/effective.nml"
+fi
 grep -Fq "radiation_transport='snrt_mn', snrt_moment_order=5" "$WORK/effective.nml"
 grep -Fq "dust_cooling='chimes_neq_v1'" "$WORK/effective.nml"
 grep -Fq "feedback_mode='channel_resolved'" "$WORK/effective.nml"
 test "$(grep -Ec '^[[:space:]]*noutput=1$' "$WORK/effective.nml")" -eq 1
 test "$(grep -Ec '^[[:space:]]*aout=2\.0d0$' "$WORK/effective.nml")" -eq 1
 test "$(grep -Ec '^[[:space:]]*tout=1\.0d30$' "$WORK/effective.nml")" -eq 1
-grep -Eq '^[[:space:]]*foutput=1000000$' "$WORK/effective.nml"
+if [[ "$CAPTURE_FINAL_DUMP" == 1 ]]; then
+  grep -Eq "^[[:space:]]*foutput=$NSTEP_MAX$" "$WORK/effective.nml"
+else
+  grep -Eq '^[[:space:]]*foutput=1000000$' "$WORK/effective.nml"
+fi
 grep -Eq '^[[:space:]]*fbackup=1000000$' "$WORK/effective.nml"
 case "$PROFILE" in
-  effective_population) grep -Eq '^[[:space:]]*nstepmax=4$' "$WORK/effective.nml" ;;
+  effective_population) grep -Eq "^[[:space:]]*nstepmax=$NSTEP_MAX$" "$WORK/effective.nml" ;;
   agn_reference) grep -Eq '^[[:space:]]*nstepmax=3$' "$WORK/effective.nml" ;;
 esac
 if [[ "$AMR_INTERFACE" == 1 ]]; then
@@ -291,12 +420,11 @@ sha256sum "$TEMPLATE" "$WORK/effective.nml" "$WORK/ic_sink" "$WORK/rank-bind.sh"
   "$GROUP_DIR"/group_*.hdf5 "$GROUP_CONTRACT" "$SECONDARY" "$DUST_CONTRACT" \
   "$ASSETS/.chimes-spectral.TrQxAG/bank-final/atomic_shells.h5" \
   "$ASSETS/.chimes-molecular.U6ZQCr/bank/molecular_nodes.h5" \
-  "$ASSETS/.effective-population.gQodLz/inputs/history.nml" \
-  "$ASSETS/.mixed-lowmass.Rbb2fZ/input-v5/yields.dat" \
   > "$WORK/inputs.sha256"
 if [[ -n "$SED" ]]; then sha256sum "$SED" >> "$WORK/inputs.sha256"; fi
 if [[ "$PROFILE" == effective_population ]]; then
-  sha256sum "$SNIA_CONTRACT" "$ASSETS/.mixed-lowmass.Rbb2fZ/input-v5/nodes.dat" \
+  sha256sum "$SNIA_CONTRACT" "$STELLAR_INPUT/manifest.json" "$STELLAR_HISTORY" \
+    "$STELLAR_YIELDS" "$STELLAR_NODES" "$STELLAR_BASE_SOURCE" "$STELLAR_BINDING" \
     >> "$WORK/inputs.sha256"
 fi
 
@@ -315,7 +443,11 @@ export SNRT_CHIMES_BINARY="$BINARY" SNRT_CHIMES_MAIN_DATA="$TABLE" SNRT_CHIMES_G
 export SNRT_CHIMES_BAND_TABLE=$ASSETS/.chimes-spectral.TrQxAG/bank-final/atomic_shells.h5
 export SNRT_CHIMES_MOLECULAR_TABLE=$ASSETS/.chimes-molecular.U6ZQCr/bank/molecular_nodes.h5
 export SNRT_CHIMES_COMPUTE_BACKEND="$CHIMES_BACKEND" SNRT_PERF_DIAGNOSTIC=1
-export PHASE0_YIELD_TABLE=$ASSETS/.mixed-lowmass.Rbb2fZ/input-v5/yields.dat
+if [[ "$PROFILE" == effective_population ]]; then
+  export PHASE0_YIELD_TABLE="$STELLAR_YIELDS"
+else
+  export PHASE0_YIELD_TABLE=$ASSETS/.mixed-lowmass.Rbb2fZ/input-v5/yields.dat
+fi
 unset SNRT_DRIVER_TEST_SEED_SOURCE SNRT_RT_ENABLE SNRT_RT_TX_TEST_FAIL_STAGE SNRT_RT_TX_TEST_FAIL_LEAF
 unset SNRT_CHIMES_CVODE_BACKEND SNRT_CHIMES_RHS_BACKEND SNRT_CHIMES_CELL_SCHEDULER
 unset SNRT_CHIMES_GPU_BROKERS SNRT_CHIMES_GPU_WORKER SNRT_CHIMES_GPU_BATCH_CELLS
@@ -342,6 +474,7 @@ printf 'TRANSPORT_BACKEND=%s MATERIAL_BACKEND=%s\n' "$TRANSPORT_BACKEND" "$MATER
   | tee -a "$WORK/launch.txt"
 printf 'CHIMES_cell_scheduler=%s\n' "$CELL_SCHEDULER" | tee -a "$WORK/launch.txt"
 printf 'AMR_INTERFACE_CHECK=%s\n' "$AMR_INTERFACE" | tee -a "$WORK/launch.txt"
+printf 'NSTEP_MAX=%s CAPTURE_FINAL_DUMP=%s\n' "$NSTEP_MAX" "$CAPTURE_FINAL_DUMP" | tee -a "$WORK/launch.txt"
 # Explicit OMP_PLACES is needed: generic "cores" can be reconstructed over
 # the whole shared allocation during MPI/OMP initialization even when srun
 # initially binds its tasks. Reuse the verified per-local-rank CPU slices.
@@ -404,12 +537,22 @@ if [[ "$VERIFY_RESTART" == 1 ]]; then
   fi
   cd "$WORK/continuous"
 else
-  printf 'OUTPUT_POLICY=raw_outputs0; future dummy clock; foutput/fbackup1000000\n' | tee -a "$WORK/launch.txt"
+  if [[ "$CAPTURE_FINAL_DUMP" == 1 ]]; then
+    printf 'OUTPUT_POLICY=one final full dump at coarse step %s; noutput1 aout2.0d0(future) tout1.0d30 fbackup1000000\n' \
+      "$NSTEP_MAX" | tee -a "$WORK/launch.txt"
+  else
+    printf 'OUTPUT_POLICY=raw_outputs0; future dummy clock; foutput/fbackup1000000\n' | tee -a "$WORK/launch.txt"
+  fi
   run_m5_case "$WORK"
   cd "$WORK"
 fi
 
 grep -q 'Run completed' run.log
+actual_main_steps=$(awk '$1=="Main" && $2=="step=" {value=$3} END {print value+0}' run.log)
+if [[ "$actual_main_steps" != "$NSTEP_MAX" ]]; then
+  echo "FAIL: reached main step $actual_main_steps; expected $NSTEP_MAX" >&2
+  exit 3
+fi
 grep -Fq 'Dust mass/thermal evolution (dust_mass_enabled)=T' run.log
 grep -Fq 'DUST_MASS model=carbon_olivine_2size_v1' run.log
 grep -Fq 'DUST_SIZE: four masses' run.log
@@ -485,6 +628,17 @@ if [[ "$VERIFY_RESTART" == 1 ]]; then
     > "$WORK/restart-comparison.json"
   printf 'M5_COUPLED_RESTART_EXECUTION_PASS profile=effective_population CHIMES_backend=%s raw_dumps_retained=3 pending_driver_evaluation=true\n' "$CHIMES_BACKEND" \
     | tee "$WORK/result.txt"
+  exit 0
+fi
+if [[ "$CAPTURE_FINAL_DUMP" == 1 ]]; then
+  test "${#raw_outputs[@]}" -eq 1
+  test "${raw_outputs[0]}" = output_00001
+  test -f output_00001/COMPLETE
+  test -s output_00001/data_00001.h5
+  raw_output_bytes=$(stat -c '%s' output_00001/data_00001.h5)
+  printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_%s_PASS profile=%s M5_order=5 source_scope=effective_population AGN_state=not_requested M5_total_source_ledger=nonzero dust_mass=enabled CHIMES_backend=%s momentum_assert_cells=%s reached_main_step=%s final_dump_bytes=%s raw_outputs=1 pending_evaluation=true reference_controls=NONPRODUCTION\n' \
+    "${CHIMES_LIBRARY_MODE^^}" "$PROFILE" "$CHIMES_BACKEND" "$momentum_assert_cells" \
+    "$actual_main_steps" "$raw_output_bytes" | tee "$WORK/result.txt"
   exit 0
 fi
 if ((${#raw_outputs[@]})); then

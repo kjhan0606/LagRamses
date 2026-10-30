@@ -19,6 +19,7 @@ from build_parsec_native_sed import Spectrum, check_rates, intervals, MYR
 from read_karakas_lugaro2016 import (read_karakas_lugaro2016, read_fishlock2014,
     DEFAULT_MATRIX, LIFETIME_PATH, LIFETIME_SHA256, FISHLOCK_SHA256)
 from build_sukhbold_native_lowmass import build_lowmass
+from audit_g2_sukhbold2016_candidate import DEFAULT_ROOT as DEFAULT_SUKHBOLD_ROOT
 
 MODEL = 'parsec_mixed_lowmass_truncated_v1'
 MSUN = 1.98847e33
@@ -33,14 +34,14 @@ def nearest(items, value, key):
     return min(items, key=lambda r: (abs(key(r)-value), key(r)))
 
 
-def terminal_sources(imf):
+def terminal_sources(imf, sukhbold_root=DEFAULT_SUKHBOLD_ROOT):
     agb = read_karakas_lugaro2016(include_lifetimes=True)['records']
     agb = [r for r in agb if r['coordinate']['initial_mass_msun'] <= 7]
     agb += read_fishlock2014(lifetime_model='raiteri96_padova', include_one=True)
     # Existing explicitly selected stable-segment residual-remnant comparison.
     table, _ = build_lowmass(solar_coordinate=.02, wind_speed_km_s=1000.,
         lifetime_model='raiteri96_padova', remnant_policy='stable_segment_residual',
-        max_remnant_difference_msun=.1, imf_id=imf)
+        max_remnant_difference_msun=.1, imf_id=imf, source_root=sukhbold_root)
     selection = json.loads(table.splitlines()[1][2:])
     return agb, selection
 
@@ -205,7 +206,7 @@ def build(args):
         raise ValueError('unexpected upper Z grid')
     if not all(np.isfinite(v) and 0 < v < 29979.2458 for v in (args.agb_wind_km_s,args.sn_wind_km_s)):
         raise ValueError('explicit positive nonrelativistic lower wind speeds required')
-    imf = feedback['imf_id']; agb, sn = terminal_sources(imf)
+    imf = feedback['imf_id']; agb, sn = terminal_sources(imf,args.sukhbold_root)
     upper_model, radiation = load_upper_sed(args.upper_sed/'nodes.dat')
     if upper_model != feedback['model']: raise ValueError('upper model identity mismatch')
     upper = np.loadtxt(args.feedback/'yields.dat')
@@ -333,6 +334,8 @@ if __name__=='__main__':
     p.add_argument('--feedback',type=Path,required=True)
     p.add_argument('--upper-sed',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--sukhbold-root',type=Path,default=DEFAULT_SUKHBOLD_ROOT,
+        help='parent of the pinned external/g2_candidates/sukhbold2016_ccsn archive')
     p.add_argument('--agb-wind-km-s',type=float,required=True)
     p.add_argument('--sn-wind-km-s',type=float,required=True)
     build(p.parse_args())
