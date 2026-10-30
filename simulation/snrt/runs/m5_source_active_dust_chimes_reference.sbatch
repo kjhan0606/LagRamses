@@ -336,7 +336,6 @@ sed -i \
   -e 's/gamma=1.6666666667d0/gamma=1.6666666666666667d0/' \
   -e 's/cooling=.false./cooling=.true./' \
   -e "s/feedback_mode='legacy'/feedback_mode='channel_resolved'/" \
-  -e 's/imf_id=2/imf_id=1/' \
   -e 's/imf_mass_max_msun=120d0/imf_mass_max_msun=600d0/' \
   -e 's/channel_mass_min_msun=0.8d0,1d0,8d0,3d0,140d0/channel_mass_min_msun=2d0,2d0,2d0,3d0,2d0/' \
   -e 's/channel_mass_max_msun=120d0,8d0,120d0,8d0,260d0/channel_mass_max_msun=600d0,600d0,600d0,8d0,600d0/' \
@@ -378,7 +377,8 @@ awk -v dust_ic="$dust_ic_settings" \
   "$WORK/effective.nml" > "$WORK/effective.nml.tmp"
 mv -- "$WORK/effective.nml.tmp" "$WORK/effective.nml"
 grep -Fq "population_model='single_star_ssp'" "$WORK/effective.nml"
-grep -Fq 'imf_id=1' "$WORK/effective.nml"
+grep -Eq '^[[:space:]]*imf_id=2$' "$WORK/effective.nml"
+grep -Eq '^[[:space:]]*input_imf_id=2([,[:space:]]|$)' "$STELLAR_HISTORY"
 grep -Fq 'imf_mass_max_msun=600d0' "$WORK/effective.nml"
 grep -Fq 'channel_mass_min_msun=2d0,2d0,2d0,3d0,2d0' "$WORK/effective.nml"
 grep -Fq 'channel_mass_max_msun=600d0,600d0,600d0,8d0,600d0' "$WORK/effective.nml"
