@@ -505,3 +505,29 @@ This qualifies same-rank CPU restart equivalence for this bounded
 effective-population/M5/live-dust/CPU-CHIMES reference profile. It is not a
 GPU comparison or a production release; source and dust/AGN contracts remain
 reference controls and the release-candidate blockers above remain open.
+
+### Exact-current-commit CPU M5+dust+CHIMES AMR smoke — 2026-10-30
+
+Build job `1243662` completed on grammar `normal` with 4 CPUs, 32 GiB and
+`M5_BUILD_CUDA=0` in 3:38 (peak RSS `26293816K`). Its isolated source tree was
+clean at commit `3628b23e9aa5e905fa7ef8231c2f6e98298c342a`; the binary
+SHA-256 is `ee0280258f2985710f88b2b4e78aeb2e31a5e5e75b51d52bcb0785b627ee5362`.
+
+Simulation job `1243669` completed on grammar `normal` with MPI 1/OpenMP 4,
+CPU-only, in 2:49 Slurm elapsed (RAMSES runtime 154.80 s; peak step RSS
+`780592K`). It used that exact-commit binary for four coarse steps with
+`AMR_INTERFACE_CHECK=1`, M5 order 5, live two-size dust, CPU CHIMES and the
+selected effective stellar population. The runner returned
+`M5_COUPLED_AMR_INTERFACE_PASS`: 56 coarse and 64 fine leaf cells, eight M5
+level commits, eight photon-ledger rows, and maximum positive-source
+residual/source `3.32e-15`. All 75 emitted NaN checks were zero. The effective
+namelist used `nstepmax=4`, one future `aout=2.0d0`, `tout=1.0d30`, and
+`foutput=fbackup=1000000`; no `output_NNNNN` dump was created.
+
+The run and build identities, effective input, log, compact result, hashes and
+no-output cleanup record are retained in `.m5-effective-amr-1243669/` and
+`.m5-ramses-momentum-build-1243662/`. This confirms the bounded CPU
+source-active AMR connection from the current commit. The available grammar
+Slurm partitions exposed no GPU GRES, so this does not qualify the CUDA/hybrid
+path. The selected AGN/dust/data contracts remain reference controls, and the
+upstream data/license and production-release blockers remain explicit.
