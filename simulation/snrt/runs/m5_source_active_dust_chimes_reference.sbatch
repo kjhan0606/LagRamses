@@ -564,6 +564,11 @@ if [[ "$actual_main_steps" != "$NSTEP_MAX" ]]; then
   echo "FAIL: reached main step $actual_main_steps; expected $NSTEP_MAX" >&2
   exit 3
 fi
+# A final-dump run exits below, so enforce real device work before that branch.
+# Restart runs validate both continuous and resumed logs in their own path.
+if [[ "$CHIMES_BACKEND" == hybrid && "$VERIFY_RESTART" != 1 ]]; then
+  check_hybrid_process_reports run.log "$MPI_RANKS"
+fi
 grep -Fq 'Dust mass/thermal evolution (dust_mass_enabled)=T' run.log
 grep -Fq 'DUST_MASS model=carbon_olivine_2size_v1' run.log
 grep -Fq 'DUST_SIZE: four masses' run.log
@@ -657,9 +662,6 @@ if ((${#raw_outputs[@]})); then
   exit 4
 fi
 if [[ "$AMR_INTERFACE" == 1 ]]; then
-  if [[ "$CHIMES_BACKEND" == hybrid ]]; then
-    check_hybrid_process_reports run.log "$MPI_RANKS"
-  fi
   grep -Eq 'Level[[:space:]]+3 has[[:space:]]+8 grids' run.log
   grep -Eq 'SNRT_MN_COMMIT level/order/substeps=[[:space:]]+2[[:space:]]+5' run.log
   grep -Eq 'SNRT_MN_COMMIT level/order/substeps=[[:space:]]+3[[:space:]]+5' run.log
@@ -691,9 +693,6 @@ if not any(
     raise SystemExit("FAIL: AGN profile has no accreting, thermally luminous coarse state")
 PY
   agn_evidence=thermal_luminous_accretion_state
-fi
-if [[ "$CHIMES_BACKEND" == hybrid ]]; then
-  check_hybrid_process_reports run.log 1
 fi
 source_scope=effective_population
 if [[ "$PROFILE" == agn_reference ]]; then source_scope=AGN_only_point_source; fi
