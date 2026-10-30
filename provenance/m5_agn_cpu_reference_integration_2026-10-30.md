@@ -38,6 +38,16 @@ its `cooling` bucket. This bucket includes the coupled M5/CHIMES path and is
 not a standalone CHIMES timing. It identifies that coupled path as the next
 runtime comparison target.
 
+The three level-3, order-5 M5 commits took 449.1 s (16 substeps), 2,361.0 s
+(16 substeps, source-active), and 437.2 s (1 substep), totaling 3,247.3 s or
+98.7% of the run. For the source-active 16-substep call, existing tile timers
+sum to 848.1 s of material preparation and 499.0 s of staged commit work;
+about 1,013.8 s remains outside those tile intervals and is not split further
+by current timers. The summed per-cell photo durations (5,942.2 s) overlap
+across OpenMP workers and are not wall time. These measurements identify the
+M5+material path as the target but do not justify attributing all its cost to
+CHIMES.
+
 The printed RAMSES `econs=9.98e-1` is computed from kinetic energy, potential
 energy, and the integrated potential-work term in `amr/update_time.f90`; it
 does not include the gas internal, dust, radiation, or explicit feedback-source
