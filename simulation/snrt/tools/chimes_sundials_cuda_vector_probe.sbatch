@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=sundials-cuda-vector
-#SBATCH --partition=a100,h100
+#SBATCH --partition=a100
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:A100:1
 #SBATCH --mem=32G
 #SBATCH --time=00:45:00
 #SBATCH --chdir=/gpfs/kjhan/chimes-cvode-gpu-20261001

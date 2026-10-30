@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:H100:1
 #SBATCH --mem=16G
 #SBATCH --time=00:15:00
 #SBATCH --output=/gpfs/kjhan/chimes-cvode-gpu-20261001/.cvode-gpu/rhs-%j.log

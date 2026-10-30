@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:A100:1
 #SBATCH --mem=64G
 #SBATCH --time=0-04:00:00
 #SBATCH --output=/gpfs/kjhan/chimes-cvode-gpu-20261001/.cvode-gpu/chimes-batch-overlap-%j.log

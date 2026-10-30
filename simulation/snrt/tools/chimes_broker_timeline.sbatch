@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=chimes-timeline
-#SBATCH --partition=h200,h100,a100
+#SBATCH --partition=h100
 #SBATCH --chdir=/gpfs/kjhan/chimes-cvode-gpu-20261001
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:H100:1
 #SBATCH --mem=64G
 #SBATCH --time=00:45:00
 #SBATCH --output=/gpfs/kjhan/chimes-cvode-gpu-20261001/.cvode-gpu/chimes-timeline-%j.log
