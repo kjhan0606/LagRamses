@@ -992,7 +992,7 @@ def audit(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
         "production_linked_harness_targets_bin_makefile": harness_targets_makefile,
         "production_linked_harness_runs_smoke": bool(
             re.search(
-                r"(?m)^\s*\"\$BINARY\"\s+>>\s+\"\$SMOKE_LOG\"\s+2>&1\s*$",
+                r"(?m)^\s*mpirun\s+-np\s+1\s+\"\$BINARY\"\s+>>\s+\"\$SMOKE_LOG\"\s+2>&1\s*$",
                 harness_text,
             )
         ),

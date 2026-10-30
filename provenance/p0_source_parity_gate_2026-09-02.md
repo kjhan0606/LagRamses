@@ -90,7 +90,8 @@ exact commit, forces the production Makefile build there, and stores the
 resulting executable and logs under `build/p0_production_linked`. It refuses
 to reuse an existing output directory. The CPU-only submission entry point is
 `simulation/snrt/runs/p0_production_linked_cpu.sbatch` and targets grammar's
-`normal` queue.
+`normal` queue. The startup smoke runs the MPI executable through
+`mpirun -np 1` so MPI initializes inside the allocated job step.
 
 Because the harness, validator, and identity configuration changed, the
 previous linked-build evidence no longer closes the live gate. P0.1 remains

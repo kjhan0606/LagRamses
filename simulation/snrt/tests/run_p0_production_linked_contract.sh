@@ -13,7 +13,7 @@ BUILD_LOG="$BUILD_DIR/make.log"
 SMOKE_LOG="$BUILD_DIR/smoke.log"
 BINARY="$ROOT/build/p0_production_linked/ramses_final3d"
 BUILD_COMMAND='make -C "$SOURCE_WORKTREE/bin" -B ramses'
-SMOKE_COMMAND='"$ROOT/build/p0_production_linked/ramses_final3d"'
+SMOKE_COMMAND='mpirun -np 1 "$ROOT/build/p0_production_linked/ramses_final3d"'
 SMOKE_EXPECTED_EXIT_CODE=$(python3 - "$ROOT/simulation/snrt/config/stellar_source_identity_v1.json" <<'PY'
 import json
 import sys
@@ -87,7 +87,7 @@ printf 'P0_BINARY_SHA256=%s\n' "$BINARY_SHA256" >> "$BUILD_LOG"
 printf 'P0_SMOKE_COMMAND %s\n' "$SMOKE_COMMAND" > "$SMOKE_LOG"
 printf 'P0_BINARY_SHA256=%s\n' "$BINARY_SHA256" >> "$SMOKE_LOG"
 set +e
-"$BINARY" >> "$SMOKE_LOG" 2>&1
+mpirun -np 1 "$BINARY" >> "$SMOKE_LOG" 2>&1
 SMOKE_STATUS=$?
 set -e
 printf 'P0_SMOKE_EXIT_CODE=%s\n' "$SMOKE_STATUS" >> "$SMOKE_LOG"
