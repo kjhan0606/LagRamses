@@ -834,7 +834,7 @@ def audit(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
     harness_text = harness_path.read_text(encoding="utf-8", errors="replace") if harness_exists else ""
     harness_targets_makefile = bool(
         re.search(
-            r"(?m)^\s*make\s+-C\s+\"\$ROOT/bin\"\s+-B\s+ramses(?:\s|$)",
+            r"(?m)^\s*make\s+-C\s+\"\$SOURCE_WORKTREE/bin\"\s+-B\s+ramses(?:\s|$)",
             harness_text,
         )
     )

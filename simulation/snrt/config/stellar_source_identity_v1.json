@@ -95,10 +95,10 @@
     "build_log": "build/p0_production_linked/make.log",
     "smoke_log": "build/p0_production_linked/smoke.log",
     "evidence_file": "simulation/snrt/data/p0_production_linked_build_evidence.json",
-    "binary": "bin/ramses_final3d",
+    "binary": "build/p0_production_linked/ramses_final3d",
     "link_output": "ramses_final3d",
-    "build_command": "make -C \"$ROOT/bin\" -B ramses",
-    "smoke_command": "\"$ROOT/bin/ramses_final3d\"",
+    "build_command": "make -C \"$SOURCE_WORKTREE/bin\" -B ramses",
+    "smoke_command": "\"$ROOT/build/p0_production_linked/ramses_final3d\"",
     "smoke_expected_output": "You should type: ramses3d input.nml",
     "smoke_expected_exit_code": 0,
     "linkage_symbol_patterns": [

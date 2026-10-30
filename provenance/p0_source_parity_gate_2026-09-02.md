@@ -36,7 +36,7 @@ compile command for every required object. The compile contract also records
 `PHASE0_STELLAR_ENRICHMENT=1`, the required long-key compile flags, and the
 default-disabled embedded-yield macro.
 
-## Current result
+## Result at implementation time (2026-09-02)
 
 ```text
 python3 simulation/snrt/tests/test_stellar_source_parity.py
@@ -46,9 +46,10 @@ python3 simulation/snrt/tools/validate_stellar_source_parity.py
 STELLAR_SOURCE_PARITY_PASS blocked=none
 ```
 
-The production-linked gate is now closed for P0.1. The harness performed the
-forced full RAMSES build, verified all 16 required object compile records,
-linked `bin/ramses_final3d`, matched the binary SHA-256 in both logs, passed
+At that time, the production-linked gate was closed for P0.1. The harness
+performed the forced full RAMSES build, verified all 16 required object
+compile records, linked `bin/ramses_final3d`, matched the binary SHA-256 in
+both logs, passed
 the configured `nm` linkage contract, and passed the no-argument startup
 smoke. Fourteen of 15 shared contract modules differ from the Makefile-
 selected tree: 11 are byte-different and 3 are absent from the native mirror,
@@ -74,8 +75,25 @@ writes its generated Makefile source to the ignored
 
 ## P0.1 disposition and next gate
 
-P0.1 source identity/build parity is closed with the evidence JSON at
-`simulation/snrt/data/p0_production_linked_build_evidence.json`. The binary
-and build/smoke logs are intentionally ignored runtime artifacts, while the
-evidence JSON is versioned. P0.2--P0.6 remain open; no physical yield asset or
-production run may be promoted until their respective gates pass.
+At implementation time, P0.1 source identity/build parity was closed with the
+evidence JSON at `simulation/snrt/data/p0_production_linked_build_evidence.json`.
+The binary and build/smoke logs are intentionally ignored runtime artifacts,
+while the evidence JSON is versioned. P0.2--P0.6 remain open; no physical yield
+asset or production run may be promoted until their respective gates pass.
+
+## 2026-10-30 safe-build follow-up
+
+The earlier harness built directly in the active `bin/` directory, which could
+replace the operator's current executable and objects. The harness now checks
+that tracked source files are committed, creates a detached worktree at that
+exact commit, forces the production Makefile build there, and stores the
+resulting executable and logs under `build/p0_production_linked`. It refuses
+to reuse an existing output directory. The CPU-only submission entry point is
+`simulation/snrt/runs/p0_production_linked_cpu.sbatch` and targets grammar's
+`normal` queue.
+
+Because the harness, validator, and identity configuration changed, the
+previous linked-build evidence no longer closes the live gate. P0.1 remains
+blocked until the updated harness records fresh evidence and the live parity
+validator passes. This source/build identity gate does not qualify the
+physical stellar-yield package; P0.2--P0.6 remain open.
