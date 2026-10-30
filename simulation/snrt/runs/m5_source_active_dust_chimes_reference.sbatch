@@ -377,8 +377,10 @@ awk -v dust_ic="$dust_ic_settings" \
   "$WORK/effective.nml" > "$WORK/effective.nml.tmp"
 mv -- "$WORK/effective.nml.tmp" "$WORK/effective.nml"
 grep -Fq "population_model='single_star_ssp'" "$WORK/effective.nml"
-grep -Eq '^[[:space:]]*imf_id=2$' "$WORK/effective.nml"
-grep -Eq '^[[:space:]]*input_imf_id=2([,[:space:]]|$)' "$STELLAR_HISTORY"
+# This profile is bound to the Kroupa id=1 source package above. The separate
+# AGN-only reference profile uses its own Chabrier id=2 history.
+grep -Eq '^[[:space:]]*imf_id=1$' "$WORK/effective.nml"
+grep -Eq '^[[:space:]]*input_imf_id=1([,[:space:]]|$)' "$STELLAR_HISTORY"
 grep -Fq 'imf_mass_max_msun=600d0' "$WORK/effective.nml"
 grep -Fq 'channel_mass_min_msun=2d0,2d0,2d0,3d0,2d0' "$WORK/effective.nml"
 grep -Fq 'channel_mass_max_msun=600d0,600d0,600d0,8d0,600d0' "$WORK/effective.nml"
