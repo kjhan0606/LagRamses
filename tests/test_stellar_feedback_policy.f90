@@ -186,7 +186,7 @@ program test_stellar_feedback_policy
   open(newunit=unit,status='scratch',action='readwrite')
   write(unit,'(A)') '&stellar_enrichment_params'
   call write_required_population_contract(unit,'channel_resolved',1, &
-       'single_star_ssp','per_star_cumulative',0.0_stellar_dp)
+       'single_star_ssp','per_star_cumulative',0.0_stellar_dp,imf_upper=260.0_stellar_dp)
   write(unit,'(A)') ' use_pisn=.true. /'
   rewind(unit)
   call read_enrichment_namelist(unit,status)
@@ -272,25 +272,28 @@ program test_stellar_feedback_policy
 contains
 
   subroutine write_required_population_contract(unit,mode,imf,population,basis, &
-       binary,write_windows,imf_lower)
+       binary,write_windows,imf_lower,imf_upper)
     integer, intent(in) :: unit, imf
     character(len=*), intent(in) :: mode, population, basis
     real(stellar_dp), intent(in) :: binary
     logical, intent(in), optional :: write_windows
     real(stellar_dp), intent(in), optional :: imf_lower
+    real(stellar_dp), intent(in), optional :: imf_upper
     logical :: include_windows
-    real(stellar_dp) :: lower
+    real(stellar_dp) :: lower, upper
 
     include_windows=.true.
     if(present(write_windows))include_windows=write_windows
     lower=0.08_stellar_dp
     if(present(imf_lower))lower=imf_lower
+    upper=120.0_stellar_dp
+    if(present(imf_upper))upper=imf_upper
     write(unit,'(A)') ' feedback_mode="'//trim(mode)//'",'
     write(unit,'(A,I0,A)') ' imf_id=',imf,','
     write(unit,'(A)') ' population_model="'//trim(population)//'",'
     write(unit,'(A)') ' yield_source_basis="'//trim(basis)//'",'
-    write(unit,'(A,ES16.8,A)') ' imf_mass_min_msun=',lower, &
-         ', imf_mass_max_msun=120.0,'
+    write(unit,'(A,ES16.8,A,ES16.8,A)') ' imf_mass_min_msun=',lower, &
+         ', imf_mass_max_msun=',upper,','
     write(unit,'(A,ES16.8,A)') ' binary_fraction=',binary,','
     if(include_windows)then
        write(unit,'(A)') ' channel_mass_min_msun=0.8,1.0,8.0,3.0,140.0,'
