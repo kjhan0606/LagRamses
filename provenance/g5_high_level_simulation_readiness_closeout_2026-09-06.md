@@ -540,9 +540,10 @@ job could not be submitted from this controller. The previous A40 integrated
 run `430150` was built from `5ea1cb6`; comparison with current commit `3628b23`
 shows intervening changes in `bin/Makefile`, the CHIMES bridge and CUDA RHS,
 the CUDA RHS header, and `snrt_moment_ramses.f90`. Consequently, that older A40
-run does not qualify today's hybrid/CUDA source. The latest exact-commit result
-is CPU-only; GPU qualification remains open until a typed GPU Slurm partition
-is available.
+run does not qualify today's hybrid/CUDA source. At that 2026-10-30
+grammar-controller check, the latest exact-commit result was CPU-only and no
+typed GPU partition was available there, so GPU qualification remained open.
+The later syntax A40 submission is recorded below.
 
 The official-source data-terms recheck is recorded in
 `manifests/native_m5_release_candidate_2026-10-12.json` under
