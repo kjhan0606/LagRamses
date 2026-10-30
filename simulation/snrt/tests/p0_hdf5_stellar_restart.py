@@ -1346,7 +1346,12 @@ def _run_fortran_hdf5_roundtrip(root: Path) -> dict[str, object]:
     }
 
 
-def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, object]:
+def compare_m5_coupled(
+    left: Path,
+    right: Path,
+    checkpoint: Path | None,
+    expected_step: int = 4,
+) -> dict[str, object]:
     """Compare actual coupled outputs, not synthetic reader/schema fixtures.
 
     Same-rank/static-layout comparison only. Retains the selected effective
@@ -1355,32 +1360,43 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
     """
     rtol, atol = 1e-12, 1e-25
     scopes = ("hydro/", "snrt/", "gravity/", "particles/", "sinks/")
-    for path in (left, right, checkpoint):
+    paths = (left, right) if checkpoint is None else (left, right, checkpoint)
+    for path in paths:
         assert path.is_file() and (path.parent / "COMPLETE").is_file(), path
-    with h5py.File(checkpoint, "r") as seed:
-        expected_ncpu = int(np.asarray(seed["header"].attrs["ncpu"]).flat[0])
-        assert expected_ncpu >= 1
-        assert int(np.asarray(seed["header"].attrs["nstep_coarse"]).flat[0]) == 2
-        assert int(np.asarray(seed["snrt"].attrs["moment_order"]).flat[0]) == 5
-        assert int(np.asarray(seed["snrt"].attrs["format_version"]).flat[0]) >= 1000
-        width = int(np.asarray(seed["snrt"].attrs["cell_width"]).flat[0])
-        # This executable's level0 angular family pads 36 M5 coefficients
-        # into 80 entries/group. Signed higher moments are NOT photon counts.
-        payload = np.asarray(seed["snrt/level_2"]).reshape(64, width)
-        assert width >= 1444 and np.all(np.isfinite(payload))
-        assert np.any(payload[:, 4:724:80] > 0), "checkpoint has no live primary photons"
-        existing_stars = set(np.asarray(seed["particles/identity"])[
-            np.asarray(seed["particles/ptypep"]) == 1])
+    if checkpoint is not None:
+        with h5py.File(checkpoint, "r") as seed:
+            expected_ncpu = int(np.asarray(seed["header"].attrs["ncpu"]).flat[0])
+            assert expected_ncpu >= 1
+            assert int(np.asarray(seed["header"].attrs["nstep_coarse"]).flat[0]) == 2
+            assert int(np.asarray(seed["snrt"].attrs["moment_order"]).flat[0]) == 5
+            assert int(np.asarray(seed["snrt"].attrs["format_version"]).flat[0]) >= 1000
+            width = int(np.asarray(seed["snrt"].attrs["cell_width"]).flat[0])
+            # This executable's level0 angular family pads 36 M5 coefficients
+            # into 80 entries/group. Signed higher moments are NOT photon counts.
+            payload = np.asarray(seed["snrt/level_2"]).reshape(64, width)
+            assert width >= 1444 and np.all(np.isfinite(payload))
+            assert np.any(payload[:, 4:724:80] > 0), "checkpoint has no live primary photons"
+            existing_stars = set(np.asarray(seed["particles/identity"])[
+                np.asarray(seed["particles/ptypep"]) == 1])
+    else:
+        with h5py.File(left, "r") as seed:
+            expected_ncpu = int(np.asarray(seed["header"].attrs["ncpu"]).flat[0])
+            assert expected_ncpu >= 1
+            assert int(np.asarray(seed["snrt"].attrs["moment_order"]).flat[0]) == 5
+            assert int(np.asarray(seed["snrt"].attrs["format_version"]).flat[0]) >= 1000
+        existing_stars = set()
     with h5py.File(left, "r") as a, h5py.File(right, "r") as b:
         for handle in (a, b):
             assert int(np.asarray(handle["header"].attrs["ncpu"]).flat[0]) == expected_ncpu
-            assert int(np.asarray(handle["header"].attrs["nstep_coarse"]).flat[0]) == 4
+            assert int(np.asarray(handle["header"].attrs["nstep_coarse"]).flat[0]) == expected_step
             assert int(np.asarray(handle["snrt"].attrs["moment_order"]).flat[0]) == 5
+            assert int(np.asarray(handle["snrt"].attrs["format_version"]).flat[0]) >= 1000
             stars = np.asarray(handle["particles/ptypep"]) == 1
             mass = np.asarray(handle["particles/mass"])[stars]
             initial = np.asarray(handle["particles/mp0"])[stars]
             assert np.any(stars) and np.all(mass > 0) and np.all(initial >= mass)
-            assert np.sum(initial - mass) > 0, "ordinary stellar return was not exercised"
+            if checkpoint is not None:
+                assert np.sum(initial - mass) > 0, "ordinary stellar return was not exercised"
         def objects(handle: h5py.File, kind: type) -> list[str]:
             names: list[str] = []
             handle.visititems(lambda name, obj: names.append(name)
@@ -1499,8 +1515,11 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
             x, y = a["header"].attrs[key], b["header"].attrs[key]
             assert np.allclose(x, y, rtol=1e-12, atol=0), key
             clocks[key] = bool(np.array_equal(x, y))
-        status = ("M5_COUPLED_RESTART_FAIL_NUMERIC_TOLERANCE"
-                  if tolerance_violations else "M5_COUPLED_RESTART_PASS")
+        comparison_label = (
+            "M5_COUPLED_RESTART" if checkpoint is not None else "M5_COUPLED_FINAL_PAIR"
+        )
+        status = (f"{comparison_label}_FAIL_NUMERIC_TOLERANCE"
+                  if tolerance_violations else f"{comparison_label}_PASS")
         violations_by_scope: dict[str, dict[str, int | float]] = {}
         for violation in tolerance_violations:
             scope = str(violation["name"]).split("/", 1)[0]
@@ -1516,7 +1535,8 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
                 float(summary["max_tolerance_ratio"]),
                 float(violation["max_tolerance_ratio"]),
             )
-        return {"status": status, "moment_order": 5,
+        return {"status": status, "comparison_mode": comparison_label,
+                "expected_step": expected_step, "moment_order": 5,
                 "compared_datasets": len(names),
                 "bitwise_datasets": len(names)-len(differences)-int(np.any(relabelled)),
                 "floating_differences": differences, "exact_contract_attributes": attribute_count,
@@ -1540,10 +1560,13 @@ def main() -> None:
         help="also run the bounded one-rank linked HDF5 writer/reader fixture",
     )
     parser.add_argument("--compare-m5-coupled", nargs=2, type=Path, metavar=("CONTINUOUS", "RESTARTED"))
+    parser.add_argument("--compare-m5-coupled-pair", nargs=2, type=Path, metavar=("LEFT", "RIGHT"))
+    parser.add_argument("--expected-step", type=int)
     parser.add_argument("--source-checkpoint", type=Path)
     args = parser.parse_args()
     if args.compare_m5_coupled is not None:
-        if args.source_checkpoint is None or args.fortran_runtime:
+        if (args.source_checkpoint is None or args.fortran_runtime
+                or args.expected_step is not None or args.compare_m5_coupled_pair is not None):
             parser.error("coupled comparison needs --source-checkpoint and cannot run synthetic fixtures")
         result = compare_m5_coupled(
             *args.compare_m5_coupled, args.source_checkpoint
@@ -1552,6 +1575,19 @@ def main() -> None:
         if result["status"] != "M5_COUPLED_RESTART_PASS":
             raise SystemExit(1)
         return
+    if args.compare_m5_coupled_pair is not None:
+        if (args.source_checkpoint is not None or args.fortran_runtime
+                or args.expected_step is None or args.expected_step < 1):
+            parser.error("coupled final-pair comparison needs --expected-step and no checkpoint/fixtures")
+        result = compare_m5_coupled(
+            *args.compare_m5_coupled_pair, None, expected_step=args.expected_step
+        )
+        print(json.dumps(result, indent=2), flush=True)
+        if result["status"] != "M5_COUPLED_FINAL_PAIR_PASS":
+            raise SystemExit(1)
+        return
+    if args.expected_step is not None:
+        parser.error("--expected-step needs --compare-m5-coupled-pair")
     if args.source_checkpoint is not None:
         parser.error("--source-checkpoint needs --compare-m5-coupled")
 
