@@ -1358,7 +1358,8 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
     for path in (left, right, checkpoint):
         assert path.is_file() and (path.parent / "COMPLETE").is_file(), path
     with h5py.File(checkpoint, "r") as seed:
-        assert int(np.asarray(seed["header"].attrs["ncpu"]).flat[0]) == 2
+        expected_ncpu = int(np.asarray(seed["header"].attrs["ncpu"]).flat[0])
+        assert expected_ncpu >= 1
         assert int(np.asarray(seed["header"].attrs["nstep_coarse"]).flat[0]) == 2
         assert int(np.asarray(seed["snrt"].attrs["moment_order"]).flat[0]) == 5
         assert int(np.asarray(seed["snrt"].attrs["format_version"]).flat[0]) >= 1000
@@ -1372,7 +1373,7 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
             np.asarray(seed["particles/ptypep"]) == 1])
     with h5py.File(left, "r") as a, h5py.File(right, "r") as b:
         for handle in (a, b):
-            assert int(np.asarray(handle["header"].attrs["ncpu"]).flat[0]) == 2
+            assert int(np.asarray(handle["header"].attrs["ncpu"]).flat[0]) == expected_ncpu
             assert int(np.asarray(handle["header"].attrs["nstep_coarse"]).flat[0]) == 4
             assert int(np.asarray(handle["snrt"].attrs["moment_order"]).flat[0]) == 5
             stars = np.asarray(handle["particles/ptypep"]) == 1
@@ -1527,7 +1528,8 @@ def compare_m5_coupled(left: Path, right: Path, checkpoint: Path) -> dict[str, o
                                     for level, p in grid_permutations.items()},
                 "particle_identity": "existing_ID_exact_new_star_exact_birth_event_cloud_exact_position",
                 "new_star_ID_relabellings": int(np.count_nonzero(relabelled)),
-                "scope": "same_MPI2_static64_cells_effective_population_co_moving_dust"}
+                "mpi_ranks": expected_ncpu,
+                "scope": f"same_MPI{expected_ncpu}_effective_population_co_moving_dust"}
 
 
 def main() -> None:

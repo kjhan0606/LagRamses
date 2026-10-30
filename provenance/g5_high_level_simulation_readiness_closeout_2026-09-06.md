@@ -475,3 +475,33 @@ preflight coverage. It remains a bounded nonproduction run: AGN/dust/source
 contracts are reference controls, no CUDA execution was performed, and the
 native release-candidate manifest, external-data terms, and physical-release
 conditions remain open.
+
+### Current-source CPU M5 effective-population restart equivalence — 2026-10-30
+
+Job `1243610` ran CPU-only on grammar `normal` (MPI 1, OpenMP 4) using the
+binary built by job `1243592` from clean source commit
+`24f62e7f362e79b1c6b5ffc8fc304715e3c71a9b` (binary SHA-256
+`561e4ee63e2dc422990e2453260b05f047c3fe2a1107f2b8035abd2ae01395b2`). Both
+the continuous four-coarse-step trajectory and the trajectory restarted from
+coarse step 2 completed. The first Slurm wrapper exited nonzero only in its
+post-run comparator: the comparator incorrectly required `ncpu=2` for this
+MPI-1 run. The comparator now derives rank count from the source checkpoint,
+requires both final outputs to match it, and reports that rank count in scope.
+
+The corrected comparison returned `M5_COUPLED_RESTART_PASS`: 449 datasets
+compared, 439 bitwise-identical, and all 10 floating differences within the
+predeclared `rtol=1e-12`, `atol=1e-25` tolerance (maximum tolerance ratio
+`3.52e-4`; zero violations). All 39 contract attributes and six clock fields
+matched exactly; physical grid ordering and particle identity also matched.
+The resumed log contains both `SNRT_HDF5_RADIATION_RESTORE_PASS` and
+`STELLAR_SOURCE_RESTART_IDENTITY_PASS`. The exact report is retained at
+`.m5-effective-restart-1243610/restart-comparison.json`; launch, effective
+namelists, execution logs, input inventory and raw HDF5 checksums remain beside
+it. After evaluation, the three raw HDF5 dumps (303,845,800 bytes total) and
+their output directories were removed; the exact targets are recorded in the
+run's `cleanup-manifest.json`.
+
+This qualifies same-rank CPU restart equivalence for this bounded
+effective-population/M5/live-dust/CPU-CHIMES reference profile. It is not a
+GPU comparison or a production release; source and dust/AGN contracts remain
+reference controls and the release-candidate blockers above remain open.
