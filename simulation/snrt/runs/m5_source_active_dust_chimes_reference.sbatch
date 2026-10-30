@@ -230,17 +230,6 @@ awk -v dust_ic="$dust_ic_settings" \
   'index($0,"var_region(1,14)") {print; print dust_ic; next} {print}' \
   "$WORK/effective.nml" > "$WORK/effective.nml.tmp"
 mv -- "$WORK/effective.nml.tmp" "$WORK/effective.nml"
-grep -Fq "radiation_transport='snrt_mn', snrt_moment_order=5" "$WORK/effective.nml"
-grep -Fq "dust_cooling='chimes_neq_v1'" "$WORK/effective.nml"
-test "$(grep -Ec '^[[:space:]]*noutput=1$' "$WORK/effective.nml")" -eq 1
-grep -Eq '^[[:space:]]*aout=2\.0d0$' "$WORK/effective.nml"
-grep -Eq '^[[:space:]]*tout=1\.0d30$' "$WORK/effective.nml"
-case "$PROFILE" in
-  effective_population) grep -Eq '^[[:space:]]*nstepmax=4$' "$WORK/effective.nml" ;;
-  agn_reference) grep -Eq '^[[:space:]]*nstepmax=3$' "$WORK/effective.nml" ;;
-esac
-grep -Eq '^[[:space:]]*foutput=1000000$' "$WORK/effective.nml"
-grep -Fq "feedback_mode='channel_resolved'" "$WORK/effective.nml"
 grep -Fq "population_model='single_star_ssp'" "$WORK/effective.nml"
 grep -Fq 'imf_id=1' "$WORK/effective.nml"
 grep -Fq 'imf_mass_max_msun=600d0' "$WORK/effective.nml"
@@ -251,9 +240,20 @@ grep -Fq 'use_pisn=.true.' "$WORK/effective.nml"
 grep -Fq 'gamma=1.6666666666666667d0' "$WORK/effective.nml"
 grep -Fq 'dust_mass_enabled=.true.' "$WORK/effective.nml"
 grep -Fq 'cooling=.true.' "$WORK/effective.nml"
-grep -Fq 'nstepmax=3' "$WORK/effective.nml"
 grep -Fq 'var_region(1,20)=0.000753012048192771d0' "$WORK/effective.nml"
 fi
+grep -Fq "radiation_transport='snrt_mn', snrt_moment_order=5" "$WORK/effective.nml"
+grep -Fq "dust_cooling='chimes_neq_v1'" "$WORK/effective.nml"
+grep -Fq "feedback_mode='channel_resolved'" "$WORK/effective.nml"
+test "$(grep -Ec '^[[:space:]]*noutput=1$' "$WORK/effective.nml")" -eq 1
+test "$(grep -Ec '^[[:space:]]*aout=2\.0d0$' "$WORK/effective.nml")" -eq 1
+test "$(grep -Ec '^[[:space:]]*tout=1\.0d30$' "$WORK/effective.nml")" -eq 1
+grep -Eq '^[[:space:]]*foutput=1000000$' "$WORK/effective.nml"
+grep -Eq '^[[:space:]]*fbackup=1000000$' "$WORK/effective.nml"
+case "$PROFILE" in
+  effective_population) grep -Eq '^[[:space:]]*nstepmax=4$' "$WORK/effective.nml" ;;
+  agn_reference) grep -Eq '^[[:space:]]*nstepmax=3$' "$WORK/effective.nml" ;;
+esac
 if [[ "$AMR_INTERFACE" == 1 ]]; then
   # Exercise the changed coarse/fine transport consumer, not a new galaxy
   # model: eight central level2 cells refine to level3, leaving coarse leaves.
@@ -272,10 +272,6 @@ if [[ "$AMR_INTERFACE" == 1 ]]; then
   grep -Eq '^[[:space:]]*levelmax=3$' "$WORK/effective.nml"
   grep -Fq 'void_refine=.true., void_refine_min_level=3' "$WORK/effective.nml"
 fi
-grep -Fq "radiation_transport='snrt_mn', snrt_moment_order=5" "$WORK/effective.nml"
-grep -Fq "dust_cooling='chimes_neq_v1'" "$WORK/effective.nml"
-grep -Eq '^[[:space:]]*foutput=1000000$' "$WORK/effective.nml"
-grep -Fq 'fbackup=1000000' "$WORK/effective.nml"
 sha256sum "$TEMPLATE" "$WORK/effective.nml" "$WORK/ic_sink" "$WORK/rank-bind.sh" \
   "$ROOT/simulation/snrt/runs/m5_source_active_dust_chimes_reference.sbatch" "$BINARY" \
   "$CHIMES_REPORTER_SOURCE" "$CHIMES_REPORTER" \
