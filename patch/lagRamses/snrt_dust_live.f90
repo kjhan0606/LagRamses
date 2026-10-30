@@ -1348,13 +1348,21 @@ contains
     if(any(.not.ieee_is_finite(payload)).or.any(payload<0))ierr=dust_err_state
   end subroutine
 
-  subroutine snrt_dust_live_restore(icell,payload,ierr)
+  subroutine snrt_dust_live_restore(icell,payload,ierr,prevalidated)
     integer, intent(in) :: icell
     real(dust_dp), intent(in) :: payload(:)
     integer, intent(out) :: ierr
     integer :: slot
-    call snrt_dust_live_validate_payload(payload,ierr)
-    if(ierr/=dust_ok)return
+    logical,optional,intent(in) :: prevalidated
+    logical :: trusted
+    ! Only the transactional regrid commit passes PREVALIDATED; public/default
+    ! restores still enforce full M_N realizability here.
+    trusted=.false.
+    if(present(prevalidated))trusted=prevalidated
+    if(.not.(trusted.and.snrt_state_is_moment()))then
+       call snrt_dust_live_validate_payload(payload,ierr)
+       if(ierr/=dust_ok)return
+    endif
     slot=snrt_state_get_slot(icell)
     if(slot==0)then
        ierr=dust_err_state
@@ -1364,7 +1372,8 @@ contains
     call prepare(ierr)
     if(ierr/=dust_ok)return
     if(snrt_state_is_moment())then
-       call mn_live_ir_unpack(slot,snrt_dust_contract_number_ir,snrt_ndirection,payload,ierr)
+       call mn_live_ir_unpack(slot,snrt_dust_contract_number_ir,snrt_ndirection,payload,ierr, &
+            prevalidated=trusted)
        return
     endif
     call ir_store(slot,reshape(payload,[snrt_dust_contract_number_ir,snrt_ndirection]))

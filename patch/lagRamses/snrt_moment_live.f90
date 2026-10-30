@@ -140,13 +140,27 @@ contains
     energy=slabs(block)%primary(:,primary_groups+1:,offset)
   end subroutine
 
-  subroutine mn_live_write(slot,number,energy,ierr,validate_only,reserve_only)
+  subroutine mn_live_write(slot,number,energy,ierr,validate_only,reserve_only,prevalidated)
     integer,intent(in) :: slot
     real(mn_dp),intent(in) :: number(:,:),energy(:,:)
     integer,intent(out) :: ierr
-    logical,optional,intent(in) :: validate_only,reserve_only
+    logical,optional,intent(in) :: validate_only,reserve_only,prevalidated
     integer :: block,offset,status
-    call mn_live_validate(number,energy,ierr)
+    logical :: trusted
+    ! PREVALIDATED is reserved for callers that already completed full M_N
+    ! realizability checks before an atomic state-publication phase.
+    trusted=.false.
+    if(present(prevalidated))trusted=prevalidated
+    if(trusted)then
+       ierr=mn_bad_input
+       if(mn_live_basis%nm<1)return
+       if(any(shape(number)/=[mn_live_basis%nm,primary_groups]))return
+       if(any(shape(energy)/=shape(number)))return
+       if(any(.not.ieee_is_finite(number)).or.any(.not.ieee_is_finite(energy)))return
+       ierr=mn_ok
+    else
+       call mn_live_validate(number,energy,ierr)
+    endif
     if(ierr/=mn_ok)return
     if(present(validate_only))then
        if(validate_only)return
@@ -187,18 +201,23 @@ contains
     ierr=mn_ok
   end subroutine
 
-  subroutine mn_live_unpack(slot,stride,number,energy,ierr,validate_only)
+  subroutine mn_live_unpack(slot,stride,number,energy,ierr,validate_only,prevalidated)
     integer,intent(in) :: slot,stride
     real(mn_dp),intent(in) :: number(:),energy(:)
     integer,intent(out) :: ierr
-    logical,optional,intent(in) :: validate_only
+    logical,optional,intent(in) :: validate_only,prevalidated
     real(mn_dp) :: n(stride,primary_groups),e(stride,primary_groups)
+    logical :: trusted,check_only
     ierr=mn_bad_input
     if(stride<mn_live_basis%nm.or.size(number)/=stride*primary_groups.or.size(energy)/=size(number))return
     if(any(.not.ieee_is_finite(number)).or.any(.not.ieee_is_finite(energy)))return
     n=reshape(number,shape(n));e=reshape(energy,shape(e))
     if(any(n(mn_live_basis%nm+1:,:)/=0).or.any(e(mn_live_basis%nm+1:,:)/=0))return
-    call mn_live_write(slot,n(1:mn_live_basis%nm,:),e(1:mn_live_basis%nm,:),ierr,validate_only)
+    trusted=.false.;check_only=.false.
+    if(present(prevalidated))trusted=prevalidated
+    if(present(validate_only))check_only=validate_only
+    call mn_live_write(slot,n(1:mn_live_basis%nm,:),e(1:mn_live_basis%nm,:),ierr, &
+         validate_only=check_only,prevalidated=trusted)
   end subroutine
 
   subroutine mn_live_ir_read(slot,energy,ierr)
@@ -216,26 +235,31 @@ contains
     energy=slabs(block)%ir(:,:,offset);ierr=mn_ok
   end subroutine
 
-  subroutine mn_live_ir_write(slot,energy,ierr,validate_only,reserve_only)
+  subroutine mn_live_ir_write(slot,energy,ierr,validate_only,reserve_only,prevalidated)
     integer,intent(in) :: slot
     real(mn_dp),intent(in) :: energy(:,:)
     integer,intent(out) :: ierr
-    logical,optional,intent(in) :: validate_only,reserve_only
+    logical,optional,intent(in) :: validate_only,reserve_only,prevalidated
     real(mn_dp) :: angular(mn_live_basis%nq)
     integer :: block,offset,g,status
+    logical :: trusted,check_only
     ierr=mn_bad_input
     if(size(energy,1)/=mn_live_basis%nm.or.size(energy,2)<1)return
     if(mn_live_basis%nm<1)return
+    if(any(.not.ieee_is_finite(energy)))return
+    ! The fast path skips only the nonlinear closure solve; callers retain the
+    ! responsibility to validate these same moments before publication.
+    trusted=.false.;check_only=.false.
+    if(present(prevalidated))trusted=prevalidated
+    if(present(validate_only))check_only=validate_only
     ierr=mn_ok
-    if(.not.all(energy==0d0))then
+    if(.not.trusted.and..not.all(energy==0d0))then
     do g=1,size(energy,2)
        call mn_reconstruct(mn_live_basis,energy(:,g),angular,ierr)
        if(ierr/=mn_ok)return
     enddo
     endif
-    if(present(validate_only))then
-       if(validate_only)return
-    endif
+    if(check_only)return
     call location(slot,block,offset,ierr)
     if(ierr/=mn_ok)return
     if(.not.allocated(slabs(block)%ir))then
@@ -270,18 +294,23 @@ contains
     ierr=mn_ok
   end subroutine
 
-  subroutine mn_live_ir_unpack(slot,ng,stride,payload,ierr,validate_only)
+  subroutine mn_live_ir_unpack(slot,ng,stride,payload,ierr,validate_only,prevalidated)
     integer,intent(in) :: slot,ng,stride
     real(mn_dp),intent(in) :: payload(:)
     integer,intent(out) :: ierr
-    logical,optional,intent(in) :: validate_only
+    logical,optional,intent(in) :: validate_only,prevalidated
     real(mn_dp) :: padded(ng,stride)
+    logical :: trusted,check_only
     ierr=mn_bad_input
     if(stride<mn_live_basis%nm.or.size(payload)/=ng*stride)return
     if(any(.not.ieee_is_finite(payload)))return
     padded=reshape(payload,shape(padded))
     if(any(padded(:,mn_live_basis%nm+1:)/=0))return
-    call mn_live_ir_write(slot,transpose(padded(:,1:mn_live_basis%nm)),ierr,validate_only)
+    trusted=.false.;check_only=.false.
+    if(present(prevalidated))trusted=prevalidated
+    if(present(validate_only))check_only=validate_only
+    call mn_live_ir_write(slot,transpose(padded(:,1:mn_live_basis%nm)),ierr, &
+         validate_only=check_only,prevalidated=trusted)
   end subroutine
 
   subroutine mn_live_ir_expand(factor,ierr)

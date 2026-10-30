@@ -8,9 +8,12 @@ module snrt_regrid
   use mpi_mod
 #endif
   use hydro_commons, only: uold
+  use amr_parameters, only: snrt_moment_order
   use snrt_state, only: snrt_nslot,snrt_ndirection,snrt_checkpoint_cell_width, &
        snrt_state_get_slot,snrt_state_pack_cell,snrt_state_restore_cell, &
-       snrt_state_clear_cell,validate_cell_payload,snrt_state_get_cell,snrt_state_rebind_cells,snrt_state_payload_tag
+       snrt_state_clear_cell,validate_cell_payload,snrt_state_get_cell,snrt_state_rebind_cells, &
+       snrt_state_payload_tag,snrt_state_is_moment,snrt_ngroups
+  use snrt_moment_live, only: mn_live_initialize
   use snrt_amr_topology, only: snrt_halo_tile_exchange
 #ifdef DUST_LIVE
   use snrt_dust_contract, only: snrt_dust_contract_version,snrt_dust_contract_number_ir
@@ -131,7 +134,7 @@ contains
                    else if(rbuf(k+1)==0)then
                       call clear(ICELL_OF(g,j),err)
                    else
-                      call restore(ICELL_OF(g,j),rbuf(k+1:k+width/twotondim),err)
+                      call restore(ICELL_OF(g,j),rbuf(k+1:k+width/twotondim),err,prevalidated=.true.)
                    endif
                    ierr=max(ierr,err);k=k+width/twotondim
                 end do
@@ -218,16 +221,31 @@ contains
 #endif
   end subroutine
 
-  subroutine restore(icell,payload,ierr)
+  subroutine restore(icell,payload,ierr,prevalidated)
     integer, intent(in) :: icell
     real(dp), intent(in) :: payload(:)
     integer, intent(out) :: ierr
-    call validate_restore(icell,payload,ierr)
-    if(ierr/=0)return
-    call snrt_state_restore_cell(icell,payload(1:snrt_checkpoint_cell_width),ierr)
+    logical,optional,intent(in) :: prevalidated
+    logical :: trusted
+    ierr=2
+    if(size(payload)/=snrt_checkpoint_cell_width+ir_width())return
+    if(any(.not.ieee_is_finite(payload)))return
+    ! PREVALIDATED is legal only after this exact payload passed the earlier
+    ! full validation phase (and MPI agreement where the operation is collective).
+    trusted=.false.
+    if(present(prevalidated))trusted=prevalidated
+    ! Empty payloads use CLEAR at regrid call sites; never let the trusted path
+    ! reinterpret an invalid zero-tag payload as a valid stored state.
+    if(trusted.and.payload(1)==0.0_dp)trusted=.false.
+    if(.not.trusted)then
+       call validate_restore(icell,payload,ierr)
+       if(ierr/=0)return
+    endif
+    call snrt_state_restore_cell(icell,payload(1:snrt_checkpoint_cell_width),ierr,prevalidated=trusted)
     if(ierr/=0)return
 #ifdef DUST_LIVE
-    if(ir_width()>0)call snrt_dust_live_restore(icell,payload(snrt_checkpoint_cell_width+1:),ierr)
+    if(ir_width()>0)call snrt_dust_live_restore(icell,payload(snrt_checkpoint_cell_width+1:),ierr, &
+         prevalidated=trusted)
 #endif
   end subroutine
 
@@ -282,17 +300,17 @@ contains
     if(ierr/=0)return
     call pack(parent,payload,ierr)
     if(ierr/=0)return
-    do j=1,twotondim
-       call validate_restore(children(j),payload,ierr)
-       if(ierr/=0)return
-    end do
+    ! All children receive the same payload, and cell_ids constructs each from
+    ! this valid grid. Run the expensive M_N realizability check only once.
+    call validate_restore(children(1),payload,ierr)
+    if(ierr/=0)return
     ! First-order, positivity-preserving prolongation of density variables.
     ! Each child has 1/8 the parent volume, so integrated photons/IR are kept.
     do j=1,twotondim
        if(payload(1)==0)then
           call clear(children(j),ierr)
        else
-          call restore(children(j),payload,ierr)
+          call restore(children(j),payload,ierr,prevalidated=.true.)
        end if
        if(ierr/=0)return
     end do
@@ -312,7 +330,7 @@ contains
     if(merged(1)==0)then
        call clear(parent,ierr)
     else
-       call restore(parent,merged,ierr)
+       call restore(parent,merged,ierr,prevalidated=.true.)
     end if
     if(ierr/=0)return
     do j=1,twotondim
@@ -392,6 +410,12 @@ contains
     ncache=active(ilevel)%ngrid
     width=snrt_checkpoint_cell_width+ir_width()
     allocate(parents(ncache),reduced(width,ncache),field(nfield),count_field(nfield))
+    ! Validation below is read-only and cell independent. Initialize the shared
+    ! M_N basis serially first so simultaneous validators never race lazy setup.
+    if(snrt_state_is_moment())then
+       call mn_live_initialize(snrt_moment_order,snrt_ngroups,ierr)
+       if(ierr/=0)return
+    endif
     count_field=0
     do i=1,ncache
        g=active(ilevel)%igrid(i); parent=father(g); parents(i)=parent
@@ -464,10 +488,15 @@ contains
           received(first_column+column-1,:)=tile(owned,column)
        end do
     end do
+    ! Regrid validation can require hundreds of safeguarded Newton iterations
+    ! per group near the realizability boundary. Balance independent parents
+    ! dynamically, and keep the global all-or-nothing commit after this barrier.
+!$omp parallel do default(shared) private(i,j) reduction(max:ierr) schedule(dynamic,1) if(nowned>=4)
     do i=1,nowned
        call validate_restore(owned(i),received(:,i),j)
        ierr=max(ierr,j)
     end do
+!$omp end parallel do
 #ifndef WITHOUTMPI
     call MPI_ALLREDUCE(ierr,global_error,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
     if(info/=0)call MPI_ABORT(MPI_COMM_WORLD,10,j)
@@ -478,7 +507,7 @@ contains
        if(received(1,i)==0)then
           call clear(owned(i),ierr)
        else
-          call restore(owned(i),received(:,i),ierr)
+          call restore(owned(i),received(:,i),ierr,prevalidated=.true.)
        end if
        if(ierr/=0)return
     end do

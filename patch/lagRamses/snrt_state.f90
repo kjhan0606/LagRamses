@@ -199,18 +199,27 @@ contains
     ierr = 0
   end subroutine
 
-  subroutine snrt_state_restore_cell(icell,payload,ierr,validate_only)
+  subroutine snrt_state_restore_cell(icell,payload,ierr,validate_only,prevalidated)
     use amr_commons, only: ncoarse,ngridmax,twotondim
     integer, intent(in) :: icell
     real(dp), intent(in) :: payload(snrt_checkpoint_cell_width)
     integer, intent(out) :: ierr
-    logical, intent(in), optional :: validate_only
+    logical, intent(in), optional :: validate_only,prevalidated
     integer :: slot
     integer :: g
     real(c_float) :: photons(snrt_ndirection,snrt_ngroups)
     real(dp) :: shift(snrt_ndirection,snrt_ngroups)
-    call validate_cell_payload(payload,ierr)
-    if(ierr/=0) return
+    logical :: trusted
+    ! PREVALIDATED is an internal two-phase-restore contract. The caller must
+    ! have validated this exact payload before any rank publishes its state.
+    trusted=.false.
+    if(present(prevalidated))trusted=prevalidated
+    if(.not.(trusted.and.snrt_state_is_moment()))then
+       call validate_cell_payload(payload,ierr)
+       if(ierr/=0) return
+    else
+       ierr=0
+    endif
     if(icell<1.or.icell>ICELL_OF(ngridmax,twotondim))then
        ierr=11
        return
@@ -235,7 +244,7 @@ contains
           snrt_slot_of_cell(icell)=slot;snrt_cell_id(slot)=icell
        endif
        call mn_live_unpack(slot,snrt_ndirection,payload(5:4+snrt_checkpoint_number_width), &
-            payload(5+snrt_checkpoint_number_width:),ierr)
+            payload(5+snrt_checkpoint_number_width:),ierr,prevalidated=trusted)
        if(ierr/=0)return
        snrt_hydrogen_ii(slot)=payload(2);snrt_neutral_fraction(slot)=1-payload(2)
        snrt_helium_ii(slot)=payload(3);snrt_helium_iii(slot)=payload(4)
