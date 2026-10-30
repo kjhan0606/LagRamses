@@ -485,7 +485,14 @@ The CPU effective-population run `1245438` completed all 128 coarse steps and
 passed its physical postconditions, although its old runner selected the
 hybrid-only `CHIMES_LEVEL_QUEUE` log check for a CPU build and therefore
 returned batch exit code 1. Its final HDF5 dump remains the CPU comparison
-reference. H100 job `442500` was cancelled before execution (zero runtime), so
+reference. Output metadata gives `time=5.8376107e-3`, `unit_t=3.1556926e16 s`,
+and `aexp=1`, corresponding to 5.8376 Myr. It also records
+`feedback_mode=channel_resolved`, all five stellar channels enabled, and the
+Phase-0 yield table loaded; the
+`thermal_feedback` caller invoked `phase0_feedback` on all 128 coarse steps.
+The retained log does not report per-channel event counts, so this proves the
+live source path ran but is not an isolated SNII/SNIa event-count result.
+H100 job `442500` was cancelled before execution (zero runtime), so
 it produced no comparison. The current-source A40 hybrid counterpart is job
 `442563` on syntax, pending GPU resources. At the 2026-10-30 23:19 KST
 check, Slurm estimated a start at 2026-10-31 03:06 KST. Preserve the CPU
