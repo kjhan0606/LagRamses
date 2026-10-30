@@ -550,3 +550,18 @@ The official-source data-terms recheck is recorded in
 for the selected CHIMES, Draine D03, PARSEC VMS or KL16 data, so those terms
 remain blocked. The production candidate was not promoted and no data-use
 approval was inferred.
+
+### Repeated-event delayed-cooling timer regression — 2026-10-30
+
+The focused Fortran unit now advances the active timer by 3 Myr before a
+second SN event, changes the gas density through returned mass, and asserts
+that the remaining delay stays at 17 Myr rather than restarting at 20 Myr.
+It also checks subsequent non-SN mass return, time decrement/expiry, and
+re-arming after expiry. `F90=ifx bash tests/run_stellar_feedback_policy_unit.sh`
+passed on grammar with the Intel 2025.3 compiler (`delayed cooling runtime:
+PASS`; the companion stellar-feedback policy unit also passed).
+
+This directly tests the timer helper's repeated-event semantics. The separate
+job1243549 restart smoke passed same-model HDF5 restore and rejected a changed
+`t_diss`; that smoke does not exercise repeated feedback events. Neither check
+is a source-active cosmological feedback qualification.
