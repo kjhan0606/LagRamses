@@ -72,6 +72,14 @@ case "$CHIMES_BACKEND" in
   cpu|hybrid) ;;
   *) echo 'M5_CHIMES_BACKEND must be cpu or hybrid' >&2; exit 2 ;;
 esac
+if [[ "$CHIMES_BACKEND" == cpu && "$CELL_SCHEDULER" != cohort ]]; then
+  echo 'CPU CHIMES uses cohort scheduling; level_queue requires the CUDA hybrid backend' >&2
+  exit 2
+fi
+if [[ "$CHIMES_BACKEND" == hybrid && "$CELL_SCHEDULER" != level_queue ]]; then
+  echo 'Hybrid CHIMES requires level_queue scheduling' >&2
+  exit 2
+fi
 case "$TRANSPORT_BACKEND:$MATERIAL_BACKEND" in
   auto:auto|openmp:auto|openmp:openmp|auto:openmp) ;;
   *) echo 'Invalid M5 diagnostic backend selection' >&2; exit 2 ;;
