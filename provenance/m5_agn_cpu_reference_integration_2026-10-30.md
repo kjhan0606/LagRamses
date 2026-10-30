@@ -445,3 +445,48 @@ This closes the Kroupa package/IMF metadata and runtime-path consistency
 repair. It does not promote any yield, SED, SNIa, AGN, dust, or nine-group
 reference contract to production status; the preceding nonproduction limits
 remain in force.
+
+## Three-step AGN reference revalidation — 2026-10-30
+
+CPU Slurm job `1245972` completed on grammar `normal` (grammar078) with exit
+code 0 after 54:09 elapsed. It used one MPI rank, eight OpenMP threads, and
+1,392,612 KiB peak RSS. The build was job `1245437`, `CHIMES_CUDA=0`, source
+commit `a0a557387f306249e7c9591a6bd311af8b771eb3`; executable SHA256 is
+`47c2a56a12c2b6297b063541c9f5fbc59bd7a934ca236afb955e0d1f6a54834e`. The
+effective namelist SHA256 is
+`b63d24b1b9274f03151377b0e3145f2fbc7310e5ac0f05a0b3ba8554dfc1a349`, and the
+sink IC SHA256 is
+`971d2f0f2b0c4731fd2b9801ebc5c363dd9cd51268660eb3cf801e7a34d88a54`.
+
+The result sentinel is
+`M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS`: three completed coarse steps,
+M5 order 5, live two-size dust, CPU CHIMES, a real accreting BH sink, and
+stellar SED disabled to isolate the AGN source. The step-2 sidecar records
+positive BH growth, inflow `5.39665e-6 Msun/yr`, Eddington ratio `83.9178`,
+bolometric luminosity `3.05619e40 erg/s`, and active thermal feedback. Step 3
+records jet mode. The 16,896 momentum-assertion cells passed. The active M5
+photon-ledger residuals are `2.68312e-17` at step 2 and `3.79273e-18` at step
+3; corresponding radiation-energy residuals are `9.62051e-17` and
+`-5.52590e-17` in the printed ledger convention. No nonzero NaN checks, M5
+rejections, dust-transaction failures, or fine-MG nonconvergence warnings
+were found. `abort_on_mg_nonconvergence=.true.` was active. The output policy
+produced no raw snapshots (`raw_outputs=0`).
+
+This is an AGN-source and coupling smoke under the declared nonproduction
+reference controls, not production physical calibration. RAMSES attributed
+99.8% of its 3,241.2 s runtime to the combined `cooling` bucket; this does not
+separate CHIMES from the coupled M5/material work. Printed `econs` is not a
+closed gas+radiation+dust+AGN energy budget. The retained compact run record is
+`.m5-source-dust-chimes-1245972/driver-evaluation.txt`.
+
+## Effective-population CPU/GPU comparator retention update — 2026-10-30
+
+The CPU effective-population run `1245438` completed all 128 coarse steps and
+passed its physical postconditions, although its old runner selected the
+hybrid-only `CHIMES_LEVEL_QUEUE` log check for a CPU build and therefore
+returned batch exit code 1. Its final HDF5 dump remains the CPU comparison
+reference. H100 job `442500` was cancelled before execution (zero runtime), so
+it produced no comparison. The current-source A40 hybrid counterpart is job
+`442563` on syntax, pending GPU resources with tentative start
+2026-10-31 12:06 KST. Preserve the CPU dump until `442563` and the state
+comparison are evaluated; remove only the raw dump after that evaluation.
