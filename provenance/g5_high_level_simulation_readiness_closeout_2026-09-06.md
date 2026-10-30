@@ -554,9 +554,11 @@ approval was inferred.
 
 The preceding GPU-availability statement is a snapshot of the grammar
 controller and predates the current syntax submission. A40 job `442563` was
-cancelled before allocation because the A40 cards remained occupied. Its
-replacement, typed A10 job `442732`, is running on `syn03`; its
-effective-population/HDF5 comparison evidence is recorded in
+cancelled before allocation because the A40 cards remained occupied. A10 job
+`442732` failed before RAMSES evolution because the runner used the wrong
+executable suffix. Its corrected replacement, typed A10 job `442742`, is
+running on `syn03`; its current status and partial effective-population/HDF5
+comparison evidence are recorded in
 [`m5_agn_cpu_reference_integration_2026-10-30.md`](m5_agn_cpu_reference_integration_2026-10-30.md).
 Current-source hybrid GPU qualification remains open until the run and
 CPU/GPU state comparison complete. This does not change the physical-data

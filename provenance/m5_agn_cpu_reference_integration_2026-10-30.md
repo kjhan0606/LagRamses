@@ -494,10 +494,33 @@ The retained log does not report per-channel event counts, so this proves the
 live source path ran but is not an isolated SNII/SNIa event-count result.
 H100 job `442500` was cancelled before execution (zero runtime). A40 job
 `442563` also remained unallocated and was cancelled with zero runtime when
-the A40 nodes had no free cards. Its replacement, A10 job `442732`, started
-on `syn03` at 2026-10-30 23:42:50 KST with one typed A10, 8 CPUs and 64 GiB.
-At startup it recorded source HEAD `ca3994b3f0215eaf663119a4308bda39076f1a73`
-and a clean tracked worktree. It builds the current CUDA-enabled executable
-and runs the same 128-step effective-population profile with one final dump.
-The CPU dump remains preserved until `442732` and the final-state comparison
-are evaluated; then remove only the evaluated raw snapshots.
+the A40 nodes had no free cards. A10 job `442732` started on `syn03` but failed
+before RAMSES evolution: the runner looked for the unsuffixed executable while
+the Makefile emitted the `3d` executable. It is not a simulation result. The
+corrected runner path was submitted as job `442742`; current status and its
+partial evidence are recorded below.
+
+## Current-source effective-population A10 hybrid run — 2026-10-31
+
+Job `442742` runs on syntax partition `a10`, node `syn03`, with one typed A10,
+8 CPUs, 64 GiB and a four-hour limit. Its runner uses source HEAD `4a33e91`
+and the corrected `${EXEC_PREFIX}3d` executable. The effective profile is
+`effective_population_M5_live_dust_CHIMES_reference_NONPRODUCTION`, with one
+MPI rank, eight OpenMP threads, a real BH accretion sink, stellar SED enabled,
+hybrid CHIMES, automatic M5/material backend selection and 128 coarse steps.
+The effective namelist and sink-IC SHA256 values are respectively
+`1e42f797e1045b9a01b417810711c4aec6c0147e9e64850233d87b0d282e9532` and
+`c9c1d969915a7987d24c23ac9facd39855d53bc7bb94f5ad5aff90ea6c40ea37`.
+The output schedule requests one final full dump at step 128; the CPU final
+dump remains preserved for the comparison.
+
+At the 2026-10-31 00:07 KST check, Slurm reported `RUNNING` at 16:38 elapsed;
+the log had reached main step 13 of 128. Runtime evidence shows the hybrid
+CHIMES level queue completing all 64 cells with eight workers and one GPU
+broker. Dust, IR absorption and scattering each recorded a GPU batch. M5
+closure dispatch includes GPU work, while the sampled face-transport counters
+remain on CPU. Final CHIMES/device counters, run completion, runtime and the
+CPU/A10 HDF5 state comparison are therefore still pending. This is not yet a
+GPU speedup result or production qualification. Preserve both final dumps
+until the comparison is evaluated; afterward remove only the raw snapshots
+owned by these two runs and retain the compact evidence.
