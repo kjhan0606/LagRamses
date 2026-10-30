@@ -120,6 +120,17 @@ readonly SUN=$ASSETS/.snrt-performance.jDx9Iz/sundials-release
 : "${M5_CHIMES_BINARY:?set M5_CHIMES_BINARY to a verified CHIMES-enabled M5 executable}"
 readonly BINARY=$(realpath "$M5_CHIMES_BINARY")
 readonly CHIMES_INSTALL=$(realpath "$(dirname "$BINARY")/../chimes-install")
+readonly CHIMES_BUILD_RESULT=$(dirname "$CHIMES_INSTALL")/build-result.txt
+test -f "$CHIMES_BUILD_RESULT" || { echo 'Missing CHIMES build provenance' >&2; exit 3; }
+readonly CHIMES_LIBRARY_MODE=$(awk -F= '$1=="CHIMES_LIBRARY_MODE" {mode=$2} END {print mode}' "$CHIMES_BUILD_RESULT")
+case "$CHIMES_LIBRARY_MODE" in
+  reference|trace) ;;
+  *) echo "Build provenance has no recognized CHIMES library mode: $CHIMES_LIBRARY_MODE" >&2; exit 3 ;;
+esac
+if [[ -n "${M5_CHIMES_LIBRARY_MODE:-}" && "$M5_CHIMES_LIBRARY_MODE" != "$CHIMES_LIBRARY_MODE" ]]; then
+  echo "Requested CHIMES library mode $M5_CHIMES_LIBRARY_MODE does not match build mode $CHIMES_LIBRARY_MODE" >&2
+  exit 3
+fi
 test -x "$BINARY"
 test -f "$CHIMES_INSTALL/libchimes.so"
 if [[ "$CHIMES_BACKEND" == hybrid ]]; then
@@ -155,6 +166,7 @@ else
   printf 'GPU=none (CPU-only)\n' | tee "$WORK/launch.txt"
 fi
 printf 'RUN_ID=%s\nBINARY=%s\n' "$RUN_ID" "$BINARY" | tee -a "$WORK/launch.txt"
+printf 'CHIMES_LIBRARY_MODE=%s\n' "$CHIMES_LIBRARY_MODE" | tee -a "$WORK/launch.txt"
 printf 'SLURM_JOB_ID=%s PARTITION=%s NODELIST=%s GPUS=%s\n' \
   "$SLURM_JOB_ID" "${SLURM_JOB_PARTITION:-unknown}" "${SLURM_JOB_NODELIST:-unknown}" \
   "${SLURM_JOB_GPUS:-${SLURM_JOB_GRES:-none}}" | tee -a "$WORK/launch.txt"
@@ -275,7 +287,7 @@ fi
 sha256sum "$TEMPLATE" "$WORK/effective.nml" "$WORK/ic_sink" "$WORK/rank-bind.sh" \
   "$ROOT/simulation/snrt/runs/m5_source_active_dust_chimes_reference.sbatch" "$BINARY" \
   "$CHIMES_REPORTER_SOURCE" "$CHIMES_REPORTER" \
-  "$CHIMES_INSTALL/libchimes.so" "$TABLE" "$GROUP_DIR/manifest.json" \
+  "$CHIMES_INSTALL/libchimes.so" "$CHIMES_BUILD_RESULT" "$TABLE" "$GROUP_DIR/manifest.json" \
   "$GROUP_DIR"/group_*.hdf5 "$GROUP_CONTRACT" "$SECONDARY" "$DUST_CONTRACT" \
   "$ASSETS/.chimes-spectral.TrQxAG/bank-final/atomic_shells.h5" \
   "$ASSETS/.chimes-molecular.U6ZQCr/bank/molecular_nodes.h5" \
@@ -320,7 +332,7 @@ if [[ "$PROFILE" == effective_population ]]; then
   unset SNRT_RT_LEVEL
 fi
 
-printf 'PROFILE=%s_M5_live_dust_CHIMES_reference_NONPRODUCTION\n' "$PROFILE" | tee -a "$WORK/launch.txt"
+printf 'PROFILE=%s_M5_live_dust_CHIMES_%s_NONPRODUCTION\n' "$PROFILE" "$CHIMES_LIBRARY_MODE" | tee -a "$WORK/launch.txt"
 stellar_sed_status=enabled
 if [[ -z "$SED" ]]; then stellar_sed_status=disabled; fi
 printf 'MPI=%s OMP=%s; real_BH_accretion_sink; stellar_SED=%s; AGN/dust contracts=reference_control; CHIMES_backend=%s; VERIFY_RESTART=%s\n' \
@@ -520,6 +532,6 @@ if [[ "$CHIMES_BACKEND" == hybrid ]]; then
 fi
 source_scope=effective_population
 if [[ "$PROFILE" == agn_reference ]]; then source_scope=AGN_only_point_source; fi
-printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS profile=%s M5_order=5 source_scope=%s AGN_state=%s M5_total_source_ledger=nonzero dust_mass=enabled CHIMES_backend=%s momentum_assert_cells=%s reference_controls=NONPRODUCTION raw_outputs=0\n' \
-  "$PROFILE" "$source_scope" "$agn_evidence" "$CHIMES_BACKEND" "$momentum_assert_cells" \
+printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_%s_PASS profile=%s M5_order=5 source_scope=%s AGN_state=%s M5_total_source_ledger=nonzero dust_mass=enabled CHIMES_backend=%s momentum_assert_cells=%s reference_controls=NONPRODUCTION raw_outputs=0\n' \
+  "${CHIMES_LIBRARY_MODE^^}" "$PROFILE" "$source_scope" "$agn_evidence" "$CHIMES_BACKEND" "$momentum_assert_cells" \
   | tee "$WORK/result.txt"

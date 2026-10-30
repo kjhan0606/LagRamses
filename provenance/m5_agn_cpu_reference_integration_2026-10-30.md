@@ -228,13 +228,56 @@ adjacent reference copy is preserved and hashes to
 `64ad78dbd531621904a9fc00dea2c81d8068198fa245fff659bede9ca4d24ab2`.
 The production/default library selection remains `reference`.
 
-Integrated trace job `1244750` now uses that exact candidate library and the
-same AGN-reference runtime profile on the CPU-only `normal` queue. It was
-submitted to start after the reference run terminates (regardless of its exit
-status) and the trace build succeeds. At this record update it is running;
-no trace-integrated verdict is claimed yet. GPU hybrid jobs `442109`/`442110`
-remain a separate `syntax` H100 chain pending `QOSGrpGRES` and its build
-dependency.
+## Integrated trace run closeout — 2026-10-30
+
+CPU job `1244750` completed on `grammar024`/`normal` with exit code 0, 1 MPI
+rank, 8 OpenMP threads, 53:54 Slurm elapsed, and 1,487,500 KiB peak RSS. The
+RAMSES log reached `Run completed`; `result.txt` records `raw_outputs=0`, and
+no `output_00001` or `output_00002` directory was created. Its effective
+namelist and sink IC hashes exactly match reference job `1244668`. Relevant
+runtime source under `patch/lagRamses` and `simulation/snrt` is identical
+between the paired builds; the only source-tree difference in those paths is
+the later build script.
+
+The run used trace library build `1244720`: its `build-result.txt` says
+`CHIMES_LIBRARY_MODE=trace`, `ldd` resolves the executable to that build's
+`chimes-install/libchimes.so`, and `inputs.sha256` pins the library to
+`e59e7d5365681631186bb0dad4e95594c29c4561bac668dcb5e6c716197cc3e2`. This
+matches the trace-library provenance above. The old runner emitted the fixed
+`M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS` label even for this trace
+library; a follow-up makes the runner read the build mode, include
+`build-result.txt` in the input hashes, and label future results as
+`..._TRACE_PASS` or `..._REFERENCE_PASS` accordingly.
+
+The reference and trace runs each produced three level-3, order-5 M5 commits
+with 16, 16, and 1 substeps. Their commit times were 401.936/2,315.817/447.083
+s and 407.442/2,323.601/446.971 s, respectively. M5 time increased by 13.178 s
+(0.42%); total RAMSES elapsed increased from 3,209.604 to 3,222.777 s
+(0.41%). These runs used separate normal-queue nodes, so this is a runtime
+compatibility comparison, not a controlled performance result or speedup.
+
+At the source-active commit, total emitted photon number agrees to printed
+precision (`8.5315194363883e-3`). The trace/reference differences in absorbed
+number, gas heat, dust heat, and peak `xHII` are about `1.5e-10` or smaller
+relative (peak `xHII` differs by `2.3e-13` absolute). Printed number and energy
+closure residuals remain at or below about `1e-16`, with no M5 transaction
+rejection. Both logs report the same RAMSES mass/energy conservation values at
+the corresponding coarse step.
+
+Across 66 photo rows, the trace run counted 443,641 CVODE steps, 589,844 RHS
+calls, and 409,899 linear iterations, versus 444,629, 590,818, and 411,048 in
+the reference run. Summed per-cell timers were 6,199.089 photo seconds and
+61.105 dark seconds for trace, versus 6,195.181 and 57.501 seconds for
+reference; these overlap across OpenMP workers and are not wall time. The
+small count/timing differences do not qualify a speed improvement.
+
+This confirms that the trace candidate completes the integrated source-active
+M5 + live-dust + CHIMES reference-control profile without a numerical or
+runtime regression at the measured precision. It does not prove the
+`CVodeReInit` retry branch was exercised: the runtime reporter exposes RHS
+counts and worker mask, not retry counts. Keep that recovery branch
+unqualified until direct branch evidence exists. The profile remains
+`NONPRODUCTION`, and the default CHIMES library remains `reference`.
 
 ## GPU queue correction and A100 reroute — 2026-10-30
 
