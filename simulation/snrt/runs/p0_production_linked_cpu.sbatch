@@ -7,7 +7,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
+#SBATCH --mem=32G
 #SBATCH --time=01:00:00
 #SBATCH --chdir=/gpfs/kjhan/chimes-cvode-gpu-20261001
 #SBATCH --output=/gpfs/kjhan/chimes-cvode-gpu-20261001/.p0-production-linked-%j.log
