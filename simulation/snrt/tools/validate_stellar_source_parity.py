@@ -575,7 +575,11 @@ def audit(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
         r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\?=|:=|\+=|=)\s*(.*)$",
         make_db_text,
     ):
-        make_db_variables[name] = make_database_assignment(make_db_text, name) or ""
+        make_db_variables[name] = (
+            (make_database_assignment(make_db_text, name) or "")
+            .split("#", 1)[0]
+            .strip()
+        )
     assignment_values = {}
     assignment_names = list(
         dict.fromkeys(
@@ -618,25 +622,29 @@ def audit(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
     )
     source_manifest = production["source_manifest"]
     source_manifest_path = ROOT / source_manifest["path"]
-    source_manifest_text = (
-        source_manifest_path.read_text(encoding="utf-8", errors="replace")
-        if source_manifest_path.is_file()
-        else ""
+    # Compare only the source list GNU Make activates for the evaluated
+    # production configuration.  The sidecar contains conditional modules
+    # (for example RADIOACTIVE-only sources) that are not part of the default
+    # stellar object list; scanning its raw text incorrectly treated those
+    # inactive sources as required production objects.
+    active_manifest_assignment = (
+        make_database_assignment(
+            make_db_text, "PHASE0_STELLAR_ENRICHMENT_SOURCES"
+        )
+        if make_db_ok
+        else None
     )
-    manifest_sources = sorted(
-        {
-            Path(match).name
-            for match in re.findall(
-                r"patch/lagRamses/[A-Za-z0-9_.-]+\.f90", source_manifest_text
-            )
-        }
+    active_manifest_sources = expand_make_variables(
+        active_manifest_assignment or "", make_db_variables
     )
     manifest_source_order = [
         Path(match).name
         for match in re.findall(
-            r"patch/lagRamses/[A-Za-z0-9_.-]+\.f90", source_manifest_text
+            r"patch/lagRamses/[A-Za-z0-9_.-]+\.f90",
+            active_manifest_sources,
         )
     ]
+    manifest_sources = sorted(set(manifest_source_order))
     expected_manifest_sources = sorted(
         source for source in required_sources if source.startswith("stellar_")
     )
