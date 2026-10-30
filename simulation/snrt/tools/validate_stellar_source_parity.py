@@ -58,7 +58,9 @@ def git_is_ancestor(ancestor: str, descendant: str) -> bool:
 
 def git_status() -> list[str]:
     return subprocess.check_output(
-        ("git", "status", "--short"), cwd=ROOT, text=True
+        ("git", "status", "--short", "--untracked-files=no"),
+        cwd=ROOT,
+        text=True,
     ).splitlines()
 
 
