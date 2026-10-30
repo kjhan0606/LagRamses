@@ -187,14 +187,14 @@ contains
       ! made each 384-node M5 sweep pay a separate allocation/copy/sync cost
       ! for every face batch; 32 remains a bounded live-kernel payload.
       integer,parameter :: angle_tile=32,field_tile=32
-      real(dp),allocatable :: field(:,:),extended(:,:),cache(:,:),theta(:),samples(:),slopes(:,:)
+      real(dp),allocatable :: field(:,:),extended(:,:),cache(:,:),theta(:)
       real(dp),allocatable :: donor(:,:,:),integrated_flux(:,:)
       real(dp),allocatable :: all_projected(:,:),left(:,:,:),right(:,:,:),geometry(:,:),face_flux(:,:)
       integer,allocatable :: faces(:,:)
       real(dp) :: angular(b%nq),moments(b%nm),flux(b%nm),mu,il,ir,signface,flow,dl,dr
       integer :: first,last,col,j,i,q,f,a,r,k,nq,component,ncol,nface,ff,fl,fi,fs,opposite,reverse_tile
       allocate(field(mesh%nfield,field_tile),extended(b%nm,mesh%nall),cache(b%nm+1,mesh%nall))
-      allocate(theta(mesh%nowned),samples(mesh%nall),slopes(3,mesh%nowned))
+      allocate(theta(mesh%nowned))
       allocate(donor(4,angle_tile,mesh%nall))
       allocate(all_projected(b%nm,mesh%nall),faces(3,6*mesh%nleaf))
       allocate(left(4,angle_tile,256),right(4,angle_tile,256),geometry(5,256),face_flux(b%nm,256))
@@ -240,9 +240,7 @@ contains
       enddo
       ! The same theta applies to all quadrature nodes of a cell. Coarse
       ! donors use conservative injection, as in the existing AMR interface.
-      do q=1,b%nq
-         call sample_slopes(b,mesh,extended,cache,q,samples,slopes,theta)
-      enddo
+      call sample_slopes_theta(b,mesh,extended,cache,theta)
       ! The first exchange uses moment tiles (field_tile columns), whereas
       ! the angular donor exchange needs four columns per angular node. Grow
       ! the same work array only after the moment exchange has finished; this
@@ -252,12 +250,10 @@ contains
       allocate(field(mesh%nfield,4*angle_tile))
       do first=1,b%nq,angle_tile
          nq=min(angle_tile,b%nq-first+1);donor=0;field=0
+         call sample_slopes_tile(b,mesh,extended,cache,first,nq,theta,donor)
          do k=1,nq
             q=first+k-1
-            call sample_slopes(b,mesh,extended,cache,q,samples,slopes)
             do i=1,mesh%nowned
-               donor(1,k,i)=samples(i)
-               donor(2:4,k,i)=theta(i)*slopes(:,i)
                field(mesh%cells(i),4*(k-1)+1:4*k)=donor(:,k,i)
             enddo
          enddo
@@ -337,45 +333,89 @@ contains
     end subroutine
   end subroutine
 
-      subroutine sample_slopes(b,mesh,extended,cache,q,samples,slopes,theta)
+      subroutine sample_slopes_theta(b,mesh,extended,cache,theta)
         type(mn_basis),intent(in) :: b
         type(mn_amr_mesh),intent(in) :: mesh
         real(dp),intent(in) :: extended(:,:),cache(:,:)
-        real(dp),intent(out) :: samples(:),slopes(:,:)
-        integer,intent(in) :: q
-        real(dp),optional,intent(inout) :: theta(:)
-        integer :: i,a,l,r
-        real(dp) :: low,high,s
-        slopes=0
-!$omp parallel private(i,a,l,r,low,high,s)
+        real(dp),intent(out) :: theta(:)
+        real(dp),allocatable :: samples(:)
+        integer :: i,a,l,r,q
+        real(dp) :: low,high,s,slope
+        allocate(samples(mesh%nall));theta=1
+        ! Keep one OpenMP team alive across all angular nodes. The old helper
+        ! opened a new parallel region twice for every node, in both SSPRK
+        ! stages and every photon group.
+!$omp parallel private(i,a,l,r,q,low,high,s,slope)
+        do q=1,b%nq
 !$omp do schedule(static)
-        do i=1,mesh%nall
-           if(extended(1,i)>0)then
-              samples(i)=extended(1,i)* &
-                   exp(dot_product(cache(1:b%nm-1,i),b%harmonic(2:,q)- &
-                   extended(2:,i)/extended(1,i))-cache(b%nm,i))/cache(b%nm+1,i)
-           else
-              samples(i)=0
-           endif
-        enddo
+           do i=1,mesh%nall
+              if(extended(1,i)>0)then
+                 samples(i)=extended(1,i)* &
+                      exp(dot_product(cache(1:b%nm-1,i),b%harmonic(2:,q)- &
+                      extended(2:,i)/extended(1,i))-cache(b%nm,i))/cache(b%nm+1,i)
+              else
+                 samples(i)=0
+              endif
+           enddo
 !$omp end do
 !$omp do schedule(static)
-        do i=1,mesh%nleaf
-           do a=1,3
-              l=mesh%neighbor(2*a-1,i);r=mesh%neighbor(2*a,i)
-              if(l==0.or.r==0)cycle
-              low=(samples(i)-samples(l))/(.5d0*(mesh%width(i)+mesh%width(l)))
-              high=(samples(r)-samples(i))/(.5d0*(mesh%width(i)+mesh%width(r)))
-              slopes(a,i)=mn_limited_slope(low,high,b%spatial_limiter)
-           enddo
-           if(present(theta))then
+           do i=1,mesh%nleaf
+              slope=0
               do a=1,3
-                 s=abs(slopes(a,i))*mesh%dx
+                 l=mesh%neighbor(2*a-1,i);r=mesh%neighbor(2*a,i)
+                 if(l==0.or.r==0)cycle
+                 low=(samples(i)-samples(l))/(.5d0*(mesh%width(i)+mesh%width(l)))
+                 high=(samples(r)-samples(i))/(.5d0*(mesh%width(i)+mesh%width(r)))
+                 slope=mn_limited_slope(low,high,b%spatial_limiter)
+                 s=abs(slope)*mesh%dx
                  if(s>0)theta(i)=min(theta(i),samples(i)/s)
               enddo
-           endif
-        enddo
+           enddo
 !$omp end do
+        enddo
+!$omp end parallel
+      end subroutine
+
+      subroutine sample_slopes_tile(b,mesh,extended,cache,q_first,nq,theta,donor)
+        type(mn_basis),intent(in) :: b
+        type(mn_amr_mesh),intent(in) :: mesh
+        real(dp),intent(in) :: extended(:,:),cache(:,:),theta(:)
+        integer,intent(in) :: q_first,nq
+        real(dp),intent(out) :: donor(:,:,:)
+        integer :: i,a,l,r,q,k
+        real(dp) :: low,high,slope(3)
+        donor=0
+        ! Sample one angular tile per team. The donor array is the bounded
+        ! tile cache, so this removes repeated team creation without storing
+        ! all nq-by-cell samples.
+!$omp parallel private(i,a,l,r,q,k,low,high,slope)
+        do k=1,nq
+           q=q_first+k-1
+!$omp do schedule(static)
+           do i=1,mesh%nall
+              if(extended(1,i)>0)then
+                 donor(1,k,i)=extended(1,i)* &
+                      exp(dot_product(cache(1:b%nm-1,i),b%harmonic(2:,q)- &
+                      extended(2:,i)/extended(1,i))-cache(b%nm,i))/cache(b%nm+1,i)
+              else
+                 donor(1,k,i)=0
+              endif
+           enddo
+!$omp end do
+!$omp do schedule(static)
+           do i=1,mesh%nleaf
+              slope=0
+              do a=1,3
+                 l=mesh%neighbor(2*a-1,i);r=mesh%neighbor(2*a,i)
+                 if(l==0.or.r==0)cycle
+                 low=(donor(1,k,i)-donor(1,k,l))/(.5d0*(mesh%width(i)+mesh%width(l)))
+                 high=(donor(1,k,r)-donor(1,k,i))/(.5d0*(mesh%width(i)+mesh%width(r)))
+                 slope(a)=mn_limited_slope(low,high,b%spatial_limiter)
+              enddo
+              donor(2:4,k,i)=theta(i)*slope
+           enddo
+!$omp end do
+        enddo
 !$omp end parallel
       end subroutine
 end module
