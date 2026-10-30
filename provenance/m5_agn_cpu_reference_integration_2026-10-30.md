@@ -306,3 +306,56 @@ there because the remaining memory is not a safe basis for the integrated
 test. CPU trace run `1244750` remained active at the last check; its log had
 advanced through multiple M5 tiles and photo-CVODE records, but no result
 sentinel was present yet.
+
+## CPU trace and A100 hybrid integrated reruns completed — 2026-10-30
+
+The current-source CPU trace rerun `1244750` completed on grammar `normal`
+(1 MPI rank, 8 OpenMP threads) in 3,222.757 s (53:54), with 1,487,500 KiB peak
+RSS and 4:27:12 accounted CPU. It emitted
+`M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS`: M5 order 5, live dust, a
+nonzero AGN source ledger, 16,896 passing momentum-assertion cells, and no raw
+RAMSES outputs.
+
+A100 hybrid job `442272` on syntax `a100` (1 MPI rank, 8 OpenMP threads, one
+A100) completed with exit code 0 in 3,036.995 s (50:48), with 2,075,020 KiB
+peak RSS. It emitted the same integration sentinel with
+`CHIMES_backend=hybrid`. Its `CHIMES_RHS_COUNTS` report is
+`gpu_calls=759329`, `cpu_fallback_calls=26501`, `gpu_batches=17117`,
+`device_errors=0`, `warm_table_uploads=2`, `peak_inflight_batches=2`, and
+`streams_used=1`. The per-tile level queue completed all 512 cells with one
+GPU broker (`gpu_worker_mask=0x1`) and CPU workers. The run therefore exercised
+both CPU and GPU lanes in the integrated material path.
+
+The M5 dispatch counters, summed over the three level-3 order-5 commits, were:
+
+| Run | Closure CPU | Closure GPU | Face CPU | Face GPU |
+| --- | ---: | ---: | ---: | ---: |
+| CPU reference `1244668` | 5,987,328 | 0 | 88,547,328 | 0 |
+| A100 hybrid `442272` | 2,327,856 | 3,659,472 | 88,547,328 | 0 |
+
+The photon/energy ledger residuals remained small: the A100 active-source
+step reported `1.1246e-17` photon residual and `1.2270e-16` energy residual;
+the final step reported `2.4627e-18` and `2.0618e-16`, respectively. CPU and
+A100 AGN sidecars cover coarse steps 0–3 and follow the same state sequence:
+inactive, inactive, thermal, jet. Mass, luminosity, efficiency, and inflow
+match to roundoff; the largest selected-field relative difference is
+`2.433e-7` in the small gas-angular-momentum norm at the jet state. Both
+efficiency contracts are valid at all four states.
+
+For elapsed-time context, CPU reference job `1244668` took 3,217 s (53:37),
+while A100 hybrid took 3,036.995 s: a 5.595% reduction, or 1.059x speedup, on
+this bounded 512-cell, one-rank smoke. The three M5 commits summed to
+3,164.836 s on CPU and 3,001.129 s on A100. This is a modest end-to-end change,
+not a substantial performance gain. It is not a scheduler-matched benchmark:
+the CPU reference used `cohort`, while hybrid used `level_queue`. The effective
+namelist SHA256 is identical (`6c8e0a0b…5772fa`), and the core
+`patch/lagRamses` source is unchanged between the recorded CPU and A100 source
+commits. The distinct library/backend and scheduler settings remain part of
+the measured configuration.
+
+Both results are **integration passes only**, not production qualification.
+The profile deliberately disables stellar SED emission, uses the AGN/dust
+reference controls, and declares `source_scope=AGN_only_point_source` and
+`reference_controls=NONPRODUCTION`. Raw outputs were suppressed in both runs;
+the run directories retain only compact inputs, logs, sidecars and result
+sentinels. This supersedes the in-progress status recorded immediately above.
