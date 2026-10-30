@@ -1440,9 +1440,23 @@ def compare_m5_coupled(
             assert len(set(keys)) == len(keys), "ambiguous particle birth/identity match"
             return keys
         keys_a, keys_b = particle_keys(a), particle_keys(b)
-        rows_b = {key: i for i, key in enumerate(keys_b)}
-        assert set(keys_a) == set(keys_b), "particle event/identity inventory differs"
-        particle_permutation = np.array([rows_b[key] for key in keys_a])
+        if set(keys_a) == set(keys_b):
+            rows_b = {key: i for i, key in enumerate(keys_b)}
+            particle_permutation = np.array([rows_b[key] for key in keys_a])
+            particle_match_method = "exact_physical_event_keys"
+        else:
+            # The same-rank CPU/GPU pair can differ by roundoff in birth time
+            # and position. If the complete particle ID/type/level arrays are
+            # still identical row by row, align those rows and let the normal
+            # numerical tolerance report the physical-state differences.
+            # This does not accept a changed inventory or relax any tolerance.
+            same_row_identity = all(
+                np.array_equal(a[f"particles/{key}"], b[f"particles/{key}"])
+                for key in ("identity", "ptypep", "levelp")
+            )
+            assert same_row_identity, "particle event/identity inventory differs"
+            particle_permutation = np.arange(len(keys_a))
+            particle_match_method = "exact_row_identity_type_level"
         ids_a = np.asarray(a["particles/identity"])
         ids_b = np.asarray(b["particles/identity"])[particle_permutation]
         relabelled = ids_a != ids_b
@@ -1511,15 +1525,36 @@ def compare_m5_coupled(
                 assert np.array_equal(a[name].attrs[key], b[name].attrs[key]), (name, key)
                 attribute_count += 1
         clocks = {}
+        clock_tolerance_violations = []
         for key in ("time", "aexp", "dtnew", "dtold", "nstep", "nstep_coarse"):
             x, y = a["header"].attrs[key], b["header"].attrs[key]
-            assert np.allclose(x, y, rtol=1e-12, atol=0), key
             clocks[key] = bool(np.array_equal(x, y))
+            delta = np.abs(np.asarray(x) - np.asarray(y))
+            limit = 1e-12 * np.abs(np.asarray(y))
+            ratio = np.divide(
+                delta, limit, out=np.full(np.broadcast_shapes(delta.shape, limit.shape), np.inf),
+                where=limit > 0,
+            )
+            ratio = np.where((delta == 0) & (limit == 0), 0.0, ratio)
+            outside = delta > limit
+            if np.any(outside):
+                clock_tolerance_violations.append({
+                    "name": key,
+                    "max_absolute": float(np.max(delta)),
+                    "elements_outside_tolerance": int(np.count_nonzero(outside)),
+                    "max_tolerance_ratio": float(np.max(ratio)),
+                })
         comparison_label = (
             "M5_COUPLED_RESTART" if checkpoint is not None else "M5_COUPLED_FINAL_PAIR"
         )
-        status = (f"{comparison_label}_FAIL_NUMERIC_TOLERANCE"
-                  if tolerance_violations else f"{comparison_label}_PASS")
+        if tolerance_violations and clock_tolerance_violations:
+            status = f"{comparison_label}_FAIL_CLOCK_AND_NUMERIC_TOLERANCE"
+        elif clock_tolerance_violations:
+            status = f"{comparison_label}_FAIL_CLOCK_TOLERANCE"
+        elif tolerance_violations:
+            status = f"{comparison_label}_FAIL_NUMERIC_TOLERANCE"
+        else:
+            status = f"{comparison_label}_PASS"
         violations_by_scope: dict[str, dict[str, int | float]] = {}
         for violation in tolerance_violations:
             scope = str(violation["name"]).split("/", 1)[0]
@@ -1542,11 +1577,12 @@ def compare_m5_coupled(
                 "floating_differences": differences, "exact_contract_attributes": attribute_count,
                 "tolerance_violations": tolerance_violations,
                 "tolerance_violations_by_scope": violations_by_scope,
+                "clock_tolerance_violations": clock_tolerance_violations,
                 "clock_bitwise": clocks, "rtol": rtol, "atol": atol,
                 "grid_identity": "exact_level_and_xyz_with_exact_son_and_owner",
                 "reordered_grids": {level: int(np.count_nonzero(p != np.arange(len(p))))
                                     for level, p in grid_permutations.items()},
-                "particle_identity": "existing_ID_exact_new_star_exact_birth_event_cloud_exact_position",
+                "particle_identity": particle_match_method,
                 "new_star_ID_relabellings": int(np.count_nonzero(relabelled)),
                 "mpi_ranks": expected_ncpu,
                 "scope": f"same_MPI{expected_ncpu}_effective_population_co_moving_dust"}
