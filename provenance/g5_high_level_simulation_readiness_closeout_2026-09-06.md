@@ -531,3 +531,22 @@ source-active AMR connection from the current commit. The available grammar
 Slurm partitions exposed no GPU GRES, so this does not qualify the CUDA/hybrid
 path. The selected AGN/dust/data contracts remain reference controls, and the
 upstream data/license and production-release blockers remain explicit.
+
+### Current CUDA qualification and source-term recheck — 2026-10-30
+
+`sinfo --all` on the active grammar Slurm controller showed only `debug`,
+`normal`, `normal1` and `normal2`, all without GPU GRES. A current-source GPU
+job could not be submitted from this controller. The previous A40 integrated
+run `430150` was built from `5ea1cb6`; comparison with current commit `3628b23`
+shows intervening changes in `bin/Makefile`, the CHIMES bridge and CUDA RHS,
+the CUDA RHS header, and `snrt_moment_ramses.f90`. Consequently, that older A40
+run does not qualify today's hybrid/CUDA source. The latest exact-commit result
+is CPU-only; GPU qualification remains open until a typed GPU Slurm partition
+is available.
+
+The official-source data-terms recheck is recorded in
+`manifests/native_m5_release_candidate_2026-10-12.json` under
+`primary_source_recheck_2026_10_30`. It found no new explicit reuse license
+for the selected CHIMES, Draine D03, PARSEC VMS or KL16 data, so those terms
+remain blocked. The production candidate was not promoted and no data-use
+approval was inferred.

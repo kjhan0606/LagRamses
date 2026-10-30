@@ -257,7 +257,7 @@
     "upstream_license_confirmation_not_implied": true
   },
   "selected_data_use_review": {
-    "checked_at": "2026-10-20",
+    "checked_at": "2026-10-30",
     "scope": "source identity and explicit notices only; no legal permission or scientific approval inferred",
     "primary_source_recheck_2026_10_20": [
       {
@@ -279,6 +279,31 @@
         "asset": "chimes_data",
         "source": "https://richings.bitbucket.io/chimes/download.html",
         "observation": "Official page says repositories are publicly accessible and identifies source and data as separate repositories; this establishes download access, not a license for the data files. Data terms remain unresolved."
+      }
+    ],
+    "primary_source_recheck_2026_10_30": [
+      {
+        "asset": "chimes_data",
+        "source": "https://richings.bitbucket.io/chimes/user_guide/GettingStarted/download.html",
+        "observation": "Official documentation confirms public download of separate CHIMES code and data repositories; it does not state a reuse license for the HDF5 data. Download availability is not treated as data permission; terms remain unresolved."
+      },
+      {
+        "asset": "draine_d03",
+        "source": "https://www.astro.princeton.edu/~draine/dust/dustmix.html",
+        "data_table": "https://www.astro.princeton.edu/~draine/dust/extcurvs/kext_albedo_WD_MW_3.1_60_D03.all",
+        "observation": "The official page describes the WD/Draine dust model, tabulated optical properties and citations; no explicit data reuse license appears in the retrieved page. Terms remain unresolved."
+      },
+      {
+        "asset": "kl16_mirror",
+        "source": "https://github.com/correac/COLIBRE_yield_tables",
+        "pinned_revision": "acecc180347d9505780a7985ec2c4a8a11f5c61f",
+        "observation": "The current repository page displays its README, scripts and data directory without a root license entry; the pinned-revision tree page was not retrievable in this check. The prior pinned-tree inspection found no root license; original yield-data terms remain unresolved."
+      },
+      {
+        "asset": "parsec_v2_vms",
+        "source": "https://stev.oapd.inaf.it/PARSEC/tracks_database.html",
+        "vms_readme": "https://stev.oapd.inaf.it/PARSEC/Database/PARSECv2.0_VMS/readme.html",
+        "observation": "The official database page identifies PARSEC VMS tracks and the associated paper; the VMS readme could not be retrieved during this check and no explicit license for the track/ejecta archives was verified. Terms remain unresolved."
       }
     ],
     "draine_d03": {
