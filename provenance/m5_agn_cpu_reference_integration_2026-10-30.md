@@ -167,6 +167,11 @@ RAMSES outputs expected. At the 15:48 KST query, `442109` was still pending
 `QOSGrpGRES` and `442110` was pending on its dependency. No duplicate jobs
 were submitted.
 
+The read-only QoS query reports `MaxTRESPerAccount=gres/gpu=8` for `normal`;
+the user association has no separate GPU cap reported. This establishes the
+account-level ceiling associated with the pending reason, but does not identify
+which account jobs currently consume those GPU slots.
+
 Runtime acceptance remains the existing bounded runner contract: successful
 M5/CHIMES/dust/source checks, a `CHIMES_LEVEL_QUEUE` report with all cells
 completed and at least one GPU broker, the pass sentinel, and no raw output
