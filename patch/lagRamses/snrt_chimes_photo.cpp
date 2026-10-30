@@ -70,6 +70,8 @@ struct Solver {
     if(constraints)N_VDestroy(constraints);
   }
 };
+struct PhotoSolverStats { long long steps=0,rhs=0,linear_iterations=0; };
+thread_local PhotoSolverStats last_photo_solver_stats;
 // Same raw FS2010 interpolation/target limiter as the existing grey adapter.
 // Samples retain six raw channels; averaging already-normalized fractions
 // at the xi endpoints would introduce a different interpolation law.
@@ -212,6 +214,14 @@ int prec_solve(realtype,N_Vector,N_Vector,N_Vector r,N_Vector z,realtype,realtyp
 }
 }
 
+extern "C" void snrt_chimes_photo_solver_stats(long long out[3]) {
+  if(!out)return;
+  out[0]=last_photo_solver_stats.steps;
+  out[1]=last_photo_solver_stats.rhs;
+  out[2]=last_photo_solver_stats.linear_iterations;
+  last_photo_solver_stats={};
+}
+
 static int photo_step(void *handle,int nd,double nh,double dt,double chat,const double *dust_alpha,
     const snrt_chimes_detail::MoleculeBank *molecules,const double *shield,double pumping,
     const double *old,const double *number,const double *energy,double *next,
@@ -219,6 +229,7 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     double *grain_number=nullptr,double *grain_energy=nullptr,
     const double *phase_alpha=nullptr,const double *directions=nullptr,
     double *phase_energy=nullptr,double *phase_moment=nullptr){
+  last_photo_solver_stats={};
   if(!handle || nd<1 || nd>720 || !old || !number || !energy || !next || !next_number || !next_energy || !ledger)return 1;
   const bool phases=phase_alpha || directions || phase_energy || phase_moment;
   if(phases && (!dust_alpha || !phase_alpha || !directions || !phase_energy || !phase_moment))return 1;
@@ -444,6 +455,14 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     }
     if(accepted_time!=1.){
       std::fprintf(stderr,"CHIMES photo work limit t=%.17g retries=%d dt=%.17g\n",accepted_time,retries,dt);return 4;
+    }
+    long int solver_steps=0,solver_rhs=0,solver_linear_iterations=0;
+    if(CVodeGetNumSteps(solver.cv,&solver_steps)==CV_SUCCESS &&
+       CVodeGetNumRhsEvals(solver.cv,&solver_rhs)==CV_SUCCESS &&
+       CVodeGetNumLinIters(solver.cv,&solver_linear_iterations)==CV_SUCCESS){
+      last_photo_solver_stats.steps=solver_steps;
+      last_photo_solver_stats.rhs=solver_rhs;
+      last_photo_solver_stats.linear_iterations=solver_linear_iterations;
     }
     double new_nuclei[11],new_charge;
     if(snrt_chimes_budget(y,new_nuclei,&new_charge))return 5;

@@ -44,9 +44,10 @@ module snrt_moment_ramses
 #ifdef SNRT_CHIMES
   use snrt_chimes_runtime, only: chimes_cell_state,chimes_live_capacity,chimes_live_stage,chimes_live_band_stage, &
        chimes_live_cold_stage,chimes_live_grain_scatter,chimes_live_fe_uv_stage
-  use snrt_chimes, only: chimes_ns,chimes_boltzmann,chimes_group_binding,chimes_last_split_wall
+  use snrt_chimes, only: chimes_ns,chimes_boltzmann,chimes_group_binding,chimes_last_split_wall, &
+       chimes_last_photo_solver
 #endif
-  use iso_c_binding, only: c_int,c_double,c_ptr,c_funptr,c_null_funptr,c_funloc,c_loc,c_f_pointer
+  use iso_c_binding, only: c_int,c_double,c_long_long,c_ptr,c_funptr,c_null_funptr,c_funloc,c_loc,c_f_pointer
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use omp_lib, only: omp_get_wtime
 #ifndef WITHOUTMPI
@@ -1278,6 +1279,7 @@ contains
 #ifdef SNRT_CHIMES
       logical :: perf_cold
       real(dp),allocatable :: perf_chimes_cell(:,:)
+      integer(c_long_long),allocatable :: perf_photo_solver(:,:)
 #endif
 #ifdef SNRT_CHIMES_CUDA
       logical :: use_level_queue
@@ -1300,6 +1302,7 @@ contains
 #endif
       if(perf_cold)then
          allocate(perf_chimes_cell(2,nc));perf_chimes_cell=0
+         allocate(perf_photo_solver(3,nc));perf_photo_solver=0_c_long_long
       endif
 #endif
       allocate(material_packet_work(nc),material_codes_work(nc))
@@ -1326,7 +1329,10 @@ contains
          call material_cell(index,cell_dt,status_cell,material_packet_work(j),.true.)
          material_codes_work(j)=int(status_cell,c_int)
 #ifdef SNRT_CHIMES
-         if(perf_cold.and.status_cell==0)perf_chimes_cell(:,j)=chimes_last_split_wall
+         if(perf_cold.and.status_cell==0)then
+            perf_chimes_cell(:,j)=chimes_last_split_wall
+            perf_photo_solver(:,j)=chimes_last_photo_solver
+         endif
 #endif
       enddo
 !$omp end parallel do
@@ -1356,11 +1362,14 @@ contains
                     ' over_1_s=',count(perf_chimes_cell(2,offset+1:offset+stage_n)>1d0)
             endif
             j=maxloc(perf_chimes_cell(1,offset+1:offset+stage_n),dim=1)
-            write(*,'(A,I0,A,I0,A,I0,A,F12.6,A,I0,A,I0,A,I0)') &
+            write(*,'(A,I0,A,I0,A,I0,A,F12.6,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0)') &
                  'SNRT PERF PHOTO rank=',myid,' first=',stage_first,' last=',stage_last, &
                  ' max_s=',perf_chimes_cell(1,offset+j),' cell=',mesh%cells(stage_first+j-1), &
                  ' over_1_s=',count(perf_chimes_cell(1,offset+1:offset+stage_n)>1d0), &
-                 ' over_5_s=',count(perf_chimes_cell(1,offset+1:offset+stage_n)>5d0)
+                 ' over_5_s=',count(perf_chimes_cell(1,offset+1:offset+stage_n)>5d0), &
+                 ' cvode_steps=',sum(perf_photo_solver(1,offset+1:offset+stage_n)), &
+                 ' cvode_rhs=',sum(perf_photo_solver(2,offset+1:offset+stage_n)), &
+                 ' cvode_lin=',sum(perf_photo_solver(3,offset+1:offset+stage_n))
          endif
 #endif
          call material_tile_commit(stage_first,stage_last,cell_dt,material_packet_work(offset+1:offset+stage_n), &

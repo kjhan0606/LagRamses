@@ -12,6 +12,9 @@ module snrt_chimes
   ! Last local split timings; thread-private, never part of the physical state.
   real(c_double),public,save::chimes_last_split_wall(2)=0
 !$omp threadprivate(chimes_last_split_wall)
+  ! CVODE work counters for the most recent spectral photo integration.
+  integer(c_long_long),public,save::chimes_last_photo_solver(3)=0_c_long_long
+!$omp threadprivate(chimes_last_photo_solver)
   public::chimes_initialize,chimes_neutral,chimes_budget,chimes_cell
   public::chimes_reconcile,chimes_locked,chimes_identity
   public::chimes_boltzmann
@@ -40,6 +43,10 @@ module snrt_chimes
      real(c_double) function chimes_cmb_temperature() bind(C,name='snrt_chimes_cmb_temperature')
        import
      end function
+     subroutine chimes_photo_solver_stats(out) bind(C,name='snrt_chimes_photo_solver_stats')
+       import c_long_long
+       integer(c_long_long),intent(out)::out(3)
+     end subroutine
      integer(c_int) function chimes_band_nodes(handle,nd,number,energy,nn,ne) bind(C,name='snrt_chimes_band_nodes')
        import
        type(c_ptr),value::handle
@@ -293,6 +300,7 @@ contains
     real(c_double),parameter::ev_erg=1.602176634d-12
     status=2
     chimes_last_split_wall=0
+    chimes_last_photo_solver=0_c_long_long
     if(present(phase_alpha).neqv.present(directions))return
     if(present(phase_alpha).neqv.present(phase_energy))return
     if(present(phase_alpha).neqv.present(phase_moment))return
@@ -337,6 +345,7 @@ contains
        status=chimes_band_photo_molecular_groups(handle,mol,nd,controls(1),controls(4),2.99792458d10*controls(9), &
             alpha,factors(1:2),factors(3),incoming,number,energy,photo,pn,pe,budget(1:10),gn,ge)
     endif
+    call chimes_photo_solver_stats(chimes_last_photo_solver)
     if(status/=0)then
        write(*,*)'CHIMES cold-stage rejection at spectral photo receiver status=',status
        return
