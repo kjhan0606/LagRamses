@@ -191,7 +191,7 @@ contains
       real(dp),allocatable :: donor(:,:,:),integrated_flux(:,:)
       real(dp),allocatable :: all_projected(:,:),left(:,:,:),right(:,:,:),geometry(:,:),face_flux(:,:)
       integer,allocatable :: faces(:,:)
-      real(dp) :: angular(b%nq),moments(b%nm),flux(b%nm),mu,il,ir,signface,flow,dl,dr,s
+      real(dp) :: angular(b%nq),moments(b%nm),flux(b%nm),mu,il,ir,signface,flow,dl,dr
       integer :: first,last,col,j,i,q,f,a,r,k,nq,component,ncol,nface,ff,fl,fi,fs,opposite,reverse_tile
       allocate(field(mesh%nfield,field_tile),extended(b%nm,mesh%nall),cache(b%nm+1,mesh%nall))
       allocate(theta(mesh%nowned),samples(mesh%nall),slopes(3,mesh%nowned))
@@ -241,13 +241,7 @@ contains
       ! The same theta applies to all quadrature nodes of a cell. Coarse
       ! donors use conservative injection, as in the existing AMR interface.
       do q=1,b%nq
-         call sample_slopes(b,mesh,extended,cache,q,samples,slopes)
-         do i=1,mesh%nleaf
-            do a=1,3
-               s=abs(slopes(a,i))*mesh%dx
-               if(s>0)theta(i)=min(theta(i),samples(i)/s)
-            enddo
-         enddo
+         call sample_slopes(b,mesh,extended,cache,q,samples,slopes,theta)
       enddo
       ! The first exchange uses moment tiles (field_tile columns), whereas
       ! the angular donor exchange needs four columns per angular node. Grow
@@ -343,20 +337,29 @@ contains
     end subroutine
   end subroutine
 
-      subroutine sample_slopes(b,mesh,extended,cache,q,samples,slopes)
+      subroutine sample_slopes(b,mesh,extended,cache,q,samples,slopes,theta)
         type(mn_basis),intent(in) :: b
         type(mn_amr_mesh),intent(in) :: mesh
         real(dp),intent(in) :: extended(:,:),cache(:,:)
         real(dp),intent(out) :: samples(:),slopes(:,:)
         integer,intent(in) :: q
+        real(dp),optional,intent(inout) :: theta(:)
         integer :: i,a,l,r
-        real(dp) :: low,high
-        samples=0;slopes=0
+        real(dp) :: low,high,s
+        slopes=0
+!$omp parallel private(i,a,l,r,low,high,s)
+!$omp do schedule(static)
         do i=1,mesh%nall
-           if(extended(1,i)>0)samples(i)=extended(1,i)* &
-                exp(dot_product(cache(1:b%nm-1,i),b%harmonic(2:,q)- &
-                extended(2:,i)/extended(1,i))-cache(b%nm,i))/cache(b%nm+1,i)
+           if(extended(1,i)>0)then
+              samples(i)=extended(1,i)* &
+                   exp(dot_product(cache(1:b%nm-1,i),b%harmonic(2:,q)- &
+                   extended(2:,i)/extended(1,i))-cache(b%nm,i))/cache(b%nm+1,i)
+           else
+              samples(i)=0
+           endif
         enddo
+!$omp end do
+!$omp do schedule(static)
         do i=1,mesh%nleaf
            do a=1,3
               l=mesh%neighbor(2*a-1,i);r=mesh%neighbor(2*a,i)
@@ -365,6 +368,14 @@ contains
               high=(samples(r)-samples(i))/(.5d0*(mesh%width(i)+mesh%width(r)))
               slopes(a,i)=mn_limited_slope(low,high,b%spatial_limiter)
            enddo
+           if(present(theta))then
+              do a=1,3
+                 s=abs(slopes(a,i))*mesh%dx
+                 if(s>0)theta(i)=min(theta(i),samples(i)/s)
+              enddo
+           endif
         enddo
+!$omp end do
+!$omp end parallel
       end subroutine
 end module
