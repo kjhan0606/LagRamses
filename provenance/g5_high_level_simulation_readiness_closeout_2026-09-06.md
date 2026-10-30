@@ -11,7 +11,7 @@ The repository now has two explicitly admitted executable smoke profiles:
 |---|---|---|
 | SNRT/CUDA reference-control | `READY_FOR_BOUNDED_QUALIFICATION` | D4 Slurm job `333272`, two MPI ranks/two A10 GPUs, startup-contract and receiver-rollback PASS |
 | CPU legacy comparison | `READY_FOR_BOUNDED_COMPARISON` | two-rank `nstepmax=2` smoke, `feedback_mode='legacy'`, finite-state diagnostics and `Run completed` |
-| Physical dusty production | `BLOCKED` | The 2026-10-10 G0 audit reports 13 blockers for the `/gpfs/kjhan/LRD_JWST` manifest/worktree; applicability to the active `/gpfs/kjhan/chimes-cvode-gpu-20261001` checkout is unverified. Selected dust live/restart paths have bounded evidence; cosmological qualification remains open. |
+| Physical dusty production | `BLOCKED` | The active checkout's 2026-10-21 production preflight found 17 release/admission blockers; the 2026-10-30 source-terms recheck confirms physical-data licenses remain unresolved. The A40 current-source comparison `442563` is still pending. Selected dust live/restart paths have bounded evidence; cosmological qualification remains open. |
 
 The first two profiles are qualification/comparison runs, not a scientific
 production release. The physical profile cannot be enabled by selecting a
