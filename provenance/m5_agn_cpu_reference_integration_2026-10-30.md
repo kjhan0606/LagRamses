@@ -337,21 +337,29 @@ The photon/energy ledger residuals remained small: the A100 active-source
 step reported `1.1246e-17` photon residual and `1.2270e-16` energy residual;
 the final step reported `2.4627e-18` and `2.0618e-16`, respectively. CPU and
 A100 AGN sidecars cover coarse steps 0–3 and follow the same state sequence:
-inactive, inactive, thermal, jet. Mass, luminosity, efficiency, and inflow
-match to roundoff; the largest selected-field relative difference is
-`2.433e-7` in the small gas-angular-momentum norm at the jet state. Both
+inactive, inactive, thermal, jet. BH mass and radiative efficiency match to
+roundoff. At the final jet state, inflow and bolometric luminosity differ by
+`8.632e-11` relative; among the selected sidecar fields, the largest relative
+difference is `2.433e-7` in the small gas-angular-momentum norm. Both
 efficiency contracts are valid at all four states.
 
-For elapsed-time context, CPU reference job `1244668` took 3,217 s (53:37),
-while A100 hybrid took 3,036.995 s: a 5.595% reduction, or 1.059x speedup, on
-this bounded 512-cell, one-rank smoke. The three M5 commits summed to
-3,164.836 s on CPU and 3,001.129 s on A100. This is a modest end-to-end change,
-not a substantial performance gain. It is not a scheduler-matched benchmark:
-the CPU reference used `cohort`, while hybrid used `level_queue`. The effective
-namelist SHA256 is identical (`6c8e0a0b…5772fa`), and the core
-`patch/lagRamses` source is unchanged between the recorded CPU and A100 source
-commits. The distinct library/backend and scheduler settings remain part of
-the measured configuration.
+Using comparable RAMSES process `Total elapsed time` values, CPU reference job
+`1244668` took 3,209.604 s and A100 hybrid took 3,036.995 s: a 5.38% reduction
+(1.057x) on this bounded 512-cell, one-rank smoke. The three M5 commits summed
+to 3,164.836 s on CPU and 3,001.129 s on A100 (5.17% lower). The Slurm elapsed
+records were 53:37 and 50:48, respectively (5.25% lower). This is a modest
+single-pair result, not a substantial or replicated performance gain. It is
+not a scheduler-matched benchmark: the CPU reference used `cohort`, while
+hybrid used `level_queue`. The effective namelist SHA256 is identical
+(`6c8e0a0b…5772fa`), both runs use the same reference CHIMES library SHA256, and
+the `patch/lagRamses` source is unchanged between their recorded source
+commits. Backend and cell-scheduler differences remain part of the measured
+configuration.
+
+Slurm also lists a two-second auxiliary bash step `.9` with exit 1. The main
+application step `.0` and batch step both completed with exit 0, and the
+runner wrote its pass sentinel. The failed auxiliary command is not preserved
+in the accounting record and is not attributed to the simulation.
 
 Both results are **integration passes only**, not production qualification.
 The profile deliberately disables stellar SED emission, uses the AGN/dust
