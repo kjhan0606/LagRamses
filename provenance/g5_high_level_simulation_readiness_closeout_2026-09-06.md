@@ -553,13 +553,14 @@ remain blocked. The production candidate was not promoted and no data-use
 approval was inferred.
 
 The preceding GPU-availability statement is a snapshot of the grammar
-controller and predates the current syntax submission. Typed-GPU execution is
-now queued as A40 job `442563`; its effective-population/HDF5 comparison and
-current Slurm state are recorded in
+controller and predates the current syntax submission. A40 job `442563` was
+cancelled before allocation because the A40 cards remained occupied. Its
+replacement, typed A10 job `442732`, is running on `syn03`; its
+effective-population/HDF5 comparison evidence is recorded in
 [`m5_agn_cpu_reference_integration_2026-10-30.md`](m5_agn_cpu_reference_integration_2026-10-30.md).
-The job remains pending resources, so current-source hybrid GPU qualification
-is still open until the run and CPU/GPU state comparison complete. This does
-not change the physical-data licensing blockers above.
+Current-source hybrid GPU qualification remains open until the run and
+CPU/GPU state comparison complete. This does not change the physical-data
+licensing blockers above.
 
 ### Repeated-event delayed-cooling timer regression — 2026-10-30
 

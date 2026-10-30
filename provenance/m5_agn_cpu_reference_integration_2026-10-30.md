@@ -492,9 +492,12 @@ Phase-0 yield table loaded; the
 `thermal_feedback` caller invoked `phase0_feedback` on all 128 coarse steps.
 The retained log does not report per-channel event counts, so this proves the
 live source path ran but is not an isolated SNII/SNIa event-count result.
-H100 job `442500` was cancelled before execution (zero runtime), so
-it produced no comparison. The current-source A40 hybrid counterpart is job
-`442563` on syntax, pending GPU resources. At the 2026-10-30 23:19 KST
-check, Slurm estimated a start at 2026-10-31 03:06 KST. Preserve the CPU
-dump until `442563` and the state comparison are evaluated; remove only the
-raw dump after that evaluation.
+H100 job `442500` was cancelled before execution (zero runtime). A40 job
+`442563` also remained unallocated and was cancelled with zero runtime when
+the A40 nodes had no free cards. Its replacement, A10 job `442732`, started
+on `syn03` at 2026-10-30 23:42:50 KST with one typed A10, 8 CPUs and 64 GiB.
+At startup it recorded source HEAD `ca3994b3f0215eaf663119a4308bda39076f1a73`
+and a clean tracked worktree. It builds the current CUDA-enabled executable
+and runs the same 128-step effective-population profile with one final dump.
+The CPU dump remains preserved until `442732` and the final-state comparison
+are evaluated; then remove only the evaluated raw snapshots.
