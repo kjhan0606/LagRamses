@@ -93,8 +93,16 @@ to reuse an existing output directory. The CPU-only submission entry point is
 `normal` queue. The startup smoke runs the MPI executable through
 `mpirun -np 1` so MPI initializes inside the allocated job step.
 
-Because the harness, validator, and identity configuration changed, the
-previous linked-build evidence no longer closes the live gate. P0.1 remains
-blocked until the updated harness records fresh evidence and the live parity
-validator passes. This source/build identity gate does not qualify the
-physical stellar-yield package; P0.2--P0.6 remain open.
+The fresh build ran as grammar job `1245196` on the CPU `normal` queue with
+4 CPUs and 32 GiB requested memory. It completed in 3:03 with peak RSS
+27,088,892 KiB. The forced production build, configured symbol-linkage check,
+and MPI-launched no-argument smoke all passed. The built executable is
+`build/p0_production_linked/ramses_final3d` with SHA-256
+`ac85e1432d6bde45184f1cce9c60d51295a8a7e5dd7e996a9f14520f33ba4a4e`; the
+operator's active `bin/ramses_final3d` remained unchanged.
+
+The evidence JSON records source commit `c616e5e85997b84cbf54dcd8967a3b7e4b3ac394`.
+The live parity regression and `validate_stellar_source_parity.py --require-pass`
+both pass. P0.1 is closed for this checkout. It establishes source/build
+identity and link/smoke behavior only; it does not qualify the physical stellar
+yield package. P0.2--P0.6 remain open.
