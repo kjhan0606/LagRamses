@@ -120,9 +120,9 @@ fi
 case "$PROFILE" in
   agn_reference)
     STELLAR_PACKAGE=''
-    STELLAR_INPUT=''
-    STELLAR_HISTORY=''
-    STELLAR_YIELDS=''
+    STELLAR_INPUT=$ASSETS/.mixed-lowmass.Rbb2fZ/input-v5
+    STELLAR_HISTORY=$STELLAR_INPUT/history.nml
+    STELLAR_YIELDS=$STELLAR_INPUT/yields.dat
     STELLAR_NODES=''
     STELLAR_BASE_SOURCE=''
     STELLAR_BINDING=''
@@ -230,6 +230,9 @@ test -f "$TABLE" -a -f "$GROUP_DIR/manifest.json"
 test -f "$SUN/include/cvode/cvode.h" -a -f "$HDF5_ROOT/include/hdf5.h"
 test -f "$ASSETS/.chimes-spectral.TrQxAG/bank-final/atomic_shells.h5"
 test -f "$ASSETS/.chimes-molecular.U6ZQCr/bank/molecular_nodes.h5"
+if [[ "$PROFILE" == agn_reference ]]; then
+  test -f "$STELLAR_HISTORY" -a -f "$STELLAR_YIELDS"
+fi
 if [[ "$PROFILE" == effective_population ]]; then
   test -d "$STELLAR_INPUT"
   test -f "$STELLAR_INPUT/manifest.json" -a -f "$STELLAR_HISTORY"
@@ -437,6 +440,8 @@ if [[ "$PROFILE" == effective_population ]]; then
   sha256sum "$SNIA_CONTRACT" "$STELLAR_INPUT/manifest.json" "$STELLAR_HISTORY" \
     "$STELLAR_YIELDS" "$STELLAR_NODES" "$STELLAR_BASE_SOURCE" "$STELLAR_BINDING" \
     >> "$WORK/inputs.sha256"
+elif [[ "$PROFILE" == agn_reference ]]; then
+  sha256sum "$STELLAR_HISTORY" "$STELLAR_YIELDS" >> "$WORK/inputs.sha256"
 fi
 
 runtime_libs="$CHIMES_INSTALL:$SUN/lib64:$SUN/lib:$HDF5_ROOT/lib"
@@ -457,7 +462,7 @@ export SNRT_CHIMES_COMPUTE_BACKEND="$CHIMES_BACKEND" SNRT_PERF_DIAGNOSTIC=1
 if [[ "$PROFILE" == effective_population ]]; then
   export PHASE0_YIELD_TABLE="$STELLAR_YIELDS"
 else
-  export PHASE0_YIELD_TABLE=$ASSETS/.mixed-lowmass.Rbb2fZ/input-v5/yields.dat
+  export PHASE0_YIELD_TABLE="$STELLAR_YIELDS"
 fi
 unset SNRT_DRIVER_TEST_SEED_SOURCE SNRT_RT_ENABLE SNRT_RT_TX_TEST_FAIL_STAGE SNRT_RT_TX_TEST_FAIL_LEAF
 unset SNRT_CHIMES_CVODE_BACKEND SNRT_CHIMES_RHS_BACKEND SNRT_CHIMES_CELL_SCHEDULER
