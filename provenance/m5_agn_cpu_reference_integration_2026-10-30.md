@@ -147,3 +147,29 @@ build job `1244657` completed on grammar's `normal` queue in 4:16 with
 `ldd` shows no CUDA runtime dependency. The separate syntax GPU build/run
 chain `442109` → `442110` remains pending (`QOSGrpGRES` and dependency,
 respectively); no replacement jobs were submitted.
+
+## Current syntax hybrid execution chain — 2026-10-30 15:48 KST
+
+The latest scheduler query confirms the submission contract for the current
+source revalidation. Build job `442109` requests one H100, 4 CPUs, 32 GiB and
+30 minutes; its submission does not override `M5_BUILD_CUDA`, so the runner
+uses its default `1`. The build script snapshots `git rev-parse HEAD` when it
+starts; the actual source commit must therefore be taken from its
+`build-result.txt`, not inferred from the submission-time branch head.
+
+Dependent job `442110` requests one H100, 8 CPUs, 64 GiB and two hours, with
+`afterok:442109`. Its recorded `SubmitLine` explicitly exports
+`M5_CHIMES_BACKEND=hybrid`, `M5_CHIMES_CELL_SCHEDULER=level_queue`, and the
+job-specific binary path under `.m5-ramses-momentum-build-442109`. The runner
+profile was not overridden, so it uses `agn_reference`: active accreting-BH
+source, stellar SED disabled, nonproduction reference controls, and no raw
+RAMSES outputs expected. At the 15:48 KST query, `442109` was still pending
+`QOSGrpGRES` and `442110` was pending on its dependency. No duplicate jobs
+were submitted.
+
+Runtime acceptance remains the existing bounded runner contract: successful
+M5/CHIMES/dust/source checks, a `CHIMES_LEVEL_QUEUE` report with all cells
+completed and at least one GPU broker, the pass sentinel, and no raw output
+dumps. Per-cell CVODE performance rows remain intentionally disabled for the
+level-queue continuation path; this run verifies hybrid execution, not a
+per-cell CVODE timing profile or production calibration.
