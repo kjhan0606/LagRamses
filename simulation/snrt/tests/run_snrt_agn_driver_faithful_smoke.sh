@@ -2,7 +2,7 @@
 # F-P2.8: execute the production amr_step -> SNRT AGN source path.
 set -euo pipefail
 
-ROOT=/gpfs/kjhan/LRD_JWST
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SCRIPT_DIR=$ROOT/simulation/snrt/tests
 CONFIG=$ROOT/simulation/snrt/config/snrt_agn_driver_faithful_smoke.nml
 GROUP_CONTRACT=$ROOT/simulation/snrt/config/snrt_group_contract_reference_control_v1.nml

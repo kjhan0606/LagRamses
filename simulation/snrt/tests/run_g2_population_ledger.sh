@@ -7,7 +7,8 @@ set -euo pipefail
 # that unsupported event channels cannot fall through to ordinary IMF
 # integration.
 
-ROOT=/gpfs/kjhan/LRD_JWST
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
 SOURCE_DIR="$ROOT/patch/lagRamses"
 FIXTURE_SOURCE_DIR="$ROOT/simulation/snrt/tests/fixtures/phase0"
 BUILD_DIR="$ROOT/build/g2_population_ledger"

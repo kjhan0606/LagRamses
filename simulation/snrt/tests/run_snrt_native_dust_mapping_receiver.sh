@@ -4,7 +4,7 @@ set -euo pipefail
 # DUST-9 native boundary smoke.  This intentionally does not launch RAMSES or
 # Python/JAX: the live RAMSES driver has no dedicated dust state yet.
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-build_dir="$(mktemp -d /gpfs/kjhan/LRD_JWST/.snrt-dust-mapping-receiver.XXXXXX)"
+build_dir="$(mktemp -d "${TMPDIR:-/tmp}/snrt-dust-mapping-receiver.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
 module_dir="$build_dir/modules"
 mkdir -p "$module_dir"

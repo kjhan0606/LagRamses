@@ -6,6 +6,7 @@ set -euo pipefail
 # SNRT-enabled full link, native controls, negative controls, timing, and one
 # concise summary.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+EXTERNAL_ASSET_ROOT="${SNRT_EXTERNAL_ASSET_ROOT:-/gpfs/kjhan/LRD_JWST}"
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
   echo 'SNRT_BUNDLE_GATE_FAIL reason=requires_Slurm_allocation; do_not_run_MPI_CUDA_gate_on_login_node' >&2
   exit 2
@@ -94,7 +95,7 @@ run_m5_live_dust_integration() {
     "$ROOT/simulation/snrt/config/snrt_secondary_table_contract_v1.nml" \
     "$ROOT/simulation/snrt/config/snrt_stellar_sed_reference_control_v1.nml" \
     "$ROOT/simulation/snrt/config/dust_dl01_bulk_030_scattering_exchange_reference_v4.nml" \
-    /gpfs/kjhan/LRD_JWST/simulation/snrt/config/snrt_agn_driver_faithful_smoke_yields.dat \
+    "$EXTERNAL_ASSET_ROOT/simulation/snrt/config/snrt_agn_driver_faithful_smoke_yields.dat" \
     "$ROOT/simulation/snrt/tests/run_snrt_bundle_gate.sh" \
     > "$case_dir/inputs.sha256"
   grep -Fq "radiation_transport='snrt_mn', snrt_moment_order=5" "$case_dir/effective.nml" || \

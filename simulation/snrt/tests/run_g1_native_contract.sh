@@ -6,7 +6,8 @@ set -euo pipefail
 # phase0 fixture driver, and runs the native/JAX differential tests. No
 # external checkout is modified.
 
-ROOT=/gpfs/kjhan/LRD_JWST
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
 SOURCE_DIR="$ROOT/patch/lagRamses"
 FIXTURE_SOURCE_DIR="$ROOT/simulation/snrt/tests/fixtures/phase0"
 BUILD_DIR="$ROOT/build/g1_native"

@@ -4,7 +4,8 @@ set -euo pipefail
 # P0.1 production-linked build harness.  The canonical source is selected by
 # bin/Makefile (PATCH=../patch/lagRamses).  The native G1 runner remains a
 # differential oracle; it is not allowed to stand in for this build.
-ROOT=/gpfs/kjhan/LRD_JWST
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
 BUILD_DIR="$ROOT/build/p0_production_linked"
 DATA_DIR="$ROOT/simulation/snrt/data"
 STATIC_EVIDENCE="$BUILD_DIR/static_source_parity.json"

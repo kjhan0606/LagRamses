@@ -3,21 +3,30 @@ set -euo pipefail
 
 # Focused F-P1.2 bridge/transaction evidence. It uses canonical production
 # modules, an explicitly scoped phase0 fixture driver, and never activates a
-# production run.
-ROOT=/gpfs/kjhan/LRD_JWST
+# production run. Resolve the active checkout from this runner's location.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
 SOURCE_DIR="$ROOT/patch/lagRamses"
 FIXTURE_SOURCE_DIR="$ROOT/simulation/snrt/tests/fixtures/phase0"
 TEST_SOURCE="$FIXTURE_SOURCE_DIR/fp12_stellar_feedback_transaction_test.f90"
-BUILD_DIR="$ROOT/build/fp12_stellar_feedback_transaction"
+BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fp12-stellar-feedback.XXXXXX")"
 FC=ifx
+cleanup_build() {
+  local exit_status=$?
+  if [[ $exit_status -eq 0 ]]; then
+    rm -rf -- "$BUILD_DIR"
+  else
+    echo "FP12_NATIVE_TRANSACTION_BUILD_RETAINED path=$BUILD_DIR" >&2
+  fi
+  return "$exit_status"
+}
+trap cleanup_build EXIT
 
 # The synchronization evidence must exercise more than one OpenMP worker.
 # Pin the test configuration so the reported full-row lock case is
 # reproducible across login-node defaults.
 export OMP_NUM_THREADS=4
 export OMP_DYNAMIC=FALSE
-
-mkdir -p "$BUILD_DIR"
 
 python3 "$ROOT/simulation/snrt/tools/validate_stellar_source_parity.py" \
   --check-runner "$BASH_SOURCE" --require-production-source

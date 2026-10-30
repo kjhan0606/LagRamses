@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=/gpfs/kjhan/LRD_JWST
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
 SNRT_ROOT="$ROOT/simulation/snrt"
 PYTHON="$SNRT_ROOT/.venv/bin/python"
 BUILD_DIR="$ROOT/build/fp1_population_fate"

@@ -5,7 +5,8 @@ set -euo pipefail
 # that configuration and conversion controls work while the legacy table and
 # one-point fixture remain refused as physical production inputs.
 
-ROOT=/gpfs/kjhan/LRD_JWST
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
 SNRT_ROOT="$ROOT/simulation/snrt"
 PRODUCTION_SOURCE_DIR="$ROOT/patch/lagRamses"
 FIXTURE_SOURCE_DIR="$SNRT_ROOT/tests/fixtures/phase0"

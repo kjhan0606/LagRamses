@@ -4,7 +4,7 @@ set -euo pipefail
 # DUST-10 native admission smoke.  The tracked fixtures are contract tests,
 # not approved opacity or thermal science assets.
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-build_dir="$(mktemp -d /gpfs/kjhan/LRD_JWST/.snrt-dust-contract.XXXXXX)"
+build_dir="$(mktemp -d "${TMPDIR:-/tmp}/snrt-dust-contract.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
 module_dir="$build_dir/modules"
 mkdir -p "$module_dir"
