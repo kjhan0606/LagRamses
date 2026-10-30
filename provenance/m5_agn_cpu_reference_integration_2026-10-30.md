@@ -58,8 +58,10 @@ gas+radiation+dust+AGN energy budget was not measured here.
 This establishes CPU-only coupled execution and AGN source attribution under
 the declared reference profile. It does not establish production physical
 calibration or GPU/hybrid runtime behavior. H100 CUDA build job `441960`
-passed, and hybrid integrated runtime job `442061` is pending Slurm GRES
-capacity at the time of this record.
+passed at source commit `ca40f0e`; its dependent runtime job `442061` was
+superseded before allocation. A build of current commit `598a302` and its
+dependent hybrid runtime job are now queued as `442109` and `442110`;
+`442109` is pending `QOSGrpGRES` capacity.
 
 ## M5 AMR slope OpenMP trial — 2026-10-30
 
@@ -97,3 +99,23 @@ does not qualify GPU/hybrid behavior, production physical inputs, or
 production-scale scaling. Keep the small timing change provisional and direct
 the next performance work toward the dominant M5 transport path, using a
 representative CPU/GPU allocation when available.
+
+## Reconciliation of the earlier M_N band-split failures
+
+CPU integrated job `1222367` and H100 integrated job `436882` both used
+executables built from source commit `00f7a4f`, before commits `0b69763`
+(`Fix subnormal M5 spectral endpoint split`) and `e63fc6d`
+(`Project subnormal M5 band packets`). Their group-4 rejection logged a
+negative endpoint weight of `-1.976262583364986E-323` and a zero opposite
+weight, consistent with the subnormal endpoint case covered by those changes.
+
+The later CPU integration job `1244378` built from `598a302` and completed the
+same three-step AGN-reference profile with the pass sentinel above. Its
+effective namelist, sink IC, and runner hashes match exactly the attempted
+revalidation job `1244569` (`6c8e0a0be400110576835fdc218c0124f8394f7670b93629590d56db4c5772fa`,
+`971d2f0f2b0c4731fd2b9801ebc5c363dd9cd51268660eb3cf801e7a34d88a54`, and
+`df8a0f6dd6b7863bf67852c344e06f9cd6568443b74b511487a42b38bb4a2f0c`). The
+revalidation was canceled after 39:21 to avoid repeating an identical
+completed run; its partial log is retained. Thus the earlier failures are not
+evidence of failure in the current `598a302` CPU path. Current-source hybrid
+execution remains unverified while job `442109` waits for GPU capacity.
