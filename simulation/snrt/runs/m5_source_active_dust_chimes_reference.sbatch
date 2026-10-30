@@ -3,6 +3,9 @@
 # two-size dust + CHIMES. The AGN profile disables stellar photons so its M5
 # source ledger is attributable to the AGN; physical tables remain references.
 #SBATCH --job-name=m5-src-dust-chem
+# Keep Slurm's initial working directory inside the canonical LagRamses tree,
+# even when sbatch is invoked from a different project or a home directory.
+#SBATCH --chdir=/gpfs/kjhan/chimes-cvode-gpu-20261001
 # GPU defaults are deliberately typed; override both options for another card:
 # A10: --partition=a10 --gres=gpu:A10:1
 # A40: --partition=a40 --gres=gpu:A40:1
