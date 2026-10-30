@@ -487,6 +487,7 @@ hybrid-only `CHIMES_LEVEL_QUEUE` log check for a CPU build and therefore
 returned batch exit code 1. Its final HDF5 dump remains the CPU comparison
 reference. H100 job `442500` was cancelled before execution (zero runtime), so
 it produced no comparison. The current-source A40 hybrid counterpart is job
-`442563` on syntax, pending GPU resources with tentative start
-2026-10-31 12:06 KST. Preserve the CPU dump until `442563` and the state
-comparison are evaluated; remove only the raw dump after that evaluation.
+`442563` on syntax, pending GPU resources. At the 2026-10-30 23:19 KST
+check, Slurm estimated a start at 2026-10-31 03:06 KST. Preserve the CPU
+dump until `442563` and the state comparison are evaluated; remove only the
+raw dump after that evaluation.
