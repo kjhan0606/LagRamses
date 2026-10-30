@@ -167,10 +167,10 @@ RAMSES outputs expected. At the 15:48 KST query, `442109` was still pending
 `QOSGrpGRES` and `442110` was pending on its dependency. No duplicate jobs
 were submitted.
 
-The read-only QoS query reports `MaxTRESPerAccount=gres/gpu=8` for `normal`;
-the user association has no separate GPU cap reported. This establishes the
-account-level ceiling associated with the pending reason, but does not identify
-which account jobs currently consume those GPU slots.
+Correction from the later QoS/partition inspection below: `normal` has
+`MaxTRESPerUser=gres/gpu=8` and no configured `GrpTRES`; it is not an
+account-level cap. The H100 partition separately applies QoS `part_h100` with
+`GrpTRES=gres/gpu=8`.
 
 Runtime acceptance remains the existing bounded runner contract: successful
 M5/CHIMES/dust/source checks, a `CHIMES_LEVEL_QUEUE` report with all cells
@@ -235,3 +235,31 @@ status) and the trace build succeeds. At this record update it is running;
 no trace-integrated verdict is claimed yet. GPU hybrid jobs `442109`/`442110`
 remain a separate `syntax` H100 chain pending `QOSGrpGRES` and its build
 dependency.
+
+## GPU queue correction and A100 reroute — 2026-10-30
+
+The H100 pending reason was traced to the partition QoS, not the user's
+`normal` per-user limit. `sacctmgr` reports `normal` with
+`MaxTRESPerUser=gres/gpu=8`, while the H100 partition uses `part_h100` with
+`GrpTRES=gres/gpu=8`. A read-only running-job query counted eight GPUs in the
+H100 partition QoS group. Thus build `442109` correctly remained pending with
+`QOSGrpGRES`; no H100 job had started.
+
+The A100 partition has no partition-level QoS cap. Its two nodes each expose
+eight A100 GPUs; the live Slurm allocation query showed seven in use on each
+node, leaving one on `syn102`. That node also reported 15 idle CPUs and ample
+memory for this job. The Makefile's CUDA targets include `sm_80`, so the A100
+build does not require an architecture change.
+
+Replacement chain: build `442271` (A100, 1 GPU, 4 CPUs, 32 GiB) and dependent
+hybrid run `442272` (A100, 1 GPU, 8 CPUs, 64 GiB, `agn_reference`,
+`level_queue`). At submission, the build was pending `Priority` and the run
+pending on its build dependency. The previous H100 jobs `442109` and `442110`
+were canceled before start to avoid a duplicate chain.
+
+Lageunha's RTX 5000 Ada has 32 GiB total, with 26 GiB already allocated and
+zero reported GPU utilization during the check; no manual run was launched
+there because the remaining memory is not a safe basis for the integrated
+test. CPU trace run `1244750` remained active at the last check; its log had
+advanced through multiple M5 tiles and photo-CVODE records, but no result
+sentinel was present yet.
