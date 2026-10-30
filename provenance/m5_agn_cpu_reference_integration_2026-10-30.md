@@ -410,3 +410,38 @@ This evidence is not production qualification. The admitted run explicitly
 uses the reference stellar spectral, nine-group, AGN and dust contracts
 (`reference_controls=NONPRODUCTION`). It must not be used to claim those
 physical inputs are production-approved. No raw dumps were retained.
+
+## Source-bound Kroupa package follow-up — 2026-10-30
+
+CPU Slurm package-build job `1245335` completed successfully on grammar's
+`normal` queue in 3:38 (peak RSS 642,500 KiB). It generated
+`.m5-kroupa-source-package-1245335/input-v5` with `imf_id=1` and a separate
+effective-SSP overlay. The manifest SHA256 is
+`0d8fa29295f4bc9df6295c0965355340de20c511dcb318933a6a716fca8951e7`; the
+binding records the SNIa runtime-contract hash and retains
+`reference_control_not_production_approval` status.
+
+The package was compared to the inputs used by A40 hybrid integration job
+`442357`. `history.nml` is byte-identical (SHA256
+`ac72b8022dcd7258926b2cd891d09983dc61c91c978747ca4122c619cf880874`), as are
+`yields.dat` (`a442f8b5637d8cb80260b835f02efae93908b6989029b1dd511f132fe4c140c6`)
+and `nodes.dat`
+(`f319b2e55d64e61354fe9f8943a5ab17f5375e292bbf5a7b825203c15713d7c3`). The
+effective-SSP SED has the same embedded node digest and population controls;
+its substantive difference is the absolute node-file path into the newly
+bound package (plus a trailing blank line). The package validator and
+effective-namelist history-path rewrite both passed on the generated package.
+Thus the earlier live hybrid result
+provides runtime evidence for the same numerical stellar inputs: 61,258 GPU
+calls, zero CPU fallbacks, and zero device errors.
+
+A follow-up H100 job `442427` was submitted on syntax but remained pending
+with Slurm reason `QOSGrpGRES`. It was cancelled while still pending after the
+exact input comparison and package/path checks showed that another coupled
+run would add no new numerical evidence. It consumed no GPU time and is not a
+runtime failure.
+
+This closes the Kroupa package/IMF metadata and runtime-path consistency
+repair. It does not promote any yield, SED, SNIa, AGN, dust, or nine-group
+reference contract to production status; the preceding nonproduction limits
+remain in force.
