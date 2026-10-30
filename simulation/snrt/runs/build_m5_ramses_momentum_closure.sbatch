@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Isolated incremental M5+CHIMES build for RAMSES-state momentum closure checks.
 # The baseline build tree and executable are kept untouched.
+# M5_CHIMES_LIBRARY_MODE=trace opts into the separately qualified dark-trace
+# CVODE recovery; the default reference library remains unchanged.
 #SBATCH --job-name=m5-momentum-build
 # CUDA toolkit modules are available on syntax's GPU nodes, not grammar normal.
 # The compiler does not execute kernels, but reserve one typed GPU for the build.
@@ -27,10 +29,19 @@ readonly BUILD=$ROOT/.m5-ramses-momentum-build-$SLURM_JOB_ID
 readonly SOURCE_TREE=$BUILD/committed-source
 readonly BIN=$BUILD/bin/ramses_m5_ramses_momentum_closure_v13d
 readonly EXEC=$BUILD/bin/ramses_m5_ramses_momentum_closure_v1
+readonly CHIMES_LIBRARY_MODE=${M5_CHIMES_LIBRARY_MODE:-reference}
+readonly CHIMES_SOURCE_ROOT=$ROOT/.cvode-gpu/chimes
+readonly CHIMES_LIBRARY_BUILDER=$ROOT/simulation/snrt/tools/build_chimes_cpu_library.sh
+readonly CHIMES_TRACE_PATCH=$ROOT/simulation/snrt/data/chimes_trace_solver.patch
+readonly HDF5_CPU_ROOT=/home/kjhan/local/hdf5
 
 case "$BUILD_CUDA" in
   0|1) ;;
   *) echo 'M5_BUILD_CUDA must be 0 or 1' >&2; exit 2 ;;
+esac
+case "$CHIMES_LIBRARY_MODE" in
+  reference|trace) ;;
+  *) echo 'M5_CHIMES_LIBRARY_MODE must be reference or trace' >&2; exit 2 ;;
 esac
 test -d "$BASE/bin"
 test -f "$BASE/chimes-install/libchimes.so"
@@ -56,6 +67,54 @@ module purge
 module load intel/tbb/2022.3 intel/compiler-rt/2025.3.0 intel/umf/1.0.2
 module load intel/compiler/2025.3.0 intel/mpi/2021.17
 if [[ "$BUILD_CUDA" == 1 ]]; then module load cuda/13.0.2; fi
+
+if [[ "$CHIMES_LIBRARY_MODE" == trace ]]; then
+  test -f "$CHIMES_SOURCE_ROOT/src/chimes.c"
+  test -f "$CHIMES_TRACE_PATCH"
+  test -f "$HDF5_CPU_ROOT/include/hdf5.h"
+  expected_chimes_files=$(printf '%s\n' \
+    src/chimes.c src/chimes_cooling.c src/chimes_proto.h src/init_chimes.c \
+    src/rate_equations.c src/update_rates.c | sort)
+  actual_chimes_files=$(git -C "$CHIMES_SOURCE_ROOT" diff --name-only | sort)
+  if [[ "$actual_chimes_files" != "$expected_chimes_files" ]]; then
+    echo 'Trace mode requires the six provenance-recorded CHIMES source modifications' >&2
+    printf 'Expected:\n%s\nActual:\n%s\n' "$expected_chimes_files" "$actual_chimes_files" >&2
+    exit 4
+  fi
+  readonly CHIMES_SOURCE_COMMIT=$(git -C "$CHIMES_SOURCE_ROOT" rev-parse HEAD)
+  readonly CHIMES_SOURCE_DIFF_SHA256=$(git -C "$CHIMES_SOURCE_ROOT" diff --binary -- \
+    src/chimes.c src/chimes_cooling.c src/chimes_proto.h src/init_chimes.c \
+    src/rate_equations.c src/update_rates.c | sha256sum | awk '{print $1}')
+  readonly CHIMES_TRACE_PATCH_SHA256=$(sha256sum "$CHIMES_TRACE_PATCH" | awk '{print $1}')
+  readonly CHIMES_TRACE_STAGE=$BUILD/chimes-trace-library-stage
+  CC=mpicc bash "$CHIMES_LIBRARY_BUILDER" "$CHIMES_SOURCE_ROOT" "$CHIMES_TRACE_STAGE" \
+    "$SUNDIALS_CPU_ROOT" "$HDF5_CPU_ROOT" trace \
+    > "$ROOT/.m5-momentum-build-$SLURM_JOB_ID.chimes-trace-build.log" 2>&1
+  mv -- "$BUILD/chimes-install/libchimes.so" "$BUILD/chimes-install/libchimes-reference.so"
+  cp -- "$CHIMES_TRACE_STAGE/libchimes.so" "$BUILD/chimes-install/libchimes.so"
+  nm -D --defined-only "$BUILD/chimes-install/libchimes-reference.so" \
+    | awk '{print $NF}' | sort -u > "$BUILD/chimes-reference-symbols.txt"
+  nm -D --defined-only "$BUILD/chimes-install/libchimes.so" \
+    | awk '{print $NF}' | sort -u > "$BUILD/chimes-trace-symbols.txt"
+  if ! diff -u "$BUILD/chimes-reference-symbols.txt" "$BUILD/chimes-trace-symbols.txt" \
+    > "$BUILD/chimes-symbol-diff.txt"; then
+    echo 'Trace CHIMES library changed the exported symbol ABI' >&2
+    cat "$BUILD/chimes-symbol-diff.txt" >&2
+    exit 4
+  fi
+  export LD_LIBRARY_PATH="$SUNDIALS_CPU_ROOT/lib64:$SUNDIALS_CPU_ROOT/lib:$HDF5_CPU_ROOT/lib:${LD_LIBRARY_PATH:-}"
+  ldd "$BUILD/chimes-install/libchimes.so" > "$BUILD/chimes-trace-library.ldd"
+  if grep -F 'not found' "$BUILD/chimes-trace-library.ldd"; then
+    echo 'Trace CHIMES library has an unresolved runtime dependency' >&2
+    exit 4
+  fi
+  {
+    printf 'CHIMES_LIBRARY_MODE=trace\nCHIMES_SOURCE_COMMIT=%s\n' "$CHIMES_SOURCE_COMMIT"
+    printf 'CHIMES_SOURCE_DIFF_SHA256=%s\nCHIMES_TRACE_PATCH_SHA256=%s\n' \
+      "$CHIMES_SOURCE_DIFF_SHA256" "$CHIMES_TRACE_PATCH_SHA256"
+    sha256sum "$BUILD/chimes-install/libchimes-reference.so" "$BUILD/chimes-install/libchimes.so"
+  } > "$BUILD/chimes-library-provenance.txt"
+fi
 
 cd "$BUILD/bin"
 if [[ "$BUILD_CUDA" == 0 ]]; then make clean; fi
@@ -97,7 +156,11 @@ else
 fi
 strings "$BIN" | grep -F 'M_N radiation momentum finite check failed'
 strings "$BIN" | grep -F 'M_N RAMSES momentum closure failed'
-build_artifacts=("$BIN" "$BUILD/bin/snrt_moment_ramses.o" "$BUILD/bin/snrt_chimes_bridge.o")
+build_artifacts=("$BIN" "$BUILD/chimes-install/libchimes.so" \
+  "$BUILD/bin/snrt_moment_ramses.o" "$BUILD/bin/snrt_chimes_bridge.o")
+if [[ "$CHIMES_LIBRARY_MODE" == trace ]]; then
+  build_artifacts+=("$BUILD/chimes-install/libchimes-reference.so")
+fi
 if [[ "$BUILD_CUDA" == 1 ]]; then
   build_artifacts+=("$BUILD/bin/snrt_chimes_cvode_cuda.o" "$BUILD/bin/snrt_chimes_rhs_cuda.o")
 else
@@ -116,3 +179,7 @@ sha256sum "$SOURCE_TREE/bin/Makefile" \
   "$SOURCE_TREE/patch/lagRamses/snrt_regrid.f90" > "$BUILD/source.sha256"
 printf 'M5_MOMENTUM_CLOSURE_BUILD_PASS\nCHIMES_CUDA=%s\nSOURCE_COMMIT=%s\nSOURCE_TREE=%s\nBINARY=%s\n' \
   "$BUILD_CUDA" "$SOURCE_COMMIT" "$SOURCE_TREE" "$BIN" > "$BUILD/build-result.txt"
+printf 'CHIMES_LIBRARY_MODE=%s\n' "$CHIMES_LIBRARY_MODE" >> "$BUILD/build-result.txt"
+if [[ "$CHIMES_LIBRARY_MODE" == trace ]]; then
+  cat "$BUILD/chimes-library-provenance.txt" >> "$BUILD/build-result.txt"
+fi
