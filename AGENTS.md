@@ -19,15 +19,19 @@ not additional prerequisites for the approved three-step implementation.
 
 ## Compute placement
 
-- Run GPU work through Slurm on `h200`, `h100`, `a100`, `a40`, or `a10`.
-  Use the typed GRES syntax required by a partition, e.g.
-  `--partition=h200 --gres=gpu:H200:1`; do not launch GPU simulations
-  manually on Lageunha or a login node.
-- Run CPU-only jobs through grammar's Slurm `normal` queue. Do not run
-  simulations directly on a login node.
-- CUDA-enabled builds that need the cluster CUDA toolkit also use GPU Slurm:
-  grammar's `normal` queue has no CUDA module/toolkit. Request one typed GPU
-  for these build jobs; reserve grammar `normal` for genuinely CPU-only builds.
+- Run GPU work through Slurm on `syntax`, using the typed GRES syntax required
+  by the selected partition, e.g. `--partition=h100 --gres=gpu:H100:1`.
+  Supported partitions include `h200`, `h100`, `a100`, `a40`, and `a10`.
+- Run CPU-only jobs through grammar's Slurm `normal` queue. Syntax also has
+  Slurm for CPU and GPU work, but grammar `normal` is the CPU-only route.
+- Lageunha has no Slurm. Manual execution there is supported on its Ada GPU
+  and 64 CPU cores; check current GPU memory and CPU availability first, use a
+  fresh run directory, and avoid interfering with other users' processes.
+  Do not run simulations directly on the grammar login node.
+- CUDA-enabled builds that need the cluster CUDA toolkit use GPU Slurm on
+  syntax; grammar's `normal` queue has no CUDA module/toolkit. Request one
+  typed GPU for these build jobs and reserve grammar `normal` for genuinely
+  CPU-only builds.
 - Preserve resource requests in the job script (`--cpus-per-task`, memory,
   wall time, and GPU count/type); report the actual allocation in run evidence.
 
