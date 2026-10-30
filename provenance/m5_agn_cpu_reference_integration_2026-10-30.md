@@ -119,3 +119,31 @@ revalidation was canceled after 39:21 to avoid repeating an identical
 completed run; its partial log is retained. Thus the earlier failures are not
 evidence of failure in the current `598a302` CPU path. Current-source hybrid
 execution remains unverified while job `442109` waits for GPU capacity.
+
+## Partial CHIMES photo-cost details from job 1244569
+
+The partial `SNRT PERF` rows separate the slow material path. Across observed
+256-cell tiles, `chimes_photo_s` is 201–227 summed per-cell elapsed seconds;
+`chimes_dark_s` is 1.3–1.4 summed per-cell seconds. Photo-cell maxima are
+2.0–4.5 seconds, with 42–69 cells over one second and none over five seconds.
+These are summed cell-seconds, not tile wall time. The enclosing 512-cell
+preparation loop takes about 58–60 wall seconds, while the M5 dust/IR tile
+stage takes about 12–15 wall seconds per 256-cell tile. This remains partial
+evidence from the canceled revalidation, not a completed run benchmark.
+
+The photo timer surrounds `chimes_band_photo_molecular_*`; its driver uses
+OpenMP `schedule(dynamic,1)`. The called `snrt_chimes_photo.cpp` solver creates
+a per-cell CVODE BDF instance with a serial N_Vector and SPGMR (`maxl=30`),
+then advances with `CV_ONE_STEP` and `rtol=1e-10`. Its state includes 157
+chemical species, up to 1,152 active photon-node optical depths, and the
+conservation ledgers (plus optional phase counters). The current timer does
+not expose accepted-step, RHS, or linear-iteration counts. Commit `c116941`
+adds those counts to the existing opt-in photo performance row. CPU-only
+build job `1244657` completed on grammar's `normal` queue in 4:16 with
+`CHIMES_CUDA=0`, 26,834,488 KiB peak RSS, and the
+`M5_MOMENTUM_CLOSURE_BUILD_PASS` sentinel. Its executable is
+`.m5-ramses-momentum-build-1244657/bin/ramses_m5_ramses_momentum_closure_v13d`
+(SHA256 `a4c15b4da13c9e00b0a1e140e72479a69a77f38605d2235c297da05f55310140`);
+`ldd` shows no CUDA runtime dependency. The separate syntax GPU build/run
+chain `442109` → `442110` remains pending (`QOSGrpGRES` and dependency,
+respectively); no replacement jobs were submitted.
