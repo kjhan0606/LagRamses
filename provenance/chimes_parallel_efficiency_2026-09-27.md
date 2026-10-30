@@ -359,3 +359,32 @@ secondary target. A single minimal phase timing of the still-unassigned
 pre-first-tile 128^3 interval should precede optimization of hydro or
 level setup. No production physics/code was changed by this triage and
 no raw simulation output was generated.
+
+## 2026-10-30 source-active AGN integration cost observation
+
+Job 1245912 completed the existing `agn_reference` profile on grammar's
+`normal` CPU queue: one MPI rank, eight OpenMP threads, three main steps,
+`COMPLETED 0:0`, no final dump. The runner emitted
+`M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS`. In the coarse-state ledger,
+step 2 had `feedback_mode=THERMAL`, positive accreted mass
+`1.010425979961e-08` code units, and `Lbol=3.056193766856e40 erg/s`; the
+next row was low-luminosity JET mode. The M5 order-5 source-active commit
+reported source `8.531519436388e-03`, absorbed `1.073906378648e-04`, photon
+residual/source `2.205e-15`, and energy residual/absorbed `2.716e-14`. Dust
+heat was positive. All 60 `NaN_CHK` records were zero.
+
+The run took 3147.784 s internally. RAMSES' broad `cooling` phase reported
+3142.713 s (99.84%); direct `feedback` reported 4.920 s. This phase timer
+contains the integrated chemistry/material work and is not a CHIMES-only
+isolated measurement. The result nevertheless confirms that this source-active
+CPU reference configuration is dominated by the cooling/coupling path; no
+CPU/GPU comparison or speedup is inferred. The active thermal-source and
+ledger checks pass only under the explicitly NONPRODUCTION reference controls.
+
+The global coarse diagnostics also printed `mcons=-2.82e-4` and
+`econs=9.98e-1` at steps 2 and 3. This bounded source-wiring run did not
+interpret those whole-system diagnostics; they are not covered by the M5
+photon/energy-ledger residuals and must be analyzed before a production
+conservation claim. Effective input, logs, hashes, compact evaluation and
+cleanup disposition are retained under
+`.m5-source-dust-chimes-1245912/`; no `output_*` directory was produced.

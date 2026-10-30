@@ -90,6 +90,11 @@ stream-count tuning stopped per operator instruction.
 [CHIMES photo/M5 high-thread tail](chimes_photo_omp_tail_2026-09-28.md):
 bounded two-tile OpenMP preparation queue, 16/31-core A/B timing and physical
 parity; speculative CVODE RHS skip rejected after integrated measurement.
+The 2026-10-30 AGN-only CPU reference integration adds a three-step source and
+ledger pass plus a measured cooling/coupling-dominated runtime; see
+[CHIMES parallel efficiency](chimes_parallel_efficiency_2026-09-27.md). This
+remains NONPRODUCTION reference-control evidence, not a whole-run speedup or
+global energy-conservation qualification.
 
 [CHIMES MPI/OpenMP layout comparison](mpi_omp_decomposition_2026-09-28.md):
 fixed-total-core 1x28/2x14/4x7 comparison on 512- and 4096-cell controls;
