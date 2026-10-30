@@ -101,8 +101,10 @@ and MPI-launched no-argument smoke all passed. The built executable is
 `ac85e1432d6bde45184f1cce9c60d51295a8a7e5dd7e996a9f14520f33ba4a4e`; the
 operator's active `bin/ramses_final3d` remained unchanged.
 
-The evidence JSON records source commit `c616e5e85997b84cbf54dcd8967a3b7e4b3ac394`.
-The live parity regression and `validate_stellar_source_parity.py --require-pass`
-both pass. P0.1 is closed for this checkout. It establishes source/build
+The build log records source commit
+`c616e5e85997b84cbf54dcd8967a3b7e4b3ac394`; the evidence JSON was regenerated
+at descendant commit `380bce5f4dd87349873673bfb3b943a381e3b83e`. The live parity
+regression and `validate_stellar_source_parity.py --require-pass` both pass.
+P0.1 is closed for this checkout. It establishes source/build
 identity and link/smoke behavior only; it does not qualify the physical stellar
 yield package. P0.2--P0.6 remain open.
