@@ -551,6 +551,15 @@ for the selected CHIMES, Draine D03, PARSEC VMS or KL16 data, so those terms
 remain blocked. The production candidate was not promoted and no data-use
 approval was inferred.
 
+The preceding GPU-availability statement is a snapshot of the grammar
+controller and predates the current syntax submission. Typed-GPU execution is
+now queued as A40 job `442563`; its effective-population/HDF5 comparison and
+current Slurm state are recorded in
+[`m5_agn_cpu_reference_integration_2026-10-30.md`](m5_agn_cpu_reference_integration_2026-10-30.md).
+The job remains pending resources, so current-source hybrid GPU qualification
+is still open until the run and CPU/GPU state comparison complete. This does
+not change the physical-data licensing blockers above.
+
 ### Repeated-event delayed-cooling timer regression — 2026-10-30
 
 The focused Fortran unit now advances the active timer by 3 Myr before a
