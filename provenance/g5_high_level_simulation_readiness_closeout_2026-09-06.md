@@ -616,3 +616,43 @@ reference-control, nonproduction evidence; it does not qualify CUDA/hybrid
 execution, release assets or licenses, cosmological evolution, or production
 scaling. The A100 CHIMES backend-path comparison remains a separate pending
 job.
+
+### Current-source CPU MPI2 M5+dust+CHIMES restart equivalence — 2026-10-31
+
+Grammar `normal` job `1248450` completed in 1:50 with exit code 0, using two
+MPI ranks, four OpenMP threads per rank, 32 GiB requested and a peak task RSS
+of 834104K. The current CPU binary
+`.m5-current-source-effective-cpu-build-1248163/bin/ramses_m5_current_cpu3d`
+has SHA-256
+`c59ca189c9f3205b95bb6478b0f1c5e475b7ab13f595c50b54af9e06ff157fcf` and was
+built from source commit `808134303d157403053d452fcddfab4ec88e7133`
+(`CHIMES_CUDA=0`). The submitted wrapper
+`.m5-current-mpi2-restart-20261031.sbatch` has SHA-256
+`03478e87822912b32822a90bb6555c5e6956eef7c4a3fa02057d45361a5152e1`.
+
+The bounded reference-control run used M5 order 5, the Kroupa effective
+population, live co-moving dust and CPU CHIMES. It evolved four coarse steps
+continuously and by checkpoint/restart, then compared the final states at
+step 4. The comparator returned `M5_COUPLED_RESTART_PASS`: 449 datasets
+compared, 437 bitwise identical, 11 listed floating-point differences within
+the declared `rtol=1e-12`, `atol=1e-25`, and zero tolerance or clock violations.
+The six clock values (`time`, `aexp`, `dtnew`, `dtold`, `nstep`,
+`nstep_coarse`) were bitwise identical. The comparison also accepted the
+recorded three-grid level-2 reorder and 48 new-star ID relabelings under the
+declared identity rules.
+
+The effective namelist SHA-256 is
+`01e623647752e38b00ea6dde9fb2be95925c923a81ac5453e5dc4f93c67a4104`. Before
+cleanup, the three compared/continuation HDF5 dumps totaled 303846520 bytes;
+their paths, byte counts and SHA-256 values are preserved in
+`.m5-effective-restart-1248450/raw-bytes.txt` and `raw.sha256`. After this
+successful stage evaluation, only those three raw HDF5 files were removed;
+their exact paths and hashes are recorded in that run directory's
+`cleanup-manifest.json`. Effective inputs, logs, comparator JSON, build
+identity and compact results remain available there.
+
+This closes current-source CPU MPI2 restart equivalence for the bounded
+effective-population/M5/live-dust/CPU-CHIMES reference profile. It does not
+qualify CUDA/hybrid execution or production physics. The separate A100
+CHIMES comparison remained pending the syntax GPU QoS limit at the latest
+check; release-data/license blockers remain open.
