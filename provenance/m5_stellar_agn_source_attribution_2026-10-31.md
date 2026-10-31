@@ -174,15 +174,53 @@ terms remain genuine release blockers. See
 `manifests/native_m5_release_candidate_2026-10-12.json` for their recorded
 scope and exact conditions.
 
-## Remaining bounded verification
+## Bounded verification results and current limits
 
-Jobs `1249156` and `1249188` separately verify the effective-population JET
-zero-packet and AGN-only THERMAL receipt cases. Job `1249327` now verifies
-simultaneous stellar and THERMAL AGN source receipts on the CPU path. CUDA
-build job `443842` requests one typed A100 and remains pending with
-`Priority` (last checked 2026-10-31). Its dependent runtime job `443906` is
-queued with
-`afterok:443842`; it holds M5 transport and dust to OpenMP while selecting
-hybrid CHIMES (`level_queue`, one GPU broker, one CUDA stream). That comparison
-must confirm actual GPU CHIMES work as well as the source/ledger checks; it is
-not a production-physics approval. Keep physical admission blockers intact.
+The remaining source-routing checks are complete. Jobs `1249156` and
+`1249188` separately verify the effective-population JET zero-packet and
+AGN-only THERMAL receipt cases. Job `1249327` verifies simultaneous stellar
+and THERMAL AGN source receipts on the CPU path.
+
+The CUDA comparison also completed. Typed-A100 build job `443842` completed
+successfully (one A100, four CPUs). Its dependent run `443906` completed on
+one A100 with eight CPUs, `level_queue`, one GPU broker and one stream. The
+AGN-only reference profile passed with no raw output; CHIMES recorded 781,416
+GPU calls, 26,525 CPU fallbacks and zero device errors. The accepted AGN
+receipt was one packet representing `1.90503e62` photons and `7.59140e51 erg`.
+The printed SNRT energy-ledger residuals were `4.15e-17` and `-8.86e-17` for
+the AGN-source step and its following transport step. This verifies execution
+of the GPU CHIMES path and AGN-to-M5 receipt under reference controls, not
+production physics.
+
+Later CPU/A10 jobs `1249452` and `444137` used byte-identical effective
+namelists (SHA256
+`b63d24b1b9274f03151377b0e3145f2fbc7310e5ac0f05a0b3ba8554dfc1a349`) and
+both passed the same three-step AGN-only source profile without raw output.
+The CPU run used Grammar `normal` with eight CPUs and took 52:10; the A10
+hybrid run used eight CPUs plus one A10 and took 1:08:57. The hybrid run was
+about 32% slower in these allocations. Since the jobs ran on different
+systems, this is an end-to-end configuration comparison rather than a
+same-node hardware benchmark. It provides no evidence to make hybrid CHIMES
+the default; CPU remains the default route.
+
+The older A100 stream-count pair `443809`/`443816` remains a failed strict
+final-state comparison (`M5_COUPLED_FINAL_PAIR_FAIL_NUMERIC_TOLERANCE`). Its
+provisional timing difference is not an accepted speedup. Its old binaries
+also predate the distinct source receipts, so those runs do not establish
+AGN-specific deposition.
+
+The RAMSES-wide `mcons` and `econs` printouts are not total feedback budgets:
+`mcons` sums gas density over hydro leaves, while `econs` uses kinetic and
+potential terms plus cosmological work and omits internal energy and explicit
+radiation/feedback source terms (`../hydro/courant_fine.f90`,
+`../amr/update_time.f90`). A nonzero `mcons` during star formation therefore
+does not by itself imply loss of total baryonic mass; this diagnostic does not
+close gas+stars+sinks. Likewise `econs` cannot certify total gas+dust+radiation
+energy closure in these nonadiabatic runs. Use the subsystem ledgers for their
+declared scopes and do not claim a global closure from these fields.
+
+Production admission remains blocked as recorded above. The reference
+spectra/dust controls and unresolved package provenance/data-use terms are
+not promoted by these successful integration runs. The release manifest
+must continue to reject physical-production admission until those conditions
+are resolved.
