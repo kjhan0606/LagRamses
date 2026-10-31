@@ -688,14 +688,28 @@ compiles the module closure used by its fixture. Grammar `normal` job
 `1251776` completed the native fixture and six native/JAX interpolation
 queries in 9 seconds (168488 KiB peak RSS). Both maximum absolute and
 relative differences were zero. The run was explicitly
-`G1_NATIVE_DIAGNOSTIC_ONLY`: production-linked build evidence is still absent,
-so this does not pass the production G1 gate. The runner and compact result
-are committed at `c1a3120`.
+`G1_NATIVE_DIAGNOSTIC_ONLY`: that diagnostic alone did not pass the production
+G1 gate. The runner and compact result are committed at `c1a3120`.
+
+The missing linked-build evidence was then regenerated from the current clean
+checkout. Grammar `normal` job `1251797` first hit the 16 GiB memory limit;
+its partial build was retained under
+`build/p0_production_linked_3d09fe6_oom1251797/`. Job `1251801`, with 32 GiB,
+completed the forced `bin/Makefile` build and linked-executable smoke in 2:53
+(peak RSS 27,089,588 KiB, exit 0). The recorded source commit is
+`3d09fe68e5a448e2a38b2c1b9accd4431ab013ec`; the executable SHA-256 is
+`902939803512c4880c21a54e816934e9c88096bb1b3796cc1bff42698f4899c6`. The
+parity validator reports no blockers and
+`production_linked_build_evidence=true`. Evidence is recorded in
+[`p0_production_linked_build_evidence.json`](../simulation/snrt/data/p0_production_linked_build_evidence.json).
+This closes the linked-build portion of G1 for that source commit; it does not
+qualify a release binary or clear the separate external-asset and license
+blockers.
 
 The current integrated M5+dust+CHIMES restart comparator, job `444740`, is
 still pending on syntax A40 with `QOSMaxGRESPerUser`; it requests one typed
 A40, 2 MPI ranks × 4 CPUs, 32 GiB, and one hour. Slurm currently estimates
-`StartTime=2026-11-01T07:56:47`, which may move as allocations change. A
+`StartTime=2026-11-01T08:10:37`, which may move as allocations change. A
 read-only `squeue -u kjhan` showed multiple user-owned GPU jobs running across
 A10/A40/H100/H200, consistent with this per-user GRES limit. No duplicate
 comparison was submitted. The job has not started and provides no new runtime

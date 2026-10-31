@@ -17,7 +17,7 @@
     "text_symbols_required": true
   },
   "binary_path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/build/p0_production_linked/ramses_final3d",
-  "binary_sha256": "ac85e1432d6bde45184f1cce9c60d51295a8a7e5dd7e996a9f14520f33ba4a4e",
+  "binary_sha256": "902939803512c4880c21a54e816934e9c88096bb1b3796cc1bff42698f4899c6",
   "build_command": "make -C \"$SOURCE_WORKTREE/bin\" -B ramses",
   "build_input_source_hashes": {
     "patch/cuRamses/adaptive_loop.jaehyun.f90": "51420130ebadada2ba6d37089dc260ed84d71637da0ec98b4acd661e9151f161",
@@ -195,10 +195,10 @@
     "compile_parameters_consistent": true,
     "compile_parameters_match": true,
     "embedded_yields_disabled": true,
-    "expected_binary_sha256": "ac85e1432d6bde45184f1cce9c60d51295a8a7e5dd7e996a9f14520f33ba4a4e",
+    "expected_binary_sha256": "902939803512c4880c21a54e816934e9c88096bb1b3796cc1bff42698f4899c6",
     "forced_rebuild": true,
     "link_output_matches": true,
-    "logged_binary_sha256": "ac85e1432d6bde45184f1cce9c60d51295a8a7e5dd7e996a9f14520f33ba4a4e",
+    "logged_binary_sha256": "902939803512c4880c21a54e816934e9c88096bb1b3796cc1bff42698f4899c6",
     "optimization_policy_satisfied": true,
     "required_compile_flags_present": true,
     "required_object_compile_counts": {
@@ -231,7 +231,7 @@
     "required_objects_compiled": true,
     "status": "pass"
   },
-  "build_log_sha256": "5ae95e46e2f78b41d9f320a90fb72b7f04ef869c90091d5bcd9aa24c8b5cc109",
+  "build_log_sha256": "deebde5d876c52f45d5417421c4b9dd320030b4cc335e7562f2bc0f3c5b7eb9b",
   "compile_parameters": {
     "NDIM": "3",
     "NENER": "0",
@@ -273,9 +273,9 @@
     "stellar_yield_provider.f90": "c0a286a4d1d34d1765343cd7b685408f2e2ae2d8a8ac73c05fab4af1d6db7c5c",
     "stellar_yield_tables.f90": "7cd4a588439a4350fa8a49d24ba71099f4f82b95e8a6163c0f243a506a16a255"
   },
-  "recorded_at_utc": "2026-10-30T10:03:16.343779+00:00",
+  "recorded_at_utc": "2026-10-31T15:17:19.511189+00:00",
   "recorder_sha256": "c9064439ebc06972e55ddd58686915e10cc70e89176e36ad27a71c6a7d0add36",
-  "repository_head": "380bce5f4dd87349873673bfb3b943a381e3b83e",
+  "repository_head": "3d09fe68e5a448e2a38b2c1b9accd4431ab013ec",
   "required_compile_flags": [
     "-DLONGINT",
     "-DQUADHILBERT",
@@ -309,23 +309,23 @@
     "stellar_ramses_runtime.o",
     "feedback.kjhan3.o"
   ],
-  "runner_sha256": "1985e13d38946e251bf261725dbdf45d6363b0d9d830ef48fc75d89f6c666a06",
+  "runner_sha256": "b579a624fbbc471b05e9ce8ca3cc0355c7fefbb2d59d096287fe37359df11022",
   "schema": "snrt-p0-production-linked-build-evidence-v1",
   "smoke_contract": {
     "binary_sha256_matches": true,
     "command_matches": true,
     "exit_code": 0,
-    "expected_binary_sha256": "ac85e1432d6bde45184f1cce9c60d51295a8a7e5dd7e996a9f14520f33ba4a4e",
+    "expected_binary_sha256": "902939803512c4880c21a54e816934e9c88096bb1b3796cc1bff42698f4899c6",
     "expected_exit_code": 0,
     "expected_output_found": true,
-    "logged_binary_sha256": "ac85e1432d6bde45184f1cce9c60d51295a8a7e5dd7e996a9f14520f33ba4a4e",
-    "logged_repository_head": "c616e5e85997b84cbf54dcd8967a3b7e4b3ac394",
+    "logged_binary_sha256": "902939803512c4880c21a54e816934e9c88096bb1b3796cc1bff42698f4899c6",
+    "logged_repository_head": "3d09fe68e5a448e2a38b2c1b9accd4431ab013ec",
     "patch_dir_found": true,
     "repository_head_found": true,
     "status": "pass"
   },
   "smoke_log": "/gpfs/kjhan/chimes-cvode-gpu-20261001/build/p0_production_linked/smoke.log",
-  "smoke_log_sha256": "98c51d8827c0d0221f2ac4d0709be08709e0a1f7c2f2755d756ba3ec6a18f4d0",
+  "smoke_log_sha256": "a1a208e662e8cd717aba39b17b3e69c15c3c56ae0b83bfbb4d1cd3ca209f6696",
   "source_manifest_sha256": "43052bb889f32cd6325a98660781130ca450e32e6108e067687ef5a2b1aef295",
   "source_root": "patch/lagRamses",
   "stale_build_objects_are_not_evidence": true,
