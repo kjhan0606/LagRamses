@@ -283,10 +283,11 @@ int cuda_acquire_stream(void) {
     // Ensure this OMP thread uses the correct GPU device (per-thread context)
     cudaSetDevice(g_device_id);
     for (int s = 0; s < g_n_active_streams; s++) {
-        if (!g_pool[s].busy) {
-            if (__sync_lock_test_and_set(&g_pool[s].busy, 1) == 0) {
-                return s;
-            }
+        // Check-and-claim atomically. An ordinary read of busy races with
+        // another worker's atomic claim/release even though the field is
+        // volatile; the failed CAS leaves an owned slot untouched.
+        if (__sync_bool_compare_and_swap(&g_pool[s].busy, 0, 1)) {
+            return s;
         }
         // A successful query only says that the stream has no queued CUDA
         // work at this instant; it does not transfer ownership from the
