@@ -203,6 +203,10 @@ if [[ -n "${M5_CHIMES_LIBRARY_MODE:-}" && "$M5_CHIMES_LIBRARY_MODE" != "$CHIMES_
 fi
 test -x "$BINARY"
 test -f "$CHIMES_INSTALL/libchimes.so"
+grep -aFq 'SNRT_MN_AGN_SOURCE accepted_packets=' "$BINARY" || {
+  echo 'Binary lacks the committed M5 AGN source receipt; rebuild from a source revision containing f260266' >&2
+  exit 3
+}
 if [[ "$CHIMES_BACKEND" == hybrid ]]; then
   grep -aFq 'hybrid (host CVODE/LU, asynchronous device RHS/cooling)' "$BINARY" || {
     echo 'Hybrid CHIMES requested with a binary lacking the CHIMES_CUDA backend' >&2
@@ -396,10 +400,16 @@ awk -v dust_ic="$dust_ic_settings" \
   "$WORK/effective.nml" > "$WORK/effective.nml.tmp"
 mv -- "$WORK/effective.nml.tmp" "$WORK/effective.nml"
 grep -Fq "population_model='single_star_ssp'" "$WORK/effective.nml"
-# This profile is bound to the Kroupa id=1 source package above. The separate
-# AGN-only reference profile uses its own Chabrier id=2 history.
-grep -Eq '^[[:space:]]*imf_id=1$' "$WORK/effective.nml"
-grep -Eq '^[[:space:]]*input_imf_id=1([,[:space:]]|$)' "$STELLAR_HISTORY"
+if [[ "$PROFILE" == effective_population ]]; then
+  # This profile is bound to the Kroupa id=1 source package above.
+  grep -Eq '^[[:space:]]*imf_id=1$' "$WORK/effective.nml"
+  grep -Eq '^[[:space:]]*input_imf_id=1([,[:space:]]|$)' "$STELLAR_HISTORY"
+else
+  # The AGN-only profile has no stellar SED and retains its separate Chabrier
+  # id=2 feedback history. Do not validate it against the effective-profile IMF.
+  grep -Eq '^[[:space:]]*imf_id=2$' "$WORK/effective.nml"
+  grep -Eq '^[[:space:]]*input_imf_id=2([,[:space:]]|$)' "$STELLAR_HISTORY"
+fi
 grep -Fq 'imf_mass_max_msun=600d0' "$WORK/effective.nml"
 grep -Fq 'channel_mass_min_msun=2d0,2d0,2d0,3d0,2d0' "$WORK/effective.nml"
 grep -Fq 'channel_mass_max_msun=600d0,600d0,600d0,8d0,600d0' "$WORK/effective.nml"
@@ -674,15 +684,105 @@ if [[ "$VERIFY_RESTART" == 1 ]]; then
     | tee "$WORK/result.txt"
   exit 0
 fi
+agn_evidence=not_requested
+agn_packets=0
+agn_photons=0
+agn_energy_erg=0
+if [[ "$PROFILE" == effective_population || "$PROFILE" == agn_reference ]]; then
+  agn_summary=$(python3 -B - "$PROFILE" "$WORK/agn_coarse_state_v1.jsonl" run.log <<'PY'
+import json
+import math
+import re
+import sys
+from pathlib import Path
+
+profile, state_path, log_path = sys.argv[1:]
+states = [
+    json.loads(line)
+    for line in Path(state_path).read_text(encoding="utf-8").splitlines()
+    if line.strip()
+]
+active = []
+for row in states:
+    if row.get("record_type") != "agn_coarse_state":
+        continue
+    try:
+        mass = float(row.get("coarse_accreted_bh_mass_code", 0.0))
+        luminosity = float(row.get("bolometric_luminosity_erg_s", 0.0))
+    except (TypeError, ValueError):
+        continue
+    if math.isfinite(mass) and mass > 0.0 and math.isfinite(luminosity) and luminosity > 0.0:
+        active.append(row)
+
+log_text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+receipt_re = re.compile(
+    r"^\s*SNRT_MN_AGN_SOURCE\s+accepted_packets=(\d+)\s+"
+    r"photons/energy_erg=\s*([^\s]+)\s+([^\s]+)\s*$"
+)
+packet_count = 0
+photon_count = 0.0
+energy_erg = 0.0
+receipt_lines = 0
+for line in log_text.splitlines():
+    if "SNRT_MN_AGN_SOURCE" not in line:
+        continue
+    match = receipt_re.match(line)
+    if not match:
+        raise SystemExit("FAIL: malformed SNRT_MN_AGN_SOURCE receipt")
+    packets = int(match.group(1))
+    photons, energy = map(float, match.group(2, 3))
+    if packets < 0 or not math.isfinite(photons) or not math.isfinite(energy) or photons < 0.0 or energy < 0.0:
+        raise SystemExit("FAIL: invalid SNRT_MN_AGN_SOURCE receipt values")
+    packet_count += packets
+    photon_count += photons
+    energy_erg += energy
+    receipt_lines += 1
+if receipt_lines == 0:
+    raise SystemExit("FAIL: runtime emitted no M5 AGN source receipts")
+if packet_count > 0 and (photon_count <= 0.0 or energy_erg <= 0.0):
+    raise SystemExit("FAIL: accepted AGN packets have no positive photon/energy receipt")
+if packet_count == 0 and (photon_count != 0.0 or energy_erg != 0.0):
+    raise SystemExit("FAIL: zero accepted AGN packets have nonzero photon/energy receipt")
+
+modes = {str(row.get("feedback_mode", "")).strip().upper() for row in active}
+if any(mode not in {"JET", "THERMAL"} for mode in modes):
+    raise SystemExit("FAIL: active AGN sidecar has an unknown feedback mode")
+if profile == "agn_reference":
+    if "THERMAL" not in modes:
+        raise SystemExit("FAIL: AGN reference has no luminous thermal feedback state")
+    if packet_count <= 0:
+        raise SystemExit("FAIL: thermal AGN state produced no committed M5 photon packet")
+    state = "THERMAL_radiative_packets_committed"
+elif not active:
+    if packet_count != 0:
+        raise SystemExit("FAIL: M5 AGN packets exist without an active accretion state")
+    state = "no_active_accretion"
+elif packet_count > 0:
+    if "THERMAL" in modes:
+        state = "THERMAL_radiative_packets_committed"
+    else:
+        state = "JET_state_with_radiative_packets"
+elif "THERMAL" in modes:
+    raise SystemExit("FAIL: luminous thermal AGN state has no committed M5 photon packet")
+elif modes == {"JET"}:
+    state = "JET_mode_zero_radiative_packets"
+else:
+    state = "inactive_no_radiative_packets"
+
+print(f"{state} {packet_count} {photon_count:.8e} {energy_erg:.8e}")
+PY
+  )
+  read -r agn_evidence agn_packets agn_photons agn_energy_erg <<< "$agn_summary"
+fi
 if [[ "$CAPTURE_FINAL_DUMP" == 1 ]]; then
   test "${#raw_outputs[@]}" -eq 1
   test "${raw_outputs[0]}" = output_00001
   test -f output_00001/COMPLETE
   test -s output_00001/data_00001.h5
   raw_output_bytes=$(stat -c '%s' output_00001/data_00001.h5)
-  printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_%s_PASS profile=%s M5_order=5 source_scope=effective_population AGN_state=not_requested M5_total_source_ledger=nonzero dust_mass=enabled CHIMES_backend=%s momentum_assert_cells=%s reached_main_step=%s final_dump_bytes=%s raw_outputs=1 pending_evaluation=true reference_controls=NONPRODUCTION\n' \
-    "${CHIMES_LIBRARY_MODE^^}" "$PROFILE" "$CHIMES_BACKEND" "$momentum_assert_cells" \
-    "$actual_main_steps" "$raw_output_bytes" | tee "$WORK/result.txt"
+  printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_%s_PASS profile=%s M5_order=5 source_scope=effective_population AGN_state=%s AGN_packets=%s AGN_photons=%s AGN_photon_energy_erg=%s M5_total_source_ledger=nonzero dust_mass=enabled CHIMES_backend=%s momentum_assert_cells=%s reached_main_step=%s final_dump_bytes=%s raw_outputs=1 pending_evaluation=true reference_controls=NONPRODUCTION\n' \
+    "${CHIMES_LIBRARY_MODE^^}" "$PROFILE" "$agn_evidence" "$agn_packets" "$agn_photons" "$agn_energy_erg" \
+    "$CHIMES_BACKEND" "$momentum_assert_cells" "$actual_main_steps" "$raw_output_bytes" | tee "$WORK/result.txt"
   exit 0
 fi
 if ((${#raw_outputs[@]})); then
@@ -697,33 +797,8 @@ if [[ "$AMR_INTERFACE" == 1 ]]; then
     "$MPI_RANKS" "$OMP_NUM_THREADS" | tee "$WORK/result.txt"
   exit 0
 fi
-agn_evidence=not_requested
-if [[ "$PROFILE" == agn_reference ]]; then
-  python3 -B - "$WORK/agn_coarse_state_v1.jsonl" <<'PY'
-import json
-import math
-import sys
-
-records = [
-    json.loads(line)
-    for line in open(sys.argv[1], encoding="utf-8")
-    if line.strip()
-]
-if not any(
-    row.get("record_type") == "agn_coarse_state"
-    and row.get("feedback_mode") == "THERMAL"
-    and math.isfinite(float(row.get("bolometric_luminosity_erg_s", 0.0)))
-    and float(row["bolometric_luminosity_erg_s"]) > 0.0
-    and math.isfinite(float(row.get("coarse_accreted_bh_mass_code", 0.0)))
-    and float(row["coarse_accreted_bh_mass_code"]) > 0.0
-    for row in records
-):
-    raise SystemExit("FAIL: AGN profile has no accreting, thermally luminous coarse state")
-PY
-  agn_evidence=thermal_luminous_accretion_state
-fi
 source_scope=effective_population
 if [[ "$PROFILE" == agn_reference ]]; then source_scope=AGN_only_point_source; fi
-printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_%s_PASS profile=%s M5_order=5 source_scope=%s AGN_state=%s M5_total_source_ledger=nonzero dust_mass=enabled CHIMES_backend=%s momentum_assert_cells=%s reference_controls=NONPRODUCTION raw_outputs=0\n' \
-  "${CHIMES_LIBRARY_MODE^^}" "$PROFILE" "$source_scope" "$agn_evidence" "$CHIMES_BACKEND" "$momentum_assert_cells" \
+printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_%s_PASS profile=%s M5_order=5 source_scope=%s AGN_state=%s AGN_packets=%s AGN_photons=%s AGN_photon_energy_erg=%s M5_total_source_ledger=nonzero dust_mass=enabled CHIMES_backend=%s momentum_assert_cells=%s reference_controls=NONPRODUCTION raw_outputs=0\n' \
+  "${CHIMES_LIBRARY_MODE^^}" "$PROFILE" "$source_scope" "$agn_evidence" "$agn_packets" "$agn_photons" "$agn_energy_erg" "$CHIMES_BACKEND" "$momentum_assert_cells" \
   | tee "$WORK/result.txt"

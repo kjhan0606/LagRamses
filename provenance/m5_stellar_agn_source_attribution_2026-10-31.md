@@ -45,10 +45,10 @@ that run.
 
 ## Reporting gap and limits
 
-The runner's effective-population result string currently hardcodes
-`AGN_state=not_requested`, while its AGN-only path checks for a luminous
-accretion state. Thus the result record understates what the effective run
-actually configured and observed.
+Before the runner correction in this closeout, the effective-population result
+string hardcoded `AGN_state=not_requested`, while the AGN-only path checked
+only for a luminous accretion state. The result record therefore understated
+the effective run and did not prove AGN photon deposition.
 
 Commit `f260266` adds `SNRT_MN_AGN_SOURCE`, reporting the accepted AGN packet
 count, photon count, and represented photon energy. These values are folded
@@ -69,6 +69,31 @@ routes the released energy to the jet channel, leaving no radiative AGN
 packet; `AGN_blast` is active. The nonzero aggregate M5 source is therefore
 stellar in this execution.
 
+The A100 stream comparison jobs `443809` and `443816` both completed with
+exit code 0 using the same executable, effective profile, and three GPU
+brokers; they differed in one versus three CUDA streams. Their application
+times were 532.148 s and 436.964 s, respectively, a provisional 17.9% decrease
+for three streams. This is not an accepted speedup: the final-dump comparator
+reported `M5_COUPLED_FINAL_PAIR_FAIL_NUMERIC_TOLERANCE` at `rtol=1e-12`,
+`atol=1e-25`. Of 449 datasets, 111 were bitwise equal and 115 exceeded the
+strict tolerance (gravity 4, hydro 96, particles 3, sinks 10, SNRT 2); clock
+checks had no tolerance violations. Consequently the timing remains
+conditional until the divergence is understood.
+
+Those two GPU jobs used a pre-receipt binary, so their logs cannot establish
+zero AGN packets. The current CPU binary from `1249105` contains the receipt
+and job `1249133` exercised it. A first runner check, job `1249152`, stopped
+before simulation because the AGN-only Chabrier history (`imf_id=2`) was
+incorrectly checked against the effective-profile Kroupa id (`imf_id=1`). The
+effective namelist was generated but no simulation started and no raw output
+was written. The check is now profile-specific. Corrected CPU integration job
+`1249156` completed four coarse steps on grammar `normal` in 1:36, exit code
+0, with no raw outputs. Its result distinguishes the live state as
+`JET_mode_zero_radiative_packets`, with zero accepted packets, photons, and
+AGN photon energy; three sidecar records show positive BH accretion and
+luminosity in JET mode. The run exercised 256 material-cell assertions, and
+all recorded input hashes verify.
+
 The older AGN-only CPU integration `1244059` contains a positive `THERMAL`
 accretion state and a nonzero M5 source ledger, but predates the new receipt.
 Thus the new receipt has been compiled and exercised in the JET branch, while
@@ -82,12 +107,12 @@ aggregate M5/dust/CHIMES transaction. It does not support a production claim:
 the spectra and dust controls are reference-only, and physical package
 admission remains blocked by the existing manifest audits.
 
-## Next bounded closeout
+## Remaining bounded verification
 
-After the queued three-broker/three-stream performance comparison no longer
-reads the current runner, make its result fields distinguish stellar source,
-BH accretion/luminosity, mechanical AGN feedback, and accepted AGN photon
-packets. Verify that the current-build THERMAL AGN profile produces a
-positive source receipt. Keep physical admission blockers intact. This is a
-reporting and verification correction; it does not alter the selected
-physical model.
+Confirm job `1249156` reports the effective-population BH state as JET with
+zero accepted AGN packets and still passes the integrated run. This is now
+verified by `1249156`. CUDA build job `443842` is queued on A100 but waiting at
+`QOSMaxGRESPerUser`; after it starts, run the AGN-only reference profile
+through a THERMAL state and require positive accepted AGN packet, photon, and
+energy receipts. Keep physical admission blockers intact. These are reporting
+and verification corrections; they do not alter the selected physical model.
