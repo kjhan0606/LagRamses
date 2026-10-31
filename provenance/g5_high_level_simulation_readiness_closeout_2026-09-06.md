@@ -656,3 +656,14 @@ effective-population/M5/live-dust/CPU-CHIMES reference profile. It does not
 qualify CUDA/hybrid execution or production physics. The separate A100
 CHIMES comparison remained pending the syntax GPU QoS limit at the latest
 check; release-data/license blockers remain open.
+
+The pending typed-A100 comparison job `443660` runs the binary built in
+`.m5-current-source-effective-hybrid-build-442744/` on an A10 build node.
+Its CUDA build log contains `sm_80` as well as `sm_86`, `sm_89` and `sm_90`,
+so the artifact includes native A100 code. The build source commit was
+`4a33e917d63db4a22f77a81491d7aabfddeed41f`; a path-scoped comparison against
+the CPU reference build commit `808134303d157403053d452fcddfab4ec88e7133`
+found no changes in `bin/Makefile`, `patch`, `hydro`, `aton`, `amr` or
+`simulation/snrt`. The A100 comparison remains pending `QOSMaxGRESPerUser`;
+this binary/source check validates the comparison setup, not its runtime
+result.
