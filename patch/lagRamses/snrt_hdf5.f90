@@ -25,6 +25,7 @@ module snrt_hdf5
 #include "amr_index.h"
   implicit none
   private
+  integer, parameter :: snrt_hdf5_grid_chunk=64
   integer :: snrt_checkpoint_cell_width=primary_width
   integer :: snrt_checkpoint_file_width=primary_width
   logical :: legacy_number_only=.false.
@@ -97,6 +98,120 @@ contains
        if(myid==1)write(*,*) 'ERROR: SNRT HDF5 radiation checkpoint rejected ',global_status
        call MPI_Abort(MPI_COMM_WORLD,10,info)
     end if
+  end subroutine
+
+  subroutine snrt_hdf5_stream_open_write(grp,name,total,dset,dspace,plist)
+    integer(HID_T), intent(in) :: grp
+    character(len=*), intent(in) :: name
+    integer(i8b), intent(in) :: total
+    integer(HID_T), intent(out) :: dset,dspace,plist
+    integer(HSIZE_T) :: gdims(1)
+    integer :: status
+    gdims(1)=int(total,HSIZE_T)
+    call h5screate_simple_f(1,gdims,dspace,status)
+    call require_ok(abs(status))
+    call h5dcreate_f(grp,trim(name),H5T_NATIVE_DOUBLE,dspace,dset,status)
+    call require_ok(abs(status))
+    call h5pcreate_f(H5P_DATASET_XFER_F,plist,status)
+    call require_ok(abs(status))
+    call h5pset_dxpl_mpio_f(plist,H5FD_MPIO_COLLECTIVE_F,status)
+    call require_ok(abs(status))
+  end subroutine
+
+  subroutine snrt_hdf5_stream_open_read(grp,name,total,dset,dspace,plist)
+    integer(HID_T), intent(in) :: grp
+    character(len=*), intent(in) :: name
+    integer(i8b), intent(in) :: total
+    integer(HID_T), intent(out) :: dset,dspace,plist
+    integer(HSIZE_T) :: dims(1),maxdims(1)
+    integer :: status,rank
+    call h5dopen_f(grp,trim(name),dset,status)
+    call require_ok(abs(status))
+    call h5dget_space_f(dset,dspace,status)
+    call require_ok(abs(status))
+    call h5sget_simple_extent_ndims_f(dspace,rank,status)
+    call require_ok(merge(0,1,status==0.and.rank==1))
+    call h5sget_simple_extent_dims_f(dspace,dims,maxdims,status)
+    call require_ok(merge(0,1,status==1.and.dims(1)==int(total,HSIZE_T)))
+    call h5pcreate_f(H5P_DATASET_XFER_F,plist,status)
+    call require_ok(abs(status))
+    call h5pset_dxpl_mpio_f(plist,H5FD_MPIO_COLLECTIVE_F,status)
+    call require_ok(abs(status))
+  end subroutine
+
+  subroutine snrt_hdf5_stream_write_slice(dset,dspace,plist,data,nvalues,offset)
+    integer(HID_T), intent(in) :: dset,dspace,plist
+    real(dp), intent(in) :: data(:)
+    integer, intent(in) :: nvalues
+    integer(i8b), intent(in) :: offset
+    integer(HID_T) :: mspace
+    integer(HSIZE_T) :: mdims(1),moffset(1),foffset(1),count(1)
+    integer :: status
+    call require_ok(merge(0,1,nvalues>=0.and.nvalues<=size(data).and.offset>=0_i8b))
+    mdims(1)=size(data)
+    call h5screate_simple_f(1,mdims,mspace,status)
+    call require_ok(abs(status))
+    if(nvalues>0)then
+       moffset(1)=0
+       foffset(1)=int(offset,HSIZE_T)
+       count(1)=int(nvalues,HSIZE_T)
+       call h5sselect_hyperslab_f(mspace,H5S_SELECT_SET_F,moffset,count,status)
+       call require_ok(abs(status))
+       call h5sselect_hyperslab_f(dspace,H5S_SELECT_SET_F,foffset,count,status)
+    else
+       call h5sselect_none_f(mspace,status)
+       call require_ok(abs(status))
+       call h5sselect_none_f(dspace,status)
+    end if
+    call require_ok(abs(status))
+    call h5dwrite_f(dset,H5T_NATIVE_DOUBLE,data,mdims,status, &
+         mem_space_id=mspace,file_space_id=dspace,xfer_prp=plist)
+    call require_ok(abs(status))
+    call h5sclose_f(mspace,status)
+    call require_ok(abs(status))
+  end subroutine
+
+  subroutine snrt_hdf5_stream_read_slice(dset,dspace,plist,data,nvalues,offset)
+    integer(HID_T), intent(in) :: dset,dspace,plist
+    real(dp), intent(out) :: data(:)
+    integer, intent(in) :: nvalues
+    integer(i8b), intent(in) :: offset
+    integer(HID_T) :: mspace
+    integer(HSIZE_T) :: mdims(1),moffset(1),foffset(1),count(1)
+    integer :: status
+    call require_ok(merge(0,1,nvalues>=0.and.nvalues<=size(data).and.offset>=0_i8b))
+    mdims(1)=size(data)
+    call h5screate_simple_f(1,mdims,mspace,status)
+    call require_ok(abs(status))
+    if(nvalues>0)then
+       moffset(1)=0
+       foffset(1)=int(offset,HSIZE_T)
+       count(1)=int(nvalues,HSIZE_T)
+       call h5sselect_hyperslab_f(mspace,H5S_SELECT_SET_F,moffset,count,status)
+       call require_ok(abs(status))
+       call h5sselect_hyperslab_f(dspace,H5S_SELECT_SET_F,foffset,count,status)
+    else
+       call h5sselect_none_f(mspace,status)
+       call require_ok(abs(status))
+       call h5sselect_none_f(dspace,status)
+    end if
+    call require_ok(abs(status))
+    call h5dread_f(dset,H5T_NATIVE_DOUBLE,data,mdims,status, &
+         mem_space_id=mspace,file_space_id=dspace,xfer_prp=plist)
+    call require_ok(abs(status))
+    call h5sclose_f(mspace,status)
+    call require_ok(abs(status))
+  end subroutine
+
+  subroutine snrt_hdf5_stream_close(dset,dspace,plist)
+    integer(HID_T), intent(in) :: dset,dspace,plist
+    integer :: status
+    call h5pclose_f(plist,status)
+    call require_ok(abs(status))
+    call h5dclose_f(dset,status)
+    call require_ok(abs(status))
+    call h5sclose_f(dspace,status)
+    call require_ok(abs(status))
   end subroutine
 
   subroutine identity(grp,writing)
@@ -316,8 +431,9 @@ contains
 
   subroutine snrt_hdf5_write()
     integer :: lev,grid,i,ind,nlocal,status,err,info,counts(ncpu),base,pass
-    integer(i8b) :: total,offset
-    integer(HID_T) :: grp
+    integer :: local_chunks,max_chunks,chunk,first_grid,chunk_grids,nvalues,stride
+    integer(i8b) :: total,offset,slice_offset
+    integer(HID_T) :: grp,dset,dspace,plist
     character(len=32) :: name
     real(dp), allocatable :: buffer(:)
     include 'mpif.h'
@@ -341,27 +457,42 @@ contains
        total=sum(int(counts,i8b))*twotondim*snrt_checkpoint_cell_width
        if(total==0)cycle
        offset=sum(int(counts(1:myid-1),i8b))*twotondim*snrt_checkpoint_cell_width
-       allocate(buffer(max(1,nlocal*twotondim*snrt_checkpoint_cell_width)))
+       stride=twotondim*snrt_checkpoint_cell_width
+       local_chunks=(nlocal+snrt_hdf5_grid_chunk-1)/snrt_hdf5_grid_chunk
+       call MPI_Allreduce(local_chunks,max_chunks,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+       call require_ok(abs(info))
+       allocate(buffer(max(1,min(snrt_hdf5_grid_chunk,nlocal)*stride)))
+       write(name,'("level_",I0)')lev
+       if(pass==2)call snrt_hdf5_stream_open_write(grp,trim(name),total,dset,dspace,plist)
        grid=headl(myid,lev)
        status=0
-       do i=1,nlocal
-          if(grid<1.or.grid>size(next))then
-             status=1
-             exit
-          end if
-          do ind=1,twotondim
-             base=((i-1)*twotondim+ind-1)*snrt_checkpoint_cell_width
-             call snrt_state_pack_cell(ICELL_OF(grid,ind), &
-                  buffer(base+1:base+snrt_checkpoint_cell_width),err)
-             status=max(status,err)
+       do chunk=0,max_chunks-1
+          first_grid=chunk*snrt_hdf5_grid_chunk
+          chunk_grids=max(0,min(snrt_hdf5_grid_chunk,nlocal-first_grid))
+          nvalues=chunk_grids*stride
+          status=0
+          do i=1,chunk_grids
+             if(grid<1.or.grid>size(next))then
+                status=1
+                exit
+             end if
+             do ind=1,twotondim
+                base=((i-1)*twotondim+ind-1)*snrt_checkpoint_cell_width
+                call snrt_state_pack_cell(ICELL_OF(grid,ind), &
+                     buffer(base+1:base+snrt_checkpoint_cell_width),err)
+                status=max(status,err)
+             end do
+             grid=next(grid)
           end do
-          grid=next(grid)
+          call require_ok(status)
+          if(pass==2)then
+             slice_offset=offset+int(first_grid,i8b)*stride
+             call snrt_hdf5_stream_write_slice(dset,dspace,plist,buffer,nvalues,slice_offset)
+          end if
        end do
        if(grid/=0)status=max(status,1)
        call require_ok(status)
-       write(name,'("level_",I0)')lev
-       if(pass==2)call hdf5_write_dataset_1d_dp(grp,trim(name),buffer, &
-            nlocal*twotondim*snrt_checkpoint_cell_width,offset,total)
+       if(pass==2)call snrt_hdf5_stream_close(dset,dspace,plist)
        deallocate(buffer)
     end do
     end do
@@ -370,8 +501,9 @@ contains
 
   subroutine snrt_hdf5_read()
     integer :: lev,grid,ind,i,nlocal,status,err,info,counts(ncpu),base,fidx,first,count,pass,handled,last_fidx
-    integer(i8b) :: total,offset,total_grids
-    integer(HID_T) :: grp
+    integer :: local_chunks,max_chunks,chunk,first_grid,chunk_grids,nvalues,stride
+    integer(i8b) :: total,offset,total_grids,slice_offset
+    integer(HID_T) :: grp,dset,dspace,plist
     character(len=32) :: name
     real(dp), allocatable :: buffer(:)
     include 'mpif.h'
@@ -441,27 +573,37 @@ contains
           end do
           call require_ok(merge(0,1,handled==nlocal.and.grid==0))
        else
-          allocate(buffer(max(1,nlocal*twotondim*snrt_checkpoint_file_width)))
-          call hdf5_read_dataset_1d_dp_checked(grp,trim(name),buffer, &
-               nlocal*twotondim*snrt_checkpoint_file_width, &
-               offset*twotondim*snrt_checkpoint_file_width,total,status)
-          call require_ok(status)
+          stride=twotondim*snrt_checkpoint_file_width
+          local_chunks=(nlocal+snrt_hdf5_grid_chunk-1)/snrt_hdf5_grid_chunk
+          call MPI_Allreduce(local_chunks,max_chunks,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+          call require_ok(abs(info))
+          allocate(buffer(max(1,min(snrt_hdf5_grid_chunk,nlocal)*stride)))
+          call snrt_hdf5_stream_open_read(grp,trim(name),total,dset,dspace,plist)
           status=0
-          do i=1,nlocal
-             if(grid<1.or.grid>size(next))then
-                status=1
-                exit
-             end if
-             do ind=1,twotondim
-                base=((i-1)*twotondim+ind-1)*snrt_checkpoint_file_width
-                call snrt_state_restore_cell(ICELL_OF(grid,ind), &
-                     buffer(base+1:base+snrt_checkpoint_file_width),err,validate_only=pass==1)
-                status=max(status,err)
+          do chunk=0,max_chunks-1
+             first_grid=chunk*snrt_hdf5_grid_chunk
+             chunk_grids=max(0,min(snrt_hdf5_grid_chunk,nlocal-first_grid))
+             nvalues=chunk_grids*stride
+             slice_offset=(offset+int(first_grid,i8b))*stride
+             call snrt_hdf5_stream_read_slice(dset,dspace,plist,buffer,nvalues,slice_offset)
+             do i=1,chunk_grids
+                if(grid<1.or.grid>size(next))then
+                   status=1
+                   exit
+                end if
+                do ind=1,twotondim
+                   base=((i-1)*twotondim+ind-1)*snrt_checkpoint_file_width
+                   call snrt_state_restore_cell(ICELL_OF(grid,ind), &
+                        buffer(base+1:base+snrt_checkpoint_file_width),err,validate_only=pass==1)
+                   status=max(status,err)
+                end do
+                grid=next(grid)
              end do
-             grid=next(grid)
+             call require_ok(status)
           end do
           if(grid/=0)status=max(status,1)
           call require_ok(status)
+          call snrt_hdf5_stream_close(dset,dspace,plist)
           deallocate(buffer)
        end if
     end do
