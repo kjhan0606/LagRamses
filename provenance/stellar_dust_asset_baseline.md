@@ -16,6 +16,24 @@ Zenodo metadata rechecked 2026-11-01 labels the record Open but leaves its
 Rights/License field blank; this does not establish an explicit data reuse
 license, so BPASS remains a candidate and is not release-license evidence.
 
+The upstream terms are now better characterized but do not close this
+asset-specific license blocker. The official [BPASS project page](https://warwick.ac.uk/fac/sci/physics/research/astro/research/catalogues/bpass/)
+states that BPASS and CURVEPOPS results made available there are under CC
+BY-NC 4.0; its [v2.2.1 release page](https://warwick.ac.uk/fac/sci/physics/research/astro/research/catalogues/bpass/v2p2/)
+identifies the release and links its official SharePoint distribution. The
+Zenodo record identifies this exact filename and matching MD5, and says its
+data came from a public Google Drive folder. This supports the file's BPASS
+v2.2.1 provenance, but the Zenodo HDF5 is a third-party packaged product and
+its own Rights/License field is blank. The sources reviewed do not establish
+that the upstream CC BY-NC grant explicitly covers redistribution or use of
+this transformed Zenodo copy. Keep its license status unresolved; do not
+promote it as release-cleared until the scope is confirmed by the relevant
+rights holder or the officially distributed source product is used with its
+terms recorded. The release page requests this acknowledgement where
+appropriate: “This work made use of v2.2.1 of the Binary Population and
+Spectral Synthesis (BPASS) models as described in Eldridge, Stanway et al.
+(2017) and Stanway & Eldridge et al. (2018).”
+
 The HDF5 axes are 13 log-relative-solar metallicities, 51 ages in Gyr, and
 100,000 wavelengths in Angstroms. `spectra` declares `L_sun/Hz`. The adapter
 converts a spectrum with
