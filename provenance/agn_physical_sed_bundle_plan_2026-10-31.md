@@ -99,24 +99,38 @@ shortcut to calling an AGN spectrum physically coupled.
 
 ## Literature comparison and proposed direction
 
-1. **Sazonov, Ostriker & Sunyaev (2004), average-quasar SED.** A common
-   galaxy-scale feedback spectrum assembled from composite AGN spectra and
-   cumulative X-ray/IR backgrounds. It is a useful fixed-template comparison,
-   but it is population averaged and includes obscuration/reprocessed IR
-   considerations; importing its IR component into a run with explicit local
-   dust reprocessing risks double counting.
-2. **Trebitsch et al. (2021), Obelisk high-redshift AGN treatment.** Uses a
-   Shakura–Sunyaev multicolour thin disk plus a high-energy power law motivated
-   by high-redshift quasar observations, with SED-dependent group quantities
-   precomputed/interpolated. It is closer to the LRD/high-redshift domain. Its
-   published implementation removes a 30% IR-reprocessed component because
-   it does not model that radiation; that normalization must not be copied
-   when local dust and IR transport already reprocess absorbed energy.
-3. **Su et al. (2025), accretion-state-dependent disk/corona/slim-disk SED.**
-   Depends on BH mass and Eddington-scaled accretion rate and extends to
-   super-Eddington flows. Its cosmological population comparison is strongest
-   below redshift one and reports discrepancies at higher redshift; using it
-   for LRD feedback would need an explicit high-redshift applicability case.
+1. **Sazonov, Ostriker & Sunyaev (2004), average-quasar SED.** This is a
+   population-average spectrum constrained jointly by composite optical/UV/X-ray
+   spectra, the cosmic X-ray background, and cumulative AGN infrared emission.
+   It is a useful fixed-template comparison, not an individual high-redshift
+   intrinsic disk/corona model. Its hard-X-ray template peaks near 60 keV and
+   extends well beyond this code's 10 keV ceiling; its IR component represents
+   dust-reprocessed AGN light. Neither the out-of-band hard-X-ray energy nor
+   the reprocessed IR component may be silently reassigned to the modeled
+   primary groups or to the local dust transaction.
+2. **Trebitsch et al. (2021), Obelisk high-redshift AGN treatment.** The
+   published prescription builds a Shakura–Sunyaev multicolour disk plus a
+   high-energy power law (UV slope -1.5), approximates it piecewise, integrates
+   group luminosities, mean photon energies and interaction cross sections,
+   then precomputes/interpolates SED-dependent quantities. Its stated aim is
+   to capture variation in ionizing luminosity, not to reproduce an observed
+   broadband AGN SED; the simulation transports only three ionizing bands
+   (13.6–1000 eV). It assumes 30% of bolometric disk luminosity is absorbed
+   and re-emitted in IR, but does not model that IR. This is valuable
+   high-redshift RT precedent, not a ready-made nine-group intrinsic spectrum
+   for our explicit local dust/IR model. The 30% factor must not be copied as
+   an additional sink from the radiation budget when absorbed energy is
+   already processed by our dust transaction.
+3. **Su et al. (2025; arXiv v2 revised 2026), accretion-state-dependent
+   disk/corona/slim-disk SED.** It computes spectra from BH mass and
+   Eddington-scaled accretion rate, using a modified magnetic-reconnection
+   disk-corona model at high rates and ADAF+thin-disk at low rates, including
+   super-Eddington photon trapping. Its cosmological population comparison
+   reproduces AGN fractions to z≈2.5, but its bolometric/X-ray luminosity
+   functions agree mainly to z≈1 and diverge at higher redshift. It is a
+   candidate for a state-dependent source model, but that population-level
+   comparison does not validate its LRD/high-z applicability; the relevant
+   BH-mass/accretion-rate domain and spectral closure still need to be stated.
 
 **Candidate source family for the audit:** the intrinsic high-redshift
 disk-plus-corona spectrum remains the leading AGN emission model, but the
@@ -125,6 +139,16 @@ transport/chemistry closure the audit selects. Do not add an unresolved
 torus/IR component: absorbed energy is handled by the existing gas/dust/IR
 transaction. Per-sink mass/accretion-dependent opacity remains out of scope
 unless the audit finds it necessary for the declared validity domain.
+
+The primary-paper checks above do not resolve the plan's central closure
+choice. In particular, Obelisk's precomputed source-dependent group moments
+were paired with its own group interaction quantities; they do not establish
+that one source-independent interaction kernel is accurate for both our
+stellar and AGN spectra. The plan audit must decide whether a bounded
+shared-kernel error criterion can be justified from the selected spectra. If
+not, source-resolved channels remain required work rather than being waived
+on memory grounds. This literature check is driver evidence, not a substitute
+for the requested Fable plan verdict.
 
 ## Proposed bounded implementation and evidence
 
@@ -156,7 +180,8 @@ unless the audit finds it necessary for the declared validity domain.
 
 - Sazonov, Ostriker & Sunyaev (2004), *Quasars: the characteristic spectrum
   and the induced radiative heating*, MNRAS 347, 144–156,
-  <https://doi.org/10.1111/j.1365-2966.2004.07184.x>.
+  <https://doi.org/10.1111/j.1365-2966.2004.07184.x>;
+  <https://arxiv.org/abs/astro-ph/0305233>.
 - Trebitsch et al. (2021), *The Obelisk simulation: galaxies contribute more
   than AGN to HI reionization of protoclusters*, A&A 653, A154,
   <https://doi.org/10.1051/0004-6361/202037698>;
@@ -166,6 +191,7 @@ unless the audit finds it necessary for the declared validity domain.
   849, 155, <https://arxiv.org/abs/1704.00753>.
 - Su et al. (2025), *Modeling the Spectral Energy Distribution of Active
   Galactic Nuclei: Implications for Cosmological Simulations of Galaxy
-  Formation*, <https://arxiv.org/abs/2501.10793>.
+  Formation*, arXiv v2 revised 2026-03-20,
+  <https://arxiv.org/abs/2501.10793>.
 
 This is a draft plan for review, not model approval or production admission.
