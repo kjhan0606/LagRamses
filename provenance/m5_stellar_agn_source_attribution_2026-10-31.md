@@ -22,8 +22,9 @@ science use.
   feedback mode is `JET`. The luminosity declines from approximately
   `2.57e34` to `2.26e34 erg/s` over those records.
 - The same run reaches the main step and emits nonzero aggregate M5 photon and
-  energy source ledgers. Its HDF5 output was retained for the matched-pair
-  evaluation.
+  energy source ledgers. Its final HDF5 dump was retained through the matched
+  comparisons and removed afterward; the exact file inventory and hashes are
+  in [the cleanup manifest](m5_a100_stream_pair_raw_cleanup_2026-10-31.json).
 
 ## Code wiring
 
@@ -79,6 +80,12 @@ reported `M5_COUPLED_FINAL_PAIR_FAIL_NUMERIC_TOLERANCE` at `rtol=1e-12`,
 strict tolerance (gravity 4, hydro 96, particles 3, sinks 10, SNRT 2); clock
 checks had no tolerance violations. Consequently the timing remains
 conditional until the divergence is understood.
+
+After both pair evaluations completed, the three `output_00001` directories
+for jobs `443660`, `443809`, and `443816` were removed. Their 42 exact files,
+including the three 101,372,728-byte HDF5 dumps and SHA256 hashes, are recorded
+in the cleanup manifest. Effective inputs, logs, result records, both
+comparison JSONs, and build identity remain in place.
 
 Those two GPU jobs used a pre-receipt binary, so their logs cannot establish
 zero AGN packets. The current CPU binary from `1249105` contains the receipt

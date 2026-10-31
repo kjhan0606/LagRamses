@@ -1,0 +1,332 @@
+{
+  "cleanup_status": "completed",
+  "comparison_results": {
+    "fixed_m5_backend": {
+      "atol": 1e-25,
+      "compared_datasets": 449,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/pair-comparison-fixed-m5-backend.json",
+      "rtol": 1e-12,
+      "sha256": "208b2a0e0e8e9d3aef8f77577aeee4535ec79377ebb17f10c915b5b4b88e4244",
+      "status": "M5_COUPLED_FINAL_PAIR_FAIL_NUMERIC_TOLERANCE",
+      "tolerance_violations": 116
+    },
+    "stream_count": {
+      "atol": 1e-25,
+      "compared_datasets": 449,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/pair-comparison-streams.json",
+      "rtol": 1e-12,
+      "sha256": "c460751b3901b39cafef7e0f67afcbafa2b175346a62880133018079744b3163",
+      "status": "M5_COUPLED_FINAL_PAIR_FAIL_NUMERIC_TOLERANCE",
+      "tolerance_violations": 115
+    }
+  },
+  "created_utc": "2026-10-31",
+  "deleted_at_utc": "2026-10-31T04:50:45Z",
+  "reason": "Both final-dump pair comparisons are complete. Preserve their JSON verdicts, effective namelists, logs, launch/results, and build identity; remove only the three evaluated output_00001 directories.",
+  "retained_evidence": [
+    {
+      "bytes": 4573,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/effective.nml",
+      "sha256": "29830de0743aeca90f142af2b39d54c92d428bcb6cc26aacd3a0c42c094510e2"
+    },
+    {
+      "bytes": 736,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/launch.txt",
+      "sha256": "845028824fa8cf7814e09ad4c47664c4b333c9c6db18efe004da1ed7d614e9fd"
+    },
+    {
+      "bytes": 165914,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/run.log",
+      "sha256": "d0dbf325f90358251fa052bac8e56f7f5f4c919c5963bf1afad4dcf4aba8109a"
+    },
+    {
+      "bytes": 359,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/result.txt",
+      "sha256": "b43661032b8e541c8bc3a5ee7ec85a4e1ac6d7fa949b295fec80ce5b0922989f"
+    },
+    {
+      "bytes": 4573,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/effective.nml",
+      "sha256": "29830de0743aeca90f142af2b39d54c92d428bcb6cc26aacd3a0c42c094510e2"
+    },
+    {
+      "bytes": 757,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/launch.txt",
+      "sha256": "4fb43500ba50cd88c30ca331206a360b47ad14f3e69ba76150aedc210399b5c0"
+    },
+    {
+      "bytes": 165915,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/run.log",
+      "sha256": "d718813850959026d6168c922f0ecdd5d4e7c7ed3e632ddbd27ab344c0cd130a"
+    },
+    {
+      "bytes": 359,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/result.txt",
+      "sha256": "b43661032b8e541c8bc3a5ee7ec85a4e1ac6d7fa949b295fec80ce5b0922989f"
+    },
+    {
+      "bytes": 4573,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/effective.nml",
+      "sha256": "0a6999390d77f187ea7623627959f7a4ea6f3770f14311b57831f62d75912e55"
+    },
+    {
+      "bytes": 772,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/launch.txt",
+      "sha256": "5466e9b3e3c4ab4c5a24457f713631c81fe46e26f0eb4001312d04d6c8f2e1fc"
+    },
+    {
+      "bytes": 166004,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/run.log",
+      "sha256": "027352737bf927b84bc220133f292b8e97594c6fc4ad66b48a1c391b4082f48b"
+    },
+    {
+      "bytes": 359,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/result.txt",
+      "sha256": "b43661032b8e541c8bc3a5ee7ec85a4e1ac6d7fa949b295fec80ce5b0922989f"
+    },
+    {
+      "bytes": 249,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-current-source-effective-hybrid-build-442744/build-result.txt",
+      "sha256": "fa1aa3a58ae681107222358c9c345f5ca46b126e2e0a8aea0c3e6a1df5740bb4"
+    },
+    {
+      "bytes": 535,
+      "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-current-source-effective-hybrid-build-442744/build.sha256",
+      "sha256": "84c30441f579fc26759c7f25058eb8059fa246b2e49de064b2b7c9f10148cfc3"
+    }
+  ],
+  "run_jobs": [
+    {
+      "dump_directory": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001",
+      "files_to_remove": [
+        {
+          "bytes": 6,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/COMPLETE",
+          "sha256": "3737c7bac6c62bea048cb5e0c11766a382c0f2772aa9c48b07807f404a721b6a"
+        },
+        {
+          "bytes": 104,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/POISSON_PHI_VALID",
+          "sha256": "560971745082847fda3798300530f37edcf6f065bab9d5b80cd00899ea33a850"
+        },
+        {
+          "bytes": 229,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/compilation.txt",
+          "sha256": "f9a26354cea912bbbf80f7ac0bb8de59676a257d47cb007ce588cb1a79b6afc7"
+        },
+        {
+          "bytes": 128,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/cooling_00001.out",
+          "sha256": "ac8968efc47a9188c3f9856bf881163d51e3dc837b7e0f5b0c6982aa53341afd"
+        },
+        {
+          "bytes": 101372728,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/data_00001.h5",
+          "sha256": "ac7380345f867135bb63967c2e2f7ca7ddb1c572e77dea39945a332cfdbad575"
+        },
+        {
+          "bytes": 610,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/dm_run_provenance_00001.txt",
+          "sha256": "7deb3ff8d400f134d908d900913a856420002f545b4c3a011b7d2d7a421e5cac"
+        },
+        {
+          "bytes": 366,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/header_00001.txt",
+          "sha256": "ba41fc0dd28eda40abc289410f3f65fce94d156e7fd4f6265d960921500f344f"
+        },
+        {
+          "bytes": 6135,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/hydro_file_descriptor.txt",
+          "sha256": "b1b75b00d322d2684db233d2e1397b4b1bcab979b687ad0a9bf3a87f9ea2cd97"
+        },
+        {
+          "bytes": 1779,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/info_00001.txt",
+          "sha256": "8fcd67a069ea4d3a51c4b0ea887a8542e00ed37b67916b6d9b6366dadf029574"
+        },
+        {
+          "bytes": 52572,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/makefile.txt",
+          "sha256": "85bc4949a06f84a8c19ea74339e0537bb07040ebfac5b99d301504dfe08302a8"
+        },
+        {
+          "bytes": 4573,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/namelist.txt",
+          "sha256": "29830de0743aeca90f142af2b39d54c92d428bcb6cc26aacd3a0c42c094510e2"
+        },
+        {
+          "bytes": 1064,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/resolved_physics_inventory_00001.txt",
+          "sha256": "900c8e75855def93b60301f5e87ff9aeaec4eb56f40c44dccf629e7cf7c92286"
+        },
+        {
+          "bytes": 200,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/sink_00001.csv",
+          "sha256": "a4f7dab8b2c265e7d2437a79814117993c39fca9f99ae9bb11c2181b2c7f4109"
+        },
+        {
+          "bytes": 693,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660/output_00001/sink_00001.info",
+          "sha256": "7d9637a7e9a37909074d92838a0cf9edef52091b713f1479b41501bb7995b525"
+        }
+      ],
+      "job_id": "443660",
+      "run_directory": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443660"
+    },
+    {
+      "dump_directory": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001",
+      "files_to_remove": [
+        {
+          "bytes": 6,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/COMPLETE",
+          "sha256": "3737c7bac6c62bea048cb5e0c11766a382c0f2772aa9c48b07807f404a721b6a"
+        },
+        {
+          "bytes": 104,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/POISSON_PHI_VALID",
+          "sha256": "560971745082847fda3798300530f37edcf6f065bab9d5b80cd00899ea33a850"
+        },
+        {
+          "bytes": 229,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/compilation.txt",
+          "sha256": "f9a26354cea912bbbf80f7ac0bb8de59676a257d47cb007ce588cb1a79b6afc7"
+        },
+        {
+          "bytes": 128,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/cooling_00001.out",
+          "sha256": "ac8968efc47a9188c3f9856bf881163d51e3dc837b7e0f5b0c6982aa53341afd"
+        },
+        {
+          "bytes": 101372728,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/data_00001.h5",
+          "sha256": "7f7f106557f9402230cc310eb207b75f740eb74802520253815519d83d53a3ae"
+        },
+        {
+          "bytes": 610,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/dm_run_provenance_00001.txt",
+          "sha256": "7deb3ff8d400f134d908d900913a856420002f545b4c3a011b7d2d7a421e5cac"
+        },
+        {
+          "bytes": 366,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/header_00001.txt",
+          "sha256": "ba41fc0dd28eda40abc289410f3f65fce94d156e7fd4f6265d960921500f344f"
+        },
+        {
+          "bytes": 6135,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/hydro_file_descriptor.txt",
+          "sha256": "b1b75b00d322d2684db233d2e1397b4b1bcab979b687ad0a9bf3a87f9ea2cd97"
+        },
+        {
+          "bytes": 1779,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/info_00001.txt",
+          "sha256": "8fcd67a069ea4d3a51c4b0ea887a8542e00ed37b67916b6d9b6366dadf029574"
+        },
+        {
+          "bytes": 52572,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/makefile.txt",
+          "sha256": "85bc4949a06f84a8c19ea74339e0537bb07040ebfac5b99d301504dfe08302a8"
+        },
+        {
+          "bytes": 4573,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/namelist.txt",
+          "sha256": "29830de0743aeca90f142af2b39d54c92d428bcb6cc26aacd3a0c42c094510e2"
+        },
+        {
+          "bytes": 1064,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/resolved_physics_inventory_00001.txt",
+          "sha256": "900c8e75855def93b60301f5e87ff9aeaec4eb56f40c44dccf629e7cf7c92286"
+        },
+        {
+          "bytes": 200,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/sink_00001.csv",
+          "sha256": "f1afc5979131b287050eacf75beb8a5541878f51425aa46766679818f5c385ae"
+        },
+        {
+          "bytes": 693,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809/output_00001/sink_00001.info",
+          "sha256": "7d9637a7e9a37909074d92838a0cf9edef52091b713f1479b41501bb7995b525"
+        }
+      ],
+      "job_id": "443809",
+      "run_directory": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443809"
+    },
+    {
+      "dump_directory": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001",
+      "files_to_remove": [
+        {
+          "bytes": 6,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/COMPLETE",
+          "sha256": "3737c7bac6c62bea048cb5e0c11766a382c0f2772aa9c48b07807f404a721b6a"
+        },
+        {
+          "bytes": 104,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/POISSON_PHI_VALID",
+          "sha256": "560971745082847fda3798300530f37edcf6f065bab9d5b80cd00899ea33a850"
+        },
+        {
+          "bytes": 229,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/compilation.txt",
+          "sha256": "f9a26354cea912bbbf80f7ac0bb8de59676a257d47cb007ce588cb1a79b6afc7"
+        },
+        {
+          "bytes": 128,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/cooling_00001.out",
+          "sha256": "ac8968efc47a9188c3f9856bf881163d51e3dc837b7e0f5b0c6982aa53341afd"
+        },
+        {
+          "bytes": 101372728,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/data_00001.h5",
+          "sha256": "4f1d7c295ed0b68516258bdf732ca7a3b65718356b7c31bb20c2573d8d65ff98"
+        },
+        {
+          "bytes": 610,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/dm_run_provenance_00001.txt",
+          "sha256": "7deb3ff8d400f134d908d900913a856420002f545b4c3a011b7d2d7a421e5cac"
+        },
+        {
+          "bytes": 366,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/header_00001.txt",
+          "sha256": "ba41fc0dd28eda40abc289410f3f65fce94d156e7fd4f6265d960921500f344f"
+        },
+        {
+          "bytes": 6135,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/hydro_file_descriptor.txt",
+          "sha256": "b1b75b00d322d2684db233d2e1397b4b1bcab979b687ad0a9bf3a87f9ea2cd97"
+        },
+        {
+          "bytes": 1779,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/info_00001.txt",
+          "sha256": "8fcd67a069ea4d3a51c4b0ea887a8542e00ed37b67916b6d9b6366dadf029574"
+        },
+        {
+          "bytes": 52572,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/makefile.txt",
+          "sha256": "85bc4949a06f84a8c19ea74339e0537bb07040ebfac5b99d301504dfe08302a8"
+        },
+        {
+          "bytes": 4573,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/namelist.txt",
+          "sha256": "0a6999390d77f187ea7623627959f7a4ea6f3770f14311b57831f62d75912e55"
+        },
+        {
+          "bytes": 1064,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/resolved_physics_inventory_00001.txt",
+          "sha256": "900c8e75855def93b60301f5e87ff9aeaec4eb56f40c44dccf629e7cf7c92286"
+        },
+        {
+          "bytes": 200,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/sink_00001.csv",
+          "sha256": "9e1cdd8011404971edc02a27d96c5853976e398b912ef6d9b01ca283a76f5672"
+        },
+        {
+          "bytes": 693,
+          "path": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816/output_00001/sink_00001.info",
+          "sha256": "7d9637a7e9a37909074d92838a0cf9edef52091b713f1479b41501bb7995b525"
+        }
+      ],
+      "job_id": "443816",
+      "run_directory": "/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-effective-dust-chimes-443816"
+    }
+  ],
+  "schema_version": 1
+}
