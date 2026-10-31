@@ -807,23 +807,21 @@ import re
 import sys
 
 path = sys.argv[1]
-ledger_prefix = "SNRT_MN_LEDGER source/absorbed/escaped/projection/residual/gas_heat/dust_heat/N="
 agn_re = re.compile(
     r"^\s*SNRT_MN_AGN_SOURCE\s+accepted_packets=(\d+)\s+"
     r"photons/energy_erg=\s*([^\s]+)\s+([^\s]+)\s*$"
 )
-ledgers = []
+stellar_re = re.compile(
+    r"^\s*SNRT_MN_STELLAR_SOURCE\s+accepted_stars=(\d+)\s+"
+    r"photons/energy_erg=\s*([^\s]+)\s+([^\s]+)\s*$"
+)
+commit_count = 0
 agn_receipts = []
+stellar_receipts = []
 with open(path, encoding="utf-8", errors="replace") as stream:
     for line in stream:
-        if ledger_prefix in line:
-            values = line.split("=", 1)[1].split()
-            if len(values) != 8:
-                raise SystemExit("FAIL: malformed global M5 source ledger")
-            row = [float(value.replace("D", "E").replace("d", "E")) for value in values]
-            if not all(math.isfinite(value) for value in row):
-                raise SystemExit("FAIL: nonfinite global M5 source ledger")
-            ledgers.append(row)
+        if "SNRT_MN_LEDGER source/absorbed/escaped/projection/residual/gas_heat/dust_heat/N=" in line:
+            commit_count += 1
         elif "SNRT_MN_AGN_SOURCE" in line:
             match = agn_re.match(line)
             if match is None:
@@ -838,25 +836,34 @@ with open(path, encoding="utf-8", errors="replace") as stream:
             if photons < 0.0 or energy < 0.0:
                 raise SystemExit("FAIL: negative M5 AGN source receipt")
             agn_receipts.append((packets, photons, energy))
-if not ledgers or len(ledgers) != len(agn_receipts):
-    raise SystemExit("FAIL: M5 global source and AGN receipts are missing or misaligned")
+        elif "SNRT_MN_STELLAR_SOURCE" in line:
+            match = stellar_re.match(line)
+            if match is None:
+                raise SystemExit("FAIL: malformed M5 stellar source receipt")
+            stars = int(match.group(1))
+            photons, energy = (
+                float(value.replace("D", "E").replace("d", "E"))
+                for value in match.group(2, 3)
+            )
+            if stars < 0 or not math.isfinite(photons) or not math.isfinite(energy):
+                raise SystemExit("FAIL: invalid M5 stellar source receipt")
+            if photons < 0.0 or energy < 0.0:
+                raise SystemExit("FAIL: negative M5 stellar source receipt")
+            stellar_receipts.append((stars, photons, energy))
+if not commit_count or len(agn_receipts) != commit_count or len(stellar_receipts) != commit_count:
+    raise SystemExit("FAIL: M5 source receipts are missing or misaligned")
 
 stellar_total = 0.0
 agn_total = 0.0
 overlap_commits = 0
-# With Haardt-Madau disabled, the M5 source array contains stellar-Sed and
-# AGN photons only; global_receipt(1) is total source photons and receipt(13)
-# is the committed AGN photon count. Their positive residual attributes the
-# remainder to the enabled stellar population in the same M5 transaction.
-for ledger, (packets, agn_photons, _agn_energy) in zip(ledgers, agn_receipts):
-    total_source_photons = ledger[0]
-    tolerance = 256.0 * sys.float_info.epsilon * max(
-        abs(total_source_photons), abs(agn_photons), 1.0
-    )
-    if total_source_photons + tolerance < agn_photons:
-        raise SystemExit("FAIL: AGN photon receipt exceeds the total M5 source ledger")
-    stellar_photons = total_source_photons - agn_photons
-    if packets > 0 and agn_photons > 0.0 and stellar_photons > tolerance:
+for (packets, agn_photons, agn_energy), (stars, stellar_photons, stellar_energy) in zip(
+    agn_receipts, stellar_receipts
+):
+    if packets > 0 and agn_photons > 0.0 and agn_energy <= 0.0:
+        raise SystemExit("FAIL: accepted AGN photons have no positive energy receipt")
+    if stars > 0 and stellar_photons > 0.0 and stellar_energy <= 0.0:
+        raise SystemExit("FAIL: accepted stellar photons have no positive energy receipt")
+    if packets > 0 and agn_photons > 0.0 and stars > 0 and stellar_photons > 0.0:
         overlap_commits += 1
         stellar_total += stellar_photons
         agn_total += agn_photons

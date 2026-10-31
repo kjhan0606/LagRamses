@@ -123,12 +123,12 @@ contains
     real(dp),allocatable :: rows(:,:),fraction(:,:),source_n(:,:),source_e(:,:)
     real(dp) :: sl,st,sd,sv,snh,st2,dt,subdt,chat,energy_unit,volume,clock0
     real(dp) :: photons(snrt_ngroups),source_energy(snrt_ngroups),lum,age_scale
-    real(dp) :: agn_source_photons,agn_source_energy_erg
-    real(dp) :: escape(36),projection(36),receipt(15),global_receipt(15),initial_n,final_n,initial_e,final_e
+    real(dp) :: agn_source_photons,agn_source_energy_erg,stellar_source_photons,stellar_source_energy_erg
+    real(dp) :: escape(36),projection(36),receipt(18),global_receipt(18),initial_n,final_n,initial_e,final_e
     real(dp) :: pair_escape,pair_projection,lo,hi,source_total_n,source_total_e
     real(dp) :: state_range(4),global_range(4),balance_scale(2),global_scale(2)
     integer :: nm,ng,ni,i,j,g,s,k,nsub,cell,found,grid,part,ip,ig,status,info
-    integer :: n_agn_sources
+    integer :: n_agn_sources,n_stellar_sources
     integer :: tile_index,tile_first,tile_last,ntile
     integer :: oldn_stride,olde_stride,oldir_stride
     ! Keep the RAMSES-side transaction large enough to amortize the native
@@ -150,8 +150,9 @@ contains
     logical,save :: host_reported=.false.
 
     ierr=0;clock0=omp_get_wtime();receipt=0
-    n_agn_sources=0
+    n_agn_sources=0;n_stellar_sources=0
     agn_source_photons=0d0;agn_source_energy_erg=0d0
+    stellar_source_photons=0d0;stellar_source_energy_erg=0d0
     call mn_dispatch_initialize(ierr)
     if(.not.host_reported)then
        if(myid==1)write(*,*)'SNRT M_N live AMR transport: shared-stream CUDA/OpenMP, MPI, FP64, 16x24 quadrature'
@@ -310,6 +311,9 @@ contains
                       else
                          source_n(:,i)=source_n(:,i)+photons/volume
                          source_e(:,i)=source_e(:,i)+source_energy/volume
+                         stellar_source_photons=stellar_source_photons+sum(photons)
+                         stellar_source_energy_erg=stellar_source_energy_erg+sum(source_energy)*snrt_ev_to_erg
+                         n_stellar_sources=n_stellar_sources+1
                       endif
                    endif
                 endif
@@ -424,12 +428,15 @@ contains
     receipt(5)=final_n-initial_n-receipt(1)+receipt(2)+receipt(3)-receipt(4)
     receipt(8)=final_n
     receipt(12)=final_e-initial_e-source_total_e+receipt(9)+receipt(10)-receipt(11)
-    if(any(receipt(13:15)<0d0))ierr=1
+    receipt(16)=stellar_source_photons
+    receipt(17)=stellar_source_energy_erg
+    receipt(18)=real(n_stellar_sources,dp)
+    if(any(receipt(13:18)<0d0))ierr=1
     global_receipt=receipt
     balance_scale=[initial_n+receipt(1)+final_n,initial_e+source_total_e+final_e]
     global_scale=balance_scale
 #ifndef WITHOUTMPI
-    call MPI_ALLREDUCE(receipt,global_receipt,15,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+    call MPI_ALLREDUCE(receipt,global_receipt,18,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
     if(info/=0)ierr=1
     call MPI_ALLREDUCE(balance_scale,global_scale,2,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
     if(info/=0)ierr=1
@@ -501,6 +508,8 @@ contains
             global_receipt(1:8)
        write(*,'(A,I0,A,2ES22.13)')' SNRT_MN_AGN_SOURCE accepted_packets=',nint(global_receipt(15)), &
             ' photons/energy_erg=',global_receipt(13:14)
+       write(*,'(A,I0,A,2ES22.13)')' SNRT_MN_STELLAR_SOURCE accepted_stars=',nint(global_receipt(18)), &
+            ' photons/energy_erg=',global_receipt(16:17)
        write(*,'(A,4ES22.13)')' SNRT_MN_ENERGY absorbed/escaped/projection/residual=',global_receipt(9:12)
        write(*,'(A,4ES22.13)')' SNRT_MN_STATE max_xHII/gasE_code/dustE_code/IR_erg_cm3=',global_range
        write(*,'(A,4I12)')' SNRT_MN_DISPATCH rank1 closureCPU/GPU faceCPU/GPU=', &
