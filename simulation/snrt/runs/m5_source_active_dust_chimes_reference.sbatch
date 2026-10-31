@@ -39,7 +39,20 @@ readonly CAPTURE_FINAL_DUMP=${M5_CAPTURE_FINAL_DUMP:-0}
 readonly RUN_ID=${M5_RUN_ID:-${SLURM_JOB_ID:-}}
 readonly OMP_THREADS=${SLURM_CPUS_PER_TASK:-${M5_OMP_THREADS:-8}}
 readonly MPI_RANKS=${SLURM_NTASKS:-${M5_MPI_RANKS:-1}}
-readonly CHIMES_BACKEND=${M5_CHIMES_BACKEND:-cpu}
+test -n "${SLURM_JOB_ID:-}" || { echo 'This runner must be submitted through Slurm' >&2; exit 2; }
+if [[ -n "${M5_CHIMES_BACKEND:-}" ]]; then
+  CHIMES_BACKEND=$M5_CHIMES_BACKEND
+else
+  case "${SLURM_JOB_PARTITION:-}" in
+    h200|h100|a100|a40|a10) CHIMES_BACKEND=hybrid ;;
+    normal) CHIMES_BACKEND=cpu ;;
+    *)
+      echo "Set M5_CHIMES_BACKEND explicitly for Slurm partition ${SLURM_JOB_PARTITION:-unknown}" >&2
+      exit 2
+      ;;
+  esac
+fi
+readonly CHIMES_BACKEND
 readonly CHIMES_GPU_BROKERS=${M5_CHIMES_GPU_BROKERS:-1}
 readonly CUDA_STREAMS=${M5_CUDA_STREAMS:-1}
 CELL_SCHEDULER=${M5_CHIMES_CELL_SCHEDULER:-}
@@ -61,7 +74,6 @@ case "$CELL_SCHEDULER" in
   cohort|level_queue) ;;
   *) echo 'M5_CHIMES_CELL_SCHEDULER must be cohort or level_queue' >&2; exit 2 ;;
 esac
-test -n "${SLURM_JOB_ID:-}" || { echo 'This runner must be submitted through Slurm' >&2; exit 2; }
 if [[ "$CHIMES_BACKEND" == hybrid ]]; then
   case "${SLURM_JOB_PARTITION:-}" in
     h200|h100|a100|a40|a10) ;;
