@@ -703,12 +703,12 @@ bool zero_incident_photon_field(const globalVariables *c,const gasVariables *g){
  if(c->N_spectra==0)return true;
  if(c->N_spectra<0 || c->N_spectra>9 || !g->isotropic_photon_density)return false;
  // CHIMES evolves log(photon density), replacing an exact input zero with
- // CHIMES_FLT_MIN. Its exp(log(floor)) round trip can lie slightly above the
- // floor, so admit only that narrow sentinel neighborhood as zero. This does
- // not admit physically resolved photons; negative and nonfinite values
- // remain hard CPU fallbacks.
+ // CHIMES_FLT_MIN. The round trip can exceed DBL_MIN by more than machine
+ // epsilon: the integrated M5 run recorded 2.225097e-308 for this sentinel,
+ // about 1.04e-5 above DBL_MIN. Keep the tolerance confined to this
+ // underflow-scale neighborhood; resolved radiation remains on the CPU.
  const double zero_floor=static_cast<double>(CHIMES_FLT_MIN)*
-   (1.0+256.0*std::numeric_limits<double>::epsilon());
+   (1.0+1.0e-4);
  for(int b=0;b<c->N_spectra;b++){
    const double photons=g->isotropic_photon_density[b];
    if(!std::isfinite(photons) || photons<0. || photons>zero_floor)return false;
@@ -1537,6 +1537,11 @@ extern "C" int snrt_chimes_rhs_test_retry_sticky(void){
  const bool sticky=result==-1 && retry_cell && cell_backend==1;
  cell_backend=saved_backend;retry_cell=saved_retry;
  return sticky;
+}
+extern "C" int snrt_chimes_rhs_test_zero_photon_value(double photons){
+ globalVariables c{};gasVariables g{};
+ c.N_spectra=1;g.isotropic_photon_density=&photons;
+ return zero_incident_photon_field(&c,&g);
 }
 #endif
 extern "C" void snrt_chimes_rhs_counts(unsigned long long out[7]) {

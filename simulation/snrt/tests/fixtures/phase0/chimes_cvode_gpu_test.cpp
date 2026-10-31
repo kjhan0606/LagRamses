@@ -656,6 +656,16 @@ static void cuda_dense_solve_trial() {
 }
 int main(int argc,char **argv) {
     require(argc==2 || argc==3,"main table argument");omp_set_dynamic(0);
+#ifdef SNRT_CHIMES_RHS_TESTING
+    require(snrt_chimes_rhs_test_zero_photon_value(0.),
+        "accept exact zero photon field");
+    require(snrt_chimes_rhs_test_zero_photon_value(2.225097e-308),
+        "accept observed CHIMES zero-photon log-floor round trip");
+    require(!snrt_chimes_rhs_test_zero_photon_value(1e-300),
+        "reject non-floor photon field");
+    require(!snrt_chimes_rhs_test_zero_photon_value(-1e-300),
+        "reject negative photon field");
+#endif
     double start=omp_get_wtime();
     int init_status=snrt_chimes_initialize(argv[1],0,nullptr,0);
     if(!init_status)reconcile_roundoff_test();

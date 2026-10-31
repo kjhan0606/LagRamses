@@ -42,6 +42,7 @@ unsigned long long snrt_chimes_rhs_test_drops(void);
 /* A pending whole-cell retry must reject further RHS calls before reading
  * the discarded trajectory's UserData. Test-only; preserves thread state. */
 int snrt_chimes_rhs_test_retry_sticky(void);
+int snrt_chimes_rhs_test_zero_photon_value(double photons);
 #endif
 #ifdef __cplusplus
 }
