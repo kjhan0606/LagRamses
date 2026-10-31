@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Reference-only source-active integration: real BH accretion + M5 + live
-# two-size dust + CHIMES. The AGN profile disables stellar photons so its M5
-# source ledger is attributable to the AGN; physical tables remain references.
+# Reference-only source-active integration: M5 + live two-size dust + CHIMES.
+# The AGN-only profile isolates AGN photons; effective_population can opt into
+# a combined stellar-Sed/high-chi thermal-AGN attribution run.
 #SBATCH --job-name=m5-src-dust-chem
 # Keep Slurm's initial working directory inside the canonical LagRamses tree,
 # even when sbatch is invoked from a different project or a home directory.
@@ -26,6 +26,7 @@ set -euo pipefail
 readonly ROOT=/gpfs/kjhan/chimes-cvode-gpu-20261001
 readonly ASSETS=/gpfs/kjhan/LRD_JWST
 readonly PROFILE=${M5_SOURCE_PROFILE:-agn_reference}
+readonly EFFECTIVE_AGN_IC_MODE=${M5_EFFECTIVE_AGN_IC_MODE:-small_bh_control}
 readonly VERIFY_RESTART=${M5_VERIFY_RESTART:-0}
 readonly AMR_INTERFACE=${M5_AMR_INTERFACE_CHECK:-0}
 readonly REQUESTED_STELLAR_PACKAGE=${M5_STELLAR_PACKAGE:-}
@@ -48,6 +49,14 @@ fi
 readonly CELL_SCHEDULER
 readonly TRANSPORT_BACKEND=${M5_TRANSPORT_BACKEND:-auto}
 readonly MATERIAL_BACKEND=${M5_MATERIAL_BACKEND:-auto}
+case "$EFFECTIVE_AGN_IC_MODE" in
+  small_bh_control|thermal_seed_reference) ;;
+  *) echo 'M5_EFFECTIVE_AGN_IC_MODE must be small_bh_control or thermal_seed_reference' >&2; exit 2 ;;
+esac
+if [[ "$PROFILE" != effective_population && "$EFFECTIVE_AGN_IC_MODE" != small_bh_control ]]; then
+  echo 'M5_EFFECTIVE_AGN_IC_MODE applies only to the effective_population profile' >&2
+  exit 2
+fi
 case "$CELL_SCHEDULER" in
   cohort|level_queue) ;;
   *) echo 'M5_CHIMES_CELL_SCHEDULER must be cohort or level_queue' >&2; exit 2 ;;
@@ -158,6 +167,14 @@ case "$PROFILE" in
       WORK=$ROOT/.m5-effective-amr-$RUN_ID
     fi
     SOURCE_IC=$ASSETS/.effective-coupled.Q9Kw29/short/ic_sink
+    expected_source_ic_sha=c9c1d969915a7987d24c23ac9facd39855d53bc7bb94f5ad5aff90ea6c40ea37
+    if [[ "$EFFECTIVE_AGN_IC_MODE" == thermal_seed_reference ]]; then
+      # Reuse the already exercised high-chi AGN sink seed while retaining the
+      # effective stellar SED and all other profile inputs. This is a
+      # nonproduction source-attribution control, not a physical seed choice.
+      SOURCE_IC=$ROOT/simulation/snrt/config/snrt_agn_accretion_smoke.ic_sink
+      expected_source_ic_sha=971d2f0f2b0c4731fd2b9801ebc5c363dd9cd51268660eb3cf801e7a34d88a54
+    fi
     : "${REQUESTED_STELLAR_PACKAGE:?set M5_STELLAR_PACKAGE to the generated source-package directory}"
     STELLAR_PACKAGE=$(realpath "$REQUESTED_STELLAR_PACKAGE")
     STELLAR_INPUT=$STELLAR_PACKAGE/input-v5
@@ -170,7 +187,7 @@ case "$PROFILE" in
     # Reuse the evaluated effective profile, not a newly chosen stellar model.
     printf '%s  %s\n' \
       1cc6534578fcaffa84c02d0dbc037973d32691aa059efc738bc9249dfa2cd358 "$TEMPLATE" \
-      c9c1d969915a7987d24c23ac9facd39855d53bc7bb94f5ad5aff90ea6c40ea37 "$SOURCE_IC" \
+      "$expected_source_ic_sha" "$SOURCE_IC" \
       | sha256sum --check --strict
     ;;
   *) echo "Unknown M5_SOURCE_PROFILE: $PROFILE" >&2; exit 2 ;;
@@ -512,6 +529,11 @@ if [[ "$PROFILE" == effective_population ]]; then
 fi
 
 printf 'PROFILE=%s_M5_live_dust_CHIMES_%s_NONPRODUCTION\n' "$PROFILE" "$CHIMES_LIBRARY_MODE" | tee -a "$WORK/launch.txt"
+if [[ "$PROFILE" == effective_population ]]; then
+  printf 'EFFECTIVE_AGN_IC_MODE=%s\nEFFECTIVE_AGN_IC_SHA256=%s\n' \
+    "$EFFECTIVE_AGN_IC_MODE" "$(sha256sum "$SOURCE_IC" | awk '{print $1}')" \
+    | tee -a "$WORK/launch.txt"
+fi
 stellar_sed_status=enabled
 if [[ -z "$SED" ]]; then stellar_sed_status=disabled; fi
 printf 'MPI=%s OMP=%s; real_BH_accretion_sink; stellar_SED=%s; AGN/dust contracts=reference_control; CHIMES_backend=%s; VERIFY_RESTART=%s\n' \
@@ -774,6 +796,80 @@ PY
   )
   read -r agn_evidence agn_packets agn_photons agn_energy_erg <<< "$agn_summary"
 fi
+if [[ "$PROFILE" == effective_population && "$EFFECTIVE_AGN_IC_MODE" == thermal_seed_reference ]]; then
+  grep -Eq '^[[:space:]]*haardt_madau=\.false\.$' effective.nml || {
+    echo 'Combined source attribution requires the external UV background to be disabled' >&2
+    exit 5
+  }
+  python3 -B - run.log <<'PY' | tee "$WORK/combined-source-attribution.txt"
+import math
+import re
+import sys
+
+path = sys.argv[1]
+ledger_prefix = "SNRT_MN_LEDGER source/absorbed/escaped/projection/residual/gas_heat/dust_heat/N="
+agn_re = re.compile(
+    r"^\s*SNRT_MN_AGN_SOURCE\s+accepted_packets=(\d+)\s+"
+    r"photons/energy_erg=\s*([^\s]+)\s+([^\s]+)\s*$"
+)
+ledgers = []
+agn_receipts = []
+with open(path, encoding="utf-8", errors="replace") as stream:
+    for line in stream:
+        if ledger_prefix in line:
+            values = line.split("=", 1)[1].split()
+            if len(values) != 8:
+                raise SystemExit("FAIL: malformed global M5 source ledger")
+            row = [float(value.replace("D", "E").replace("d", "E")) for value in values]
+            if not all(math.isfinite(value) for value in row):
+                raise SystemExit("FAIL: nonfinite global M5 source ledger")
+            ledgers.append(row)
+        elif "SNRT_MN_AGN_SOURCE" in line:
+            match = agn_re.match(line)
+            if match is None:
+                raise SystemExit("FAIL: malformed M5 AGN source receipt")
+            packets = int(match.group(1))
+            photons, energy = (
+                float(value.replace("D", "E").replace("d", "E"))
+                for value in match.group(2, 3)
+            )
+            if packets < 0 or not math.isfinite(photons) or not math.isfinite(energy):
+                raise SystemExit("FAIL: invalid M5 AGN source receipt")
+            if photons < 0.0 or energy < 0.0:
+                raise SystemExit("FAIL: negative M5 AGN source receipt")
+            agn_receipts.append((packets, photons, energy))
+if not ledgers or len(ledgers) != len(agn_receipts):
+    raise SystemExit("FAIL: M5 global source and AGN receipts are missing or misaligned")
+
+stellar_total = 0.0
+agn_total = 0.0
+overlap_commits = 0
+# With Haardt-Madau disabled, the M5 source array contains stellar-Sed and
+# AGN photons only; global_receipt(1) is total source photons and receipt(13)
+# is the committed AGN photon count. Their positive residual attributes the
+# remainder to the enabled stellar population in the same M5 transaction.
+for ledger, (packets, agn_photons, _agn_energy) in zip(ledgers, agn_receipts):
+    total_source_photons = ledger[0]
+    tolerance = 256.0 * sys.float_info.epsilon * max(
+        abs(total_source_photons), abs(agn_photons), 1.0
+    )
+    if total_source_photons + tolerance < agn_photons:
+        raise SystemExit("FAIL: AGN photon receipt exceeds the total M5 source ledger")
+    stellar_photons = total_source_photons - agn_photons
+    if packets > 0 and agn_photons > 0.0 and stellar_photons > tolerance:
+        overlap_commits += 1
+        stellar_total += stellar_photons
+        agn_total += agn_photons
+if overlap_commits == 0:
+    raise SystemExit("FAIL: no M5 commit contains both stellar and thermal-AGN photons")
+print(
+    "M5_COMBINED_SOURCE_ATTRIBUTION_PASS "
+    f"overlap_commits={overlap_commits} "
+    f"stellar_photons={stellar_total:.8e} "
+    f"thermal_agn_photons={agn_total:.8e}"
+)
+PY
+fi
 if [[ "$CAPTURE_FINAL_DUMP" == 1 ]]; then
   test "${#raw_outputs[@]}" -eq 1
   test "${raw_outputs[0]}" = output_00001
@@ -799,6 +895,9 @@ if [[ "$AMR_INTERFACE" == 1 ]]; then
 fi
 source_scope=effective_population
 if [[ "$PROFILE" == agn_reference ]]; then source_scope=AGN_only_point_source; fi
+if [[ "$PROFILE" == effective_population && "$EFFECTIVE_AGN_IC_MODE" == thermal_seed_reference ]]; then
+  source_scope=stellar_plus_thermal_AGN_reference
+fi
 printf 'M5_SOURCE_ACTIVE_DUST_CHIMES_%s_PASS profile=%s M5_order=5 source_scope=%s AGN_state=%s AGN_packets=%s AGN_photons=%s AGN_photon_energy_erg=%s M5_total_source_ledger=nonzero dust_mass=enabled CHIMES_backend=%s momentum_assert_cells=%s reference_controls=NONPRODUCTION raw_outputs=0\n' \
   "${CHIMES_LIBRARY_MODE^^}" "$PROFILE" "$source_scope" "$agn_evidence" "$agn_packets" "$agn_photons" "$agn_energy_erg" "$CHIMES_BACKEND" "$momentum_assert_cells" \
   | tee "$WORK/result.txt"
