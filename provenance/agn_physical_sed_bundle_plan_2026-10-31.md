@@ -118,6 +118,14 @@ frequency support. A runtime source outside either parameter grid must be
 rejected or explicitly assigned another declared model, never silently
 extrapolated.
 
+The current integrated `effective_population` wiring fixture cannot be reused
+unchanged for this candidate: its retained coarse-state ledger in job 444355
+has `M_BH=2.4527e11 Msun` from the initial step (`log10 M_BH=11.39`), above
+the candidate grid's `1e10 Msun` upper bound. That run remains valid as a
+reference-control coupling test, but a candidate SED smoke must use a separate
+in-domain source fixture (or another explicitly justified input) and verify
+both mass and `mdot` bounds. It must not extrapolate this fixture's SED.
+
 LagRamses does not use that same Eddington-rate convention when spin is active:
 `dM_Edd/dt = 4 pi G m_p M_BH/(sigma_T c epsilon_r)`, where `epsilon_r` is
 spin-dependent (and defaults to 0.1 without spin). The coarse-state record
