@@ -51,6 +51,61 @@ be inconsistent.
   reference-control integration therefore proves wiring only; it is not
   physical-SED or production qualification evidence.
 
+### Candidate-data audit (2026-10-31)
+
+The repository does not yet contain a physical AGN SED candidate for this
+bundle. `p4_explicit_agn_photon_ledger.json` is explicitly marked
+`synthetic_non_physical_wiring_fixture`; its ten-point CSV assigns a constant
+energy fraction per eV over 0.01--10,000 eV and therefore places about 80% of
+bolometric power in the 2--10 keV group. It is an engineering fixture, not a
+plausible adopted AGN spectrum. In `run_snrt_native_spectral_contract.sh`, the
+loader's `candidate_explicit_sed` case is made by copying the reference
+namelist and changing only its status string. Passing that case validates
+status parsing, not a physical candidate or its spectrum.
+
+The other checked-in input, `p4_pilot_agn_photon_ledger.json`, is a
+parameterized Sazonov--Ostriker--Sunyaev-style reference control with support
+only from 10 eV to 10 keV. It represents 0.18148066885 of bolometric power;
+the lower two configured groups are zero and the group crossing 10 eV is only
+partially supported. Its own metadata requires Lyman normalization and escape
+fraction variation before a production interpretation. The control must not
+be promoted by changing its approval string.
+
+This leaves the source spectrum itself as a prerequisite to quantifying the
+shared-kernel error: the synthetic flat fixture cannot represent either the
+selected high-redshift AGN model or its intended parameter domain. The
+candidate derivation must state its black-hole mass/accretion-rate domain and
+whether the transported component is intrinsic or escaped, with dust
+reprocessing accounted for exactly once. The Obelisk precedent integrates
+SED-dependent interaction moments but omits X-rays and assigns 30% of the
+bolometric disc luminosity to dust-reprocessed IR that it does not transport;
+it therefore cannot supply our full 0.01 eV--10 keV plus live-dust closure
+unchanged. The Su et al. accretion-state model depends on black-hole mass and
+Eddington-scaled accretion rate, and its own cosmological comparison reports
+high-redshift population discrepancies; it is not an automatic LRD-valid
+template. These source-domain limits must be carried into the Q-GOAL/Q-LEAN
+review.
+
+The authors' [`agnSED` implementation and interpolation data](https://github.com/SuTong1999/agnSED/tree/200dbbf4e606bbf4a7d6d72c7883951940c8f57a)
+are available upstream at commit `200dbbf4e606bbf4a7d6d72c7883951940c8f57a`
+under the [MIT license](https://github.com/SuTong1999/agnSED/blob/200dbbf4e606bbf4a7d6d72c7883951940c8f57a/LICENSE). The repository README
+says its `data/` directory was restored on 2026-03-31. Its API calculates
+SEDs from black-hole mass and Eddington-scaled accretion rate, switching
+between ADAF/truncated-disk and disk-corona branches at the published critical
+rate ([Su et al.](https://arxiv.org/abs/2501.10793)); the paper's model does
+not include spin. The published parameter grid spans log mass 4--10 and log
+accretion rate -10--3, and the package interpolation data cover log frequency
+8.0--22.9. That frequency range covers the current transported 0.01 eV--10 keV
+interval. However, the package loads pickled SciPy
+`RegularGridInterpolator` objects and pins SciPy to <=1.14.1 because of a
+documented compatibility issue. If selected, it should be used only by a
+pinned, audited offline table generator; the simulation runtime should read
+plain, hash-bound numerical arrays instead of importing this Python/pickle
+stack. The upstream model is a traceable candidate source, not a
+production-approved SED or proof of shared-opacity accuracy. Its intended
+accretion-state domain and high-redshift LRD applicability still require
+review.
+
 ## Design question that must be settled in the plan audit
 
 Choose and justify one closure for the shared multigroup state before coding:
