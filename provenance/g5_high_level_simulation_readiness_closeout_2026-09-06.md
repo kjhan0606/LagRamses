@@ -578,3 +578,41 @@ This directly tests the timer helper's repeated-event semantics. The separate
 job1243549 restart smoke passed same-model HDF5 restore and rejected a changed
 `t_diss`; that smoke does not exercise repeated feedback events. Neither check
 is a source-active cosmological feedback qualification.
+
+### Current-source CPU MPI2 M5+dust+CHIMES mixed-AMR smoke — 2026-10-31
+
+CPU job `1248430` completed on grammar `normal` (`grammar054`) with two MPI
+ranks, four OpenMP threads per rank, 32 GiB requested and 1:55 Slurm elapsed
+(exit 0; Slurm step `MaxRSS=682904K`). The binary is
+`.m5-current-source-effective-cpu-build-1248163/bin/ramses_m5_current_cpu3d`,
+SHA-256 `c59ca189c9f3205b95bb6478b0f1c5e475b7ab13f595c50b54af9e06ff157fcf`,
+built with `CHIMES_CUDA=0` from source commit
+`808134303d157403053d452fcddfab4ec88e7133`. Between that build commit and the
+recorded branch head `66ca31b`, the relevant Fortran/CUDA model sources are
+unchanged; the only runner difference is launch-resource logging.
+
+The run used the effective-population, M5 order-5, live two-size dust and CPU
+CHIMES path with the runner's mixed-AMR interface check. The result is
+`M5_COUPLED_AMR_INTERFACE_PASS coarse_leaf_cells=56 fine_leaf_cells=64
+MPI=2 OMP=4 raw_outputs=0`. Both levels 2 and 3 committed M5 four times each
+(eight commits total). Six positive-source photon-ledger rows have a maximum
+absolute residual/source ratio of `2.084e-15`; all 75 `NaN_CHK` counters are
+zero, and the runner found no error or nonconvergence markers. No raw RAMSES
+dump was produced.
+
+The effective namelist SHA-256 is
+`7d6c59ff88fb5da471298d3a0aac55f055eb2af4d0a291d67ce5fee7517e3cf6`; its
+output policy was `noutput=1`, future `aout=2.0d0` and `tout=1.0d30`, with
+`foutput=fbackup=1000000`. The sink IC SHA-256 is
+`c9c1d969915a7987d24c23ac9facd39855d53bc7bb94f5ad5aff90ea6c40ea37`; the
+input-inventory SHA-256 is
+`b01e77bcfef3c93e7324ca332523c700c37469233fab96de00fc54af55cd69c6`. The
+exact run evidence is retained in `.m5-effective-amr-1248430/`, and the
+submitted wrapper hash is recorded in
+`.m5-current-mpi2-amr-1248430.log`.
+
+This closes the current-source CPU two-rank mixed-AMR coupling smoke. It is
+reference-control, nonproduction evidence; it does not qualify CUDA/hybrid
+execution, release assets or licenses, cosmological evolution, or production
+scaling. The A100 CHIMES backend-path comparison remains a separate pending
+job.
