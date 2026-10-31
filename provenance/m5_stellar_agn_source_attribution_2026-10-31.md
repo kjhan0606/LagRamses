@@ -233,15 +233,22 @@ heating.
 
 The hybrid path made 43,014 GPU RHS calls in 2,117 batches, with zero CPU
 fallbacks, zero device errors, two peak in-flight batches, and one stream.
-Total cooling took 126.969 s (99.1% of application time). The CPU fixture
-`1249327` took 90.589 s, including 89.195 s in cooling; although the effective
-namelists match byte-for-byte, the runs were on different systems, so this is
-not a controlled same-node speed benchmark and does not establish a GPU
-speedup. It does show that the hybrid CUDA path is active and numerically
-completes this integrated reference transaction. Output clocks were audited
-in the effective namelist (`noutput=1`, future `aout=2.0d0` and `tout=1.0d30`,
-`nstepmax=4`, `foutput=fbackup=1000000`); no raw output directories were
-created. The effective run is preserved at
+RAMSES's top-level `cooling` bucket reports 126.969 s (99.1% of application
+time), but its direct `cooling_fine` and `cooling_table` timers are both zero.
+The four direct `snrt_advance` calls take 1.448, 41.340, 40.706 and 41.351 s,
+for 124.845 s total. The SNRT dispatch receipt confirms this run selected
+`SNRT_BACKEND=openmp`: 24,832 closure evaluations and 387,072 face evaluations
+went to CPU, with zero to GPU. The 43,014 CHIMES GPU calls prove its hybrid
+backend was active; they do not account for the dominant M5 transport time.
+The CPU fixture `1249327` took 90.589 s overall, including 86.536 s in its
+four `snrt_advance` calls. Its effective namelist matches byte-for-byte, but
+the runs were on different systems, so this comparison is not a controlled
+same-node benchmark and does not establish a hardware speedup. It does expose
+the M5 OpenMP transport as the dominant timed section in both runs. Output
+clocks were audited in the effective namelist (`noutput=1`, future
+`aout=2.0d0` and `tout=1.0d30`, `nstepmax=4`,
+`foutput=fbackup=1000000`); no raw output directories were created. The
+effective run is preserved at
 `.m5-effective-dust-chimes-444210/`, with `inputs.sha256` SHA256
 `1487b1d1b6ff9b5458a81a635ee1efbb691200c654422c9417be63c10388923b`.
 Both profiles remain reference controls, not production qualification.
