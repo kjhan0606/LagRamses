@@ -116,7 +116,10 @@ contains
     call require_ok(abs(status))
     call h5pcreate_f(H5P_DATASET_XFER_F,plist,status)
     call require_ok(abs(status))
-    call h5pset_dxpl_mpio_f(plist,H5FD_MPIO_COLLECTIVE_F,status)
+    ! Each rank writes a disjoint, rank-local hyperslab.  Local chunk counts
+    ! may differ (including zero), so the data transfer itself must be
+    ! independent; collective metadata creation above remains collective.
+    call h5pset_dxpl_mpio_f(plist,H5FD_MPIO_INDEPENDENT_F,status)
     call require_ok(abs(status))
   end subroutine
 
@@ -142,7 +145,10 @@ contains
     call require_ok(merge(0,1,dims(1)==int(total,HSIZE_T)))
     call h5pcreate_f(H5P_DATASET_XFER_F,plist,status)
     call require_ok(abs(status))
-    call h5pset_dxpl_mpio_f(plist,H5FD_MPIO_COLLECTIVE_F,status)
+    ! Rank-local restart slabs can differ in size or be empty.  Keep dataset
+    ! metadata operations collective, but make the disjoint data reads
+    ! independent to preserve MPI collective ordering across ranks.
+    call h5pset_dxpl_mpio_f(plist,H5FD_MPIO_INDEPENDENT_F,status)
     call require_ok(abs(status))
   end subroutine
 
@@ -160,27 +166,27 @@ contains
        call require_ok(merge(0,1,offset<=total))
        call require_ok(merge(0,1,int(nvalues,i8b)<=total-offset))
     end if
-    mdims(1)=size(data)
-    call h5screate_simple_f(1,mdims,mspace,status)
-    call require_ok(abs(status))
     if(nvalues>0)then
+       mdims(1)=size(data)
+       call h5screate_simple_f(1,mdims,mspace,status)
+       call require_ok(abs(status))
        moffset(1)=0
        foffset(1)=int(offset,HSIZE_T)
        count(1)=int(nvalues,HSIZE_T)
        call h5sselect_hyperslab_f(mspace,H5S_SELECT_SET_F,moffset,count,status)
        call require_ok(abs(status))
        call h5sselect_hyperslab_f(dspace,H5S_SELECT_SET_F,foffset,count,status)
-    else
-       call h5sselect_none_f(mspace,status)
        call require_ok(abs(status))
-       call h5sselect_none_f(dspace,status)
+       call h5dwrite_f(dset,H5T_NATIVE_DOUBLE,data,mdims,status, &
+            mem_space_id=mspace,file_space_id=dspace,xfer_prp=plist)
+       call require_ok(abs(status))
+       call h5sclose_f(mspace,status)
+       call require_ok(abs(status))
+    else
+       ! Empty ranks skip the independent data transfer but still reach the
+       ! same project-level status reduction as every other rank.
+       call require_ok(0)
     end if
-    call require_ok(abs(status))
-    call h5dwrite_f(dset,H5T_NATIVE_DOUBLE,data,mdims,status, &
-         mem_space_id=mspace,file_space_id=dspace,xfer_prp=plist)
-    call require_ok(abs(status))
-    call h5sclose_f(mspace,status)
-    call require_ok(abs(status))
   end subroutine
 
   subroutine snrt_hdf5_stream_read_slice(dset,dspace,plist,data,nvalues,offset,total)
@@ -197,27 +203,27 @@ contains
        call require_ok(merge(0,1,offset<=total))
        call require_ok(merge(0,1,int(nvalues,i8b)<=total-offset))
     end if
-    mdims(1)=size(data)
-    call h5screate_simple_f(1,mdims,mspace,status)
-    call require_ok(abs(status))
     if(nvalues>0)then
+       mdims(1)=size(data)
+       call h5screate_simple_f(1,mdims,mspace,status)
+       call require_ok(abs(status))
        moffset(1)=0
        foffset(1)=int(offset,HSIZE_T)
        count(1)=int(nvalues,HSIZE_T)
        call h5sselect_hyperslab_f(mspace,H5S_SELECT_SET_F,moffset,count,status)
        call require_ok(abs(status))
        call h5sselect_hyperslab_f(dspace,H5S_SELECT_SET_F,foffset,count,status)
-    else
-       call h5sselect_none_f(mspace,status)
        call require_ok(abs(status))
-       call h5sselect_none_f(dspace,status)
+       call h5dread_f(dset,H5T_NATIVE_DOUBLE,data,mdims,status, &
+            mem_space_id=mspace,file_space_id=dspace,xfer_prp=plist)
+       call require_ok(abs(status))
+       call h5sclose_f(mspace,status)
+       call require_ok(abs(status))
+    else
+       ! Empty ranks skip the independent data transfer but still reach the
+       ! same project-level status reduction as every other rank.
+       call require_ok(0)
     end if
-    call require_ok(abs(status))
-    call h5dread_f(dset,H5T_NATIVE_DOUBLE,data,mdims,status, &
-         mem_space_id=mspace,file_space_id=dspace,xfer_prp=plist)
-    call require_ok(abs(status))
-    call h5sclose_f(mspace,status)
-    call require_ok(abs(status))
   end subroutine
 
   subroutine snrt_hdf5_stream_close(dset,dspace,plist)
