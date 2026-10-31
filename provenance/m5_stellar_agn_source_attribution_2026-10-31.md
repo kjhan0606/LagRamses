@@ -48,10 +48,33 @@ that run.
 The runner's effective-population result string currently hardcodes
 `AGN_state=not_requested`, while its AGN-only path checks for a luminous
 accretion state. Thus the result record understates what the effective run
-actually configured and observed. Conversely, the aggregate M5 source ledger
-does not isolate photons emitted from AGN versus stars, so the run log alone
-does not provide a source-specific AGN deposition receipt. Do not treat the
-existing pass sentinel as an AGN-specific photon-deposition audit.
+actually configured and observed.
+
+Commit `f260266` adds `SNRT_MN_AGN_SOURCE`, reporting the accepted AGN packet
+count, photon count, and represented photon energy. These values are folded
+into unused entries of the existing MPI-reduced M5 conservation receipt, so
+the change adds no collective. The output appears only after the enclosing
+M5/chemistry/dust transaction commits.
+
+CPU build job `1249105` completed on grammar `normal` with
+`M5_MOMENTUM_CLOSURE_BUILD_PASS` and `CHIMES_CUDA=0`; the executable and
+recorded objects passed SHA256 verification and the executable has no CUDA
+runtime dependency. CPU integration job `1249133` completed four coarse steps
+on grammar `normal` with exit code 0. It formed 256 stars, loaded the effective
+stellar SED, and reached successful M5/dust/CHIMES commits without raw dumps.
+The BH sidecar records positive accretion and luminosity in `JET` mode. The
+new receipt reports zero AGN photon packets throughout this run. That is
+consistent with `agn_partition_release`: below `X_floor` the reference model
+routes the released energy to the jet channel, leaving no radiative AGN
+packet; `AGN_blast` is active. The nonzero aggregate M5 source is therefore
+stellar in this execution.
+
+The older AGN-only CPU integration `1244059` contains a positive `THERMAL`
+accretion state and a nonzero M5 source ledger, but predates the new receipt.
+Thus the new receipt has been compiled and exercised in the JET branch, while
+a positive receipt from the THERMAL branch remains to be confirmed on the
+current binary. Do not treat the existing effective-population pass sentinel
+as an AGN-specific photon-deposition audit.
 
 The current evidence supports: (a) stellar SED execution, (b) live BH
 accretion and luminosity, (c) a code-wired AGN-to-M5 path, and (d) a successful
@@ -62,9 +85,9 @@ admission remains blocked by the existing manifest audits.
 ## Next bounded closeout
 
 After the queued three-broker/three-stream performance comparison no longer
-reads the current runner, make its result fields distinguish BH
-accretion/luminosity from AGN-photon deposition. Add only the minimal
-source-specific M5 receipt needed to demonstrate that a nonzero AGN photon
-packet was accepted and committed alongside the aggregate conservation
-ledger. Keep physical admission blockers intact. This is a reporting and
-verification correction; it does not alter the selected physical model.
+reads the current runner, make its result fields distinguish stellar source,
+BH accretion/luminosity, mechanical AGN feedback, and accepted AGN photon
+packets. Verify that the current-build THERMAL AGN profile produces a
+positive source receipt. Keep physical admission blockers intact. This is a
+reporting and verification correction; it does not alter the selected
+physical model.
