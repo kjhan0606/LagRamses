@@ -106,6 +106,43 @@ production-approved SED or proof of shared-opacity accuracy. Its intended
 accretion-state domain and high-redshift LRD applicability still require
 review.
 
+### LagRamses-to-model accretion contract audit (2026-10-31)
+
+The pinned `agnSED` API accepts `log10(M_BH/Msun)` and `log10(mdot)` and
+returns tabulated `log10(L_nu)`; its mode switch is at `log10(mdot)=-2.9`.
+The paper defines `mdot = Mdot_acc/Mdot_Edd` with
+`Mdot_Edd=L_Edd/(0.1 c^2)` and assumes zero SMBH spin. The upstream
+interpolators cover `log10(M_BH/Msun)=4..10`, `log10(mdot)=-10..3`, and
+`log10(nu/Hz)=8.0..22.9`; the configured transported band lies inside the
+frequency support. A runtime source outside either parameter grid must be
+rejected or explicitly assigned another declared model, never silently
+extrapolated.
+
+LagRamses does not use that same Eddington-rate convention when spin is active:
+`dM_Edd/dt = 4 pi G m_p M_BH/(sigma_T c epsilon_r)`, where `epsilon_r` is
+spin-dependent (and defaults to 0.1 without spin). The coarse-state record
+already carries the BH mass, Bondi and Eddington rates, capped inflow rate,
+base/effective efficiencies, and code bolometric luminosity. Thus the Su-model
+input is derivable from audited fields as
+`mdot_Su = Mdot_inflow/[L_Edd/(0.1 c^2)]`; if expressed using the code's
+uncapped ratio `X=Bondi/Mdot_Edd(code)`, it is
+`min(X,1) * 0.1/epsilon_r`. Feeding `X` directly is equivalent only when
+`epsilon_r=0.1` and the cap has not changed the inflow. The existing effective
+efficiency can also include the MAD jet-mode reduction, while Su et al.'s SED
+assumes zero spin and does not encode that reduction.
+
+Before generating a candidate ledger, the plan audit must choose its
+normalization contract: (a) use the Su interpolator for spectral shape and
+renormalize its sampled `L_nu` to LagRamses's existing
+`effective_efficiency * Mdot_inflow * c^2`, explicitly treating Su as a
+shape-only closure; or (b) use the interpolator's own radiative output and
+reconcile its radiative efficiency with the existing thermal/jet energy
+partition. These choices are physically different. Option (b) changes the
+current feedback energy contract and cannot be introduced as a mere SED file
+conversion. Source escape/obscuration remains another explicit source-side
+choice; local gas and dust absorption must still process injected energy only
+once.
+
 ### First-pass stellar interaction-moment sensitivity (2026-10-31)
 
 The independent BPASS v2.2.1 radiation-reference source was integrated against
