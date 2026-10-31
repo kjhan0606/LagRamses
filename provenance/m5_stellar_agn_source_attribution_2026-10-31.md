@@ -268,3 +268,36 @@ spectra/dust controls and unresolved package provenance/data-use terms are
 not promoted by these successful integration runs. The release manifest
 must continue to reject physical-production admission until those conditions
 are resolved.
+
+## Automatic M5/dust dispatch integration — job 444227
+
+Job `444227` completed on the typed-A10 partition (`syn02`) with exit code
+`0:0` in 3:04 Slurm elapsed time; peak process RSS was 1.07 GiB. The run used
+the same effective namelist as job `444210` (SHA256
+`01e623647752e38b00ea6dde9fb2be95925c923a81ac5453e5dc4f93c67a4104`) and
+completed four coarse steps with `TRANSPORT_BACKEND=auto`,
+`MATERIAL_BACKEND=auto`, hybrid CHIMES, and no raw output directories.
+`M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS` and
+`M5_COMBINED_SOURCE_ATTRIBUTION_PASS overlap_commits=1` both passed. The
+source receipts again contain 64 stellar sources (`7.71699705e66` photons)
+and one accepted thermal-AGN packet (`1.56436650e70` photons,
+`6.23389269e59 erg`); 256 momentum assertions ran, with nonzero gas and dust
+heating.
+
+The cumulative M5 dispatch receipt reports 22,256 CPU and 2,576 GPU closure
+evaluations, while all 387,072 face evaluations used the CPU. This confirms
+that automatic M5 closure dispatch reached the A10; the CPU face path is the
+configured auto policy. CHIMES separately reports 43,014 GPU RHS calls in
+2,117 batches, zero CPU fallbacks and zero device errors. The log says the
+dust material backend entered `hybrid` mode for 64 cells, but the production
+path does not emit per-backend dust work counts, so this run does not establish
+that dust material kernels actually executed on the GPU.
+
+Application elapsed time was 168.438 s. The four direct `snrt_advance` timers
+sum to 164.370 s; direct `cooling_fine` and `cooling_table` timers are zero.
+The top-level RAMSES `cooling` timer is 167.037 s and includes SNRT work. These
+timings are attribution evidence, not a speedup result: the A10 run is not a
+controlled same-node comparison against the A100 and CPU fixtures. In
+particular, the successful automatic dispatch receipt does not establish that
+the hybrid configuration is faster. The run remains a reference-control
+integration, not production qualification.
