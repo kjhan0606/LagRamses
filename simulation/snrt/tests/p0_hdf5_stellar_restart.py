@@ -30,6 +30,9 @@ EVIDENCE = ROOT / "simulation" / "snrt" / "data" / "p0_hdf5_stellar_restart_cont
 
 SCHEMA_VERSION = 1
 RELEASE_FIELDS = ("tpp", "mp0", "indtab")
+M5_PAYLOAD_HEADER = 4
+M5_PRIMARY_GROUPS = 9
+M5_STORAGE_STRIDE = 80
 
 
 def _synthetic_arrays() -> dict[str, np.ndarray]:
@@ -1355,8 +1358,12 @@ def compare_m5_coupled(
     """Compare actual coupled outputs, not synthetic reader/schema fixtures.
 
     Same-rank/static-layout comparison only. Retains the selected effective
-    profile's predeclared rtol=1e-12/atol=1e-25 for floating state; integer,
-    source identity and contract attributes must match exactly.
+    profile's rtol=1e-12/atol=1e-25. For M5 spherical-harmonic coefficients,
+    the relative scale is the largest of that coefficient and its channel's
+    l=0 coefficient in either run; applying only a component-relative scale
+    to a high-l coefficient near zero would compare it against its own
+    numerical noise instead of the represented radiation.
+    Integer, source identity and contract attributes must match exactly.
     """
     rtol, atol = 1e-12, 1e-25
     scopes = ("hydro/", "snrt/", "gravity/", "particles/", "sinks/")
@@ -1386,6 +1393,26 @@ def compare_m5_coupled(
             assert int(np.asarray(seed["snrt"].attrs["format_version"]).flat[0]) >= 1000
         existing_stars = set()
     with h5py.File(left, "r") as a, h5py.File(right, "r") as b:
+        snrt_attrs = a["snrt"].attrs
+        transport_model = np.asarray(snrt_attrs["transport_model"]).flat[0]
+        if isinstance(transport_model, bytes):
+            transport_model = transport_model.decode("ascii")
+        assert transport_model == "compact_mn_mc15_v1"
+        moment_order = int(np.asarray(snrt_attrs["moment_order"]).flat[0])
+        moment_count = (moment_order + 1) ** 2
+        m5_payload_width = int(np.asarray(snrt_attrs["cell_width"]).flat[0])
+        ir_width = m5_payload_width - M5_PAYLOAD_HEADER - 2 * M5_STORAGE_STRIDE * M5_PRIMARY_GROUPS
+        assert ir_width >= 0 and ir_width % M5_STORAGE_STRIDE == 0
+        ir_groups = ir_width // M5_STORAGE_STRIDE
+        assert moment_count <= M5_STORAGE_STRIDE
+        m5_layout = {
+            "moment_order": moment_order,
+            "moment_count": moment_count,
+            "primary_groups": M5_PRIMARY_GROUPS,
+            "storage_stride": M5_STORAGE_STRIDE,
+            "ir_groups": ir_groups,
+            "payload_width": m5_payload_width,
+        }
         for handle in (a, b):
             assert int(np.asarray(handle["header"].attrs["ncpu"]).flat[0]) == expected_ncpu
             assert int(np.asarray(handle["header"].attrs["nstep_coarse"]).flat[0]) == expected_step
@@ -1495,6 +1522,35 @@ def compare_m5_coupled(
                 assert x.dtype.kind == "f", name
                 delta = np.abs(x-y)
                 limit = atol + rtol*np.abs(y)
+                if name.startswith("snrt/level_") and len(x.shape) == 3:
+                    # Primary photon and endpoint-weight M5 arrays are group
+                    # major (direction stride within each group). The live IR
+                    # serializer stores groups contiguously within each moment.
+                    for base in (M5_PAYLOAD_HEADER,
+                                 M5_PAYLOAD_HEADER + M5_STORAGE_STRIDE * M5_PRIMARY_GROUPS):
+                        for group in range(M5_PRIMARY_GROUPS):
+                            first = base + group * M5_STORAGE_STRIDE
+                            scale = np.maximum(np.abs(x[:, :, first]), np.abs(y[:, :, first]))
+                            target = limit[:, :, first:first + moment_count]
+                            target[...] = atol + rtol * np.maximum(
+                                np.maximum(
+                                    np.abs(x[:, :, first:first + moment_count]),
+                                    np.abs(y[:, :, first:first + moment_count]),
+                                ),
+                                scale[:, :, None],
+                            )
+                    if ir_groups:
+                        base = (M5_PAYLOAD_HEADER
+                                + 2 * M5_STORAGE_STRIDE * M5_PRIMARY_GROUPS)
+                        for group in range(ir_groups):
+                            indices = base + group + np.arange(M5_STORAGE_STRIDE) * ir_groups
+                            first = int(indices[0])
+                            scale = np.maximum(np.abs(x[:, :, first]), np.abs(y[:, :, first]))
+                            active = indices[:moment_count]
+                            limit[:, :, active] = atol + rtol * np.maximum(
+                                np.maximum(np.abs(x[:, :, active]), np.abs(y[:, :, active])),
+                                scale[:, :, None],
+                            )
                 outside = delta > limit
                 outside_count = int(np.count_nonzero(outside))
                 ratio = delta / limit
@@ -1593,6 +1649,12 @@ def compare_m5_coupled(
                                     for level, p in grid_permutations.items()},
                 "particle_identity": particle_match_method,
                 "new_star_ID_relabellings": int(np.count_nonzero(relabelled)),
+                "snrt_moment_tolerance": {
+                    "scale": "max_pair_component_or_same_channel_l0",
+                    "atol": atol,
+                    "rtol": rtol,
+                    **m5_layout,
+                },
                 "mpi_ranks": expected_ncpu,
                 "scope": f"same_MPI{expected_ncpu}_effective_population_co_moving_dust"}
 

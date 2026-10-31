@@ -304,3 +304,43 @@ controlled same-node comparison against the A100 and CPU fixtures. In
 particular, the successful automatic dispatch receipt does not establish that
 the hybrid configuration is faster. The run remains a reference-control
 integration, not production qualification.
+
+## M5 live-dust/CHIMES restart smoke — job 444355
+
+Job `444355` ran on typed A10 partition `a10` (`syn02`), with one GPU,
+two MPI ranks and four OpenMP threads per rank. Both continuous and restarted
+legs reached coarse step 4 and printed `Run completed`; the restart log
+also records `SNRT_HDF5_RADIATION_RESTORE_PASS`. The effective profile was
+`effective_population_M5_live_dust_CHIMES_reference_NONPRODUCTION`, with M5
+order 5, live dust, hybrid CHIMES and reference-control AGN/dust contracts.
+This is integrated restart evidence for that declared profile, not physical
+AGN-spectrum approval or production qualification.
+
+The Slurm batch ended `FAILED` (`1:0`, 00:03:05) in its post-run comparison.
+The original comparator reported 1,086 out-of-tolerance elements in two
+`snrt/level_*` datasets, while all six clock fields were bitwise equal and all
+39 contract attributes matched exactly. These were M5 coefficient comparisons
+near zero: component-wise relative scaling compared high-order coefficients
+against their own roundoff. The comparator now uses a symmetric scale for
+active M5 coefficients: `max(|left|, |right|, |left channel l=0|, |right
+channel l=0|)`, with the existing `rtol=1e-12` and `atol=1e-25`. Padded
+coefficients and non-M5 fields retain the original comparison rule.
+
+Re-running that comparator on the retained job outputs produced
+`M5_COUPLED_RESTART_PASS`: 449 datasets compared, 121 bitwise-equal datasets,
+327 datasets with floating differences but zero tolerance violations, 39
+exact contract attributes, and all six clocks bitwise equal. The layout was
+checked as `compact_mn_mc15_v1`, order 5, 36 active moments, 9 primary groups,
+136 IR groups, and payload width 12,324. The continuous-leg rank counters
+reported 22,793 and 22,117 GPU RHS calls; the restarted-leg counters reported
+6,710 and 6,482. All reported CPU fallbacks and device errors were zero.
+
+The three raw dump directories (42 files, 304,049,480 bytes) and the resumed
+leg's symlink to the continuous initial dump were removed after evaluation.
+Per-file sizes and SHA256 values are retained in
+`.m5-effective-restart-444355/raw-cleanup.json`; the three HDF5 hashes were
+verified against `raw.sha256` before cleanup. Effective inputs, logs, build
+identity, both comparison records, and the cleanup manifest remain available
+in `.m5-effective-restart-444355/`. The batch's recorded failure remains
+visible in Slurm accounting; the corrected offline comparison does not rewrite
+that scheduler state.
