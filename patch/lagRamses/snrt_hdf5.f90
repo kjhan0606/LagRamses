@@ -25,6 +25,8 @@ module snrt_hdf5
 #include "amr_index.h"
   implicit none
   private
+  ! Bound temporary checkpoint I/O to 64 AMR grids per rank, independent of
+  ! the rank's total level size; this does not change the on-disk cell layout.
   integer, parameter :: snrt_hdf5_grid_chunk=64
   integer :: snrt_checkpoint_cell_width=primary_width
   integer :: snrt_checkpoint_file_width=primary_width
@@ -125,29 +127,37 @@ contains
     integer(HID_T), intent(out) :: dset,dspace,plist
     integer(HSIZE_T) :: dims(1),maxdims(1)
     integer :: status,rank
+    dims=0
+    maxdims=0
+    rank=0
     call h5dopen_f(grp,trim(name),dset,status)
     call require_ok(abs(status))
     call h5dget_space_f(dset,dspace,status)
     call require_ok(abs(status))
     call h5sget_simple_extent_ndims_f(dspace,rank,status)
-    call require_ok(merge(0,1,status==0.and.rank==1))
+    call require_ok(merge(0,1,status==0))
+    call require_ok(merge(0,1,rank==1))
     call h5sget_simple_extent_dims_f(dspace,dims,maxdims,status)
-    call require_ok(merge(0,1,status==1.and.dims(1)==int(total,HSIZE_T)))
+    call require_ok(merge(0,1,status==1))
+    call require_ok(merge(0,1,dims(1)==int(total,HSIZE_T)))
     call h5pcreate_f(H5P_DATASET_XFER_F,plist,status)
     call require_ok(abs(status))
     call h5pset_dxpl_mpio_f(plist,H5FD_MPIO_COLLECTIVE_F,status)
     call require_ok(abs(status))
   end subroutine
 
-  subroutine snrt_hdf5_stream_write_slice(dset,dspace,plist,data,nvalues,offset)
+  subroutine snrt_hdf5_stream_write_slice(dset,dspace,plist,data,nvalues,offset,total)
     integer(HID_T), intent(in) :: dset,dspace,plist
     real(dp), intent(in) :: data(:)
     integer, intent(in) :: nvalues
-    integer(i8b), intent(in) :: offset
+    integer(i8b), intent(in) :: offset,total
     integer(HID_T) :: mspace
     integer(HSIZE_T) :: mdims(1),moffset(1),foffset(1),count(1)
     integer :: status
-    call require_ok(merge(0,1,nvalues>=0.and.nvalues<=size(data).and.offset>=0_i8b))
+    call require_ok(merge(0,1,nvalues>=0.and.nvalues<=size(data)))
+    call require_ok(merge(0,1,offset>=0_i8b))
+    call require_ok(merge(0,1,offset<=total))
+    call require_ok(merge(0,1,int(nvalues,i8b)<=total-offset))
     mdims(1)=size(data)
     call h5screate_simple_f(1,mdims,mspace,status)
     call require_ok(abs(status))
@@ -171,15 +181,18 @@ contains
     call require_ok(abs(status))
   end subroutine
 
-  subroutine snrt_hdf5_stream_read_slice(dset,dspace,plist,data,nvalues,offset)
+  subroutine snrt_hdf5_stream_read_slice(dset,dspace,plist,data,nvalues,offset,total)
     integer(HID_T), intent(in) :: dset,dspace,plist
     real(dp), intent(out) :: data(:)
     integer, intent(in) :: nvalues
-    integer(i8b), intent(in) :: offset
+    integer(i8b), intent(in) :: offset,total
     integer(HID_T) :: mspace
     integer(HSIZE_T) :: mdims(1),moffset(1),foffset(1),count(1)
     integer :: status
-    call require_ok(merge(0,1,nvalues>=0.and.nvalues<=size(data).and.offset>=0_i8b))
+    call require_ok(merge(0,1,nvalues>=0.and.nvalues<=size(data)))
+    call require_ok(merge(0,1,offset>=0_i8b))
+    call require_ok(merge(0,1,offset<=total))
+    call require_ok(merge(0,1,int(nvalues,i8b)<=total-offset))
     mdims(1)=size(data)
     call h5screate_simple_f(1,mdims,mspace,status)
     call require_ok(abs(status))
@@ -487,7 +500,7 @@ contains
           call require_ok(status)
           if(pass==2)then
              slice_offset=offset+int(first_grid,i8b)*stride
-             call snrt_hdf5_stream_write_slice(dset,dspace,plist,buffer,nvalues,slice_offset)
+             call snrt_hdf5_stream_write_slice(dset,dspace,plist,buffer,nvalues,slice_offset,total)
           end if
        end do
        if(grid/=0)status=max(status,1)
@@ -540,7 +553,7 @@ contains
           ! Reuse the restored AMR file-grid map, in bounded streaming chunks.
           first=0
           do while(int(first,i8b)<total_grids)
-             count=int(min(64_i8b,total_grids-int(first,i8b)))
+             count=int(min(int(snrt_hdf5_grid_chunk,i8b),total_grids-int(first,i8b)))
              allocate(buffer(count*twotondim*snrt_checkpoint_file_width))
              call hdf5_read_dataset_1d_dp_checked(grp,trim(name),buffer,size(buffer), &
                   int(first,i8b)*twotondim*snrt_checkpoint_file_width,total,status)
@@ -585,7 +598,7 @@ contains
              chunk_grids=max(0,min(snrt_hdf5_grid_chunk,nlocal-first_grid))
              nvalues=chunk_grids*stride
              slice_offset=(offset+int(first_grid,i8b))*stride
-             call snrt_hdf5_stream_read_slice(dset,dspace,plist,buffer,nvalues,slice_offset)
+             call snrt_hdf5_stream_read_slice(dset,dspace,plist,buffer,nvalues,slice_offset,total)
              do i=1,chunk_grids
                 if(grid<1.or.grid>size(next))then
                    status=1
