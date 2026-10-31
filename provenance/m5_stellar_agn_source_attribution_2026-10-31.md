@@ -288,10 +288,13 @@ The cumulative M5 dispatch receipt reports 22,256 CPU and 2,576 GPU closure
 evaluations, while all 387,072 face evaluations used the CPU. This confirms
 that automatic M5 closure dispatch reached the A10; the CPU face path is the
 configured auto policy. CHIMES separately reports 43,014 GPU RHS calls in
-2,117 batches, zero CPU fallbacks and zero device errors. The log says the
-dust material backend entered `hybrid` mode for 64 cells, but the production
-path does not emit per-backend dust work counts, so this run does not establish
-that dust material kernels actually executed on the GPU.
+2,117 batches, zero CPU fallbacks and zero device errors. For dust material,
+the existing hybrid helper reports `CPU=0 GPU=1` on its first invocation; with
+64 cells and a 256-cell batch size, this confirms that the 64-cell dust
+material batch executed on the A10 GPU. The IR absorption helper likewise
+reports `CPU=0 GPU=1` on its first invocation. These counters print only the
+first invocation per operation, not cumulative work across the whole run, so
+they establish GPU execution but do not measure total dust GPU workload.
 
 Application elapsed time was 168.438 s. The four direct `snrt_advance` timers
 sum to 164.370 s; direct `cooling_fine` and `cooling_table` timers are zero.
