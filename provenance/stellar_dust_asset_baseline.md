@@ -12,6 +12,9 @@ the binary-star product with the broken IMF slopes -1.30 over 0.1--0.5 Msun
 and -2.35 over 0.5--300 Msun. Its Zenodo MD5 is
 `eac7f8ef432ff86b3d7ab8dc32c1b8b1`; the staged SHA256 is
 `b53d7bf4e8c50ae0a02458eae9d5b6dff5d5782f9f2b23dd40514ad85716c9b3`.
+Zenodo metadata rechecked 2026-11-01 labels the record Open but leaves its
+Rights/License field blank; this does not establish an explicit data reuse
+license, so BPASS remains a candidate and is not release-license evidence.
 
 The HDF5 axes are 13 log-relative-solar metallicities, 51 ages in Gyr, and
 100,000 wavelengths in Angstroms. `spectra` declares `L_sun/Hz`. The adapter
