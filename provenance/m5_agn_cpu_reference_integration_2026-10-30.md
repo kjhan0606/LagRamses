@@ -601,3 +601,31 @@ CPU and A10 build commits differ only in provenance files under the relevant
 runtime comparison; their `patch/lagRamses` and `simulation/snrt` source trees
 are identical, and the staged CHIMES object files have matching SHA256 values.
 The CPU final dump remains until the A100 run and pair evaluation finish.
+
+### Retained-trace analysis of the 128-step CPU/A10 mismatch — 2026-10-31
+
+The completed CPU job `1248163` and A10 job `442744` each contain 128
+`Main step=` summaries, and all 128 printed lines are textually identical.
+Their retained `sink_log.csv` files are byte-identical (SHA-256
+`d4c5a18767162dfcf84daefa2321fe2c886da5dfb4a4a6fff0ee49f8d7b0f473`). These
+coarse diagnostics do not override the failed full-state comparator: its
+149 violating datasets include 89,720 elements, and `time`, `dtnew` and
+`dtold` violate the declared clock tolerance.
+
+The retained AGN sidecars differ first at coarse step 1 in the gas angular
+momentum diagnostic (maximum component difference `6.99e-35` code units).
+Their `t_code` first differs at step 21 by `2.17e-19` code units and ends with
+the comparator's `3.70e-14` difference at step 128. The step-1 sidecar value
+is a near-zero diagnostic; it does not identify the first differing evolved
+field in the deleted HDF5 snapshots or establish a causal source.
+
+The 128-step A10 run enabled several accelerator paths together: hybrid
+CHIMES, GPU M5 closure and GPU dust/material work; face transport stayed on
+CPU. The CPU and hybrid CHIMES schedulers also differ (`cohort` versus
+`level_queue`). Therefore the retained evidence cannot attribute the strict
+pair failure to a single module. The pending 16-step A100 run keeps M5
+transport and dust material on CPU while selecting hybrid CHIMES, removing
+their GPU dispatch from this short pair. The required CPU `cohort` versus
+hybrid `level_queue` scheduler difference remains, so the result tests the
+supported operational CHIMES paths rather than only the GPU kernel. It cannot
+explain the full 128-step mixed-dispatch divergence by itself.
