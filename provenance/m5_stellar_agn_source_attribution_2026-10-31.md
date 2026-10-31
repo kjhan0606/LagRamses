@@ -209,6 +209,43 @@ provisional timing difference is not an accepted speedup. Its old binaries
 also predate the distinct source receipts, so those runs do not establish
 AGN-specific deposition.
 
+The current CUDA build and combined-source integration close that gap for the
+reference profile. Typed-A100 build job `444209` built commit
+`ccfe43b2b35224ff50b812feb0dd09782106278f` with `USE_CUDA=1` and completed
+with `M5_MOMENTUM_CLOSURE_BUILD_PASS`; the executable SHA256 is
+`ba2caceb023c86d933e6ce45199620d10a7bb21597d04490241cde8ebe7b38b0`.
+Dependent job `444210` completed on one A100-SXM4-80GB, one MPI rank and eight
+OpenMP threads. It used M5 order 5, live two-size dust, CHIMES non-equilibrium
+cooling, one GPU broker/stream, and the asynchronous hybrid CHIMES backend.
+The effective namelist exactly matches the CPU combined-source fixture
+`1249327` (SHA256
+`01e623647752e38b00ea6dde9fb2be95925c923a81ac5453e5dc4f93c67a4104`). The
+four-step run completed in 128.118 s application time with 256 momentum
+assertions, the combined-source attribution PASS, and the integration PASS.
+At the joint source commit it recorded 64 stellar sources and one accepted
+thermal-AGN packet: `7.71699705e66` stellar photons and `1.56436650e70` AGN
+photons (`6.23389269e59 erg`). The M5 photon/energy ledger residuals printed
+for that source step were `1.4361e-18` and `2.0204e-17`; for the following
+transport step they were `3.5599e-19` and `-9.6428e-18`. These are subsystem
+ledger values in the runtime's printed conventions, not a global gas+stars+
+dust+radiation closure. The source step also records nonzero gas and dust
+heating.
+
+The hybrid path made 43,014 GPU RHS calls in 2,117 batches, with zero CPU
+fallbacks, zero device errors, two peak in-flight batches, and one stream.
+Total cooling took 126.969 s (99.1% of application time). The CPU fixture
+`1249327` took 90.589 s, including 89.195 s in cooling; although the effective
+namelists match byte-for-byte, the runs were on different systems, so this is
+not a controlled same-node speed benchmark and does not establish a GPU
+speedup. It does show that the hybrid CUDA path is active and numerically
+completes this integrated reference transaction. Output clocks were audited
+in the effective namelist (`noutput=1`, future `aout=2.0d0` and `tout=1.0d30`,
+`nstepmax=4`, `foutput=fbackup=1000000`); no raw output directories were
+created. The effective run is preserved at
+`.m5-effective-dust-chimes-444210/`, with `inputs.sha256` SHA256
+`1487b1d1b6ff9b5458a81a635ee1efbb691200c654422c9417be63c10388923b`.
+Both profiles remain reference controls, not production qualification.
+
 The RAMSES-wide `mcons` and `econs` printouts are not total feedback budgets:
 `mcons` sums gas density over hydro leaves, while `econs` uses kinetic and
 potential terms plus cosmological work and omits internal energy and explicit
