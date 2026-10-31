@@ -222,9 +222,10 @@ else
 fi
 printf 'RUN_ID=%s\nBINARY=%s\n' "$RUN_ID" "$BINARY" | tee -a "$WORK/launch.txt"
 printf 'CHIMES_LIBRARY_MODE=%s\n' "$CHIMES_LIBRARY_MODE" | tee -a "$WORK/launch.txt"
-printf 'SLURM_JOB_ID=%s PARTITION=%s NODELIST=%s GPUS=%s\n' \
+printf 'SLURM_JOB_ID=%s PARTITION=%s NODELIST=%s GPU_COUNT=%s GPU_IDS=%s GPU_GRES=%s\n' \
   "$SLURM_JOB_ID" "${SLURM_JOB_PARTITION:-unknown}" "${SLURM_JOB_NODELIST:-unknown}" \
-  "${SLURM_JOB_GPUS:-${SLURM_JOB_GRES:-none}}" | tee -a "$WORK/launch.txt"
+  "${SLURM_GPUS_ON_NODE:-unknown}" "${SLURM_JOB_GPUS:-none}" "${SLURM_JOB_GRES:-none}" \
+  | tee -a "$WORK/launch.txt"
 
 test -f "$TABLE" -a -f "$GROUP_DIR/manifest.json"
 test -f "$SUN/include/cvode/cvode.h" -a -f "$HDF5_ROOT/include/hdf5.h"
