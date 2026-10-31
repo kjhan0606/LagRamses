@@ -114,19 +114,58 @@ binary under reference controls; it does not qualify the physical spectrum or
 the stellar-plus-thermal-AGN combination. Do not treat the effective-profile
 pass sentinel as an AGN-specific photon-deposition audit.
 
+The first combined current-source attempt, job `1249312`, reached the
+`Run completed` marker and formed stars, but its post-run assertion compared
+physical AGN photon counts against the normalized code-unit M5 ledger source.
+Those values are dimensionally different, so the runner failed without
+indicating a RAMSES failure. The attempt produced no raw dumps and its logs are
+retained. The check was corrected to use distinct source receipts in matching
+units.
+
+Build `1249326` compiled commit `e96ee64e49ae9131a1deaeb5d4634ff8efe44293`
+with `CHIMES_CUDA=0`, and produced
+`M5_MOMENTUM_CLOSURE_BUILD_PASS`. The executable contains both source receipt
+labels and has no CUDA runtime dependency. Its dependent CPU run `1249327`
+completed four coarse steps on grammar `normal` with exit code 0 in 1:45
+Slurm elapsed time (90.589 s application time). It used one MPI rank, eight
+OpenMP threads, M5 order 5, OpenMP transport/material, CPU CHIMES, live dust,
+and the effective stellar population plus the thermal-seed AGN sink fixture.
+The external Haardt-Madau field was disabled to isolate the two source paths.
+
+At one M5 commit, the new receipts report 64 stellar sources producing
+`7.71699705e66` photons and `9.29350206e55 erg`, alongside one accepted
+thermal-AGN packet producing `1.56436650e70` photons and `6.23389269e59 erg`.
+The runner reports `overlap_commits=1`; the same commit has nonzero gas and
+dust heating, with printed photon-number and energy ledger residuals
+`5.2640467126858e-20` and `1.0582739475971e-17`. The run exercised 256
+momentum assertions, completed with the combined-source and integration PASS
+sentinels, and retained zero raw outputs. Its effective namelist, launch
+record, input hashes, sidecar and logs remain under
+`.m5-effective-dust-chimes-1249327/`.
+
+This reference fixture has `cosmo=.false.`. The legacy SFRD diagnostic divides
+by a cosmological box volume and consequently prints NaN/Infinity in this
+non-cosmological setup; SFRD is not an evaluated quantity here. The run's gas
+state checks remain clean, and the SFRD line is not used as a success metric.
+This source-attribution pass establishes simultaneous source routing and
+accounting under reference controls only; it does not qualify either spectrum
+or production physics.
+
 The current evidence supports: (a) stellar SED execution, (b) live BH
 accretion and luminosity, (c) a code-wired AGN-to-M5 path, and (d) a successful
-aggregate M5/dust/CHIMES transaction. It does not support a production claim:
-the spectra and dust controls are reference-only, and physical package
-admission remains blocked by the existing manifest audits.
+aggregate M5/dust/CHIMES transaction with simultaneous stellar and thermal
+AGN photons. It does not support a production claim: the spectra and dust
+controls are reference-only, and physical package admission remains blocked by
+the existing manifest audits.
 
 ## Remaining bounded verification
 
-Job `1249156` verifies the effective-population BH state as JET with zero
-accepted AGN packets while the integrated run passes. The complementary
-current-source THERMAL receipt is verified by CPU job `1249188`. CUDA build
-job `443842` requests one typed A100 and is currently pending with
-`QOSMaxGRESPerUser`. Its dependent runtime job `443906` is queued with
+Jobs `1249156` and `1249188` separately verify the effective-population JET
+zero-packet and AGN-only THERMAL receipt cases. Job `1249327` now verifies
+simultaneous stellar and THERMAL AGN source receipts on the CPU path. CUDA
+build job `443842` requests one typed A100 and remains pending with
+`Priority` (last checked 2026-10-31). Its dependent runtime job `443906` is
+queued with
 `afterok:443842`; it holds M5 transport and dust to OpenMP while selecting
 hybrid CHIMES (`level_queue`, one GPU broker, one CUDA stream). That comparison
 must confirm actual GPU CHIMES work as well as the source/ledger checks; it is

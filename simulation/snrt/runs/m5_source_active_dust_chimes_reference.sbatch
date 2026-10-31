@@ -224,6 +224,11 @@ grep -aFq 'SNRT_MN_AGN_SOURCE accepted_packets=' "$BINARY" || {
   echo 'Binary lacks the committed M5 AGN source receipt; rebuild from a source revision containing f260266' >&2
   exit 3
 }
+if [[ "$PROFILE" == effective_population && "$EFFECTIVE_AGN_IC_MODE" == thermal_seed_reference ]] && \
+  ! grep -aFq 'SNRT_MN_STELLAR_SOURCE accepted_stars=' "$BINARY"; then
+  echo 'Combined source attribution requires the M5 stellar-source receipt; rebuild from the current source revision' >&2
+  exit 3
+fi
 if [[ "$CHIMES_BACKEND" == hybrid ]]; then
   grep -aFq 'hybrid (host CVODE/LU, asynchronous device RHS/cooling)' "$BINARY" || {
     echo 'Hybrid CHIMES requested with a binary lacking the CHIMES_CUDA backend' >&2
