@@ -48,6 +48,23 @@ timer. This is a small CPU reference smoke, not a controlled performance
 benchmark; `cooling` includes the coupled M5/material path and is not a
 standalone CHIMES measurement.
 
+## Coverage of the CUDA hybrid path
+
+Source inspection confirms that `SNRT_CHIMES_COMPUTE_BACKEND=hybrid` selects a
+host CVODE/LU solver and `cuda_dark_reactions` RHS. The spectral photo solver
+in `patch/lagRamses/snrt_chimes_photo.cpp` creates its own serial host
+`N_Vector`, BDF CVODE instance, and SPGMR solver; it does not call the CUDA
+RHS dispatcher. Thus the queued GPU test qualifies dark-reaction RHS parity
+and level-queue behavior, not GPU acceleration of spectral photo chemistry.
+
+In this CPU smoke, photo-solver cell timers sum to 96.952, 55.473, and
+41.320 seconds across the three source-active M5 commits (these per-cell sums
+overlap across OpenMP workers and are not wall time). They show why a passing
+dark-RHS GPU test must not be reported as acceleration of the dominant
+photo-active integration path. The CPU backend remains the production default;
+the upcoming GPU integration run can qualify wiring and coupled correctness,
+but not photo-solver acceleration or production-scale speedup.
+
 ## Outstanding GPU verification
 
 This CPU run was submitted while the A40 queue was blocked by the per-user GPU
