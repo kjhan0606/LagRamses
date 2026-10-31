@@ -383,6 +383,14 @@
         "observation": "The official database page identifies PARSEC VMS tracks and the associated paper; the VMS readme could not be retrieved during this check and no explicit license for the track/ejecta archives was verified. Terms remain unresolved."
       }
     ],
+    "primary_source_recheck_2026_11_01": [
+      {
+        "asset": "parsec_v2_vms",
+        "source": "https://stev.oapd.inaf.it/PARSEC/tracks_v2_VMS.html",
+        "vms_readme": "https://stev.oapd.inaf.it/PARSEC/Database/PARSECv2.0_VMS/readme.html",
+        "observation": "The official PARSEC v2.0 no-rotation VMS page lists stellar tracks, ejecta and ionizing-photon products and requests citation of Nguyen et al. (2022) and Costa et al. (2025). No data reuse license is stated in the retrieved page content. The linked readme timed out again; its retained copy has no established track-data license. Terms remain unresolved, and citation guidance is not treated as a reuse license."
+      }
+    ],
     "draine_d03": {
       "official_table": "https://www.astro.princeton.edu/~draine/dust/extcurvs/kext_albedo_WD_MW_3.1_60_D03.all",
       "official_description": "https://www.astro.princeton.edu/~draine/dust/dustmix.html",
