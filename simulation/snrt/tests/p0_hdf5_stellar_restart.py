@@ -1421,6 +1421,11 @@ def compare_m5_coupled(
                 x = np.asarray(a[f"amr/{level}/{key}"]).reshape(-1, 8)
                 y = np.asarray(b[f"amr/{level}/{key}"]).reshape(-1, 8)[permutation]
                 assert np.array_equal(x, y), (level, key)
+        same_row_identity = all(
+            np.array_equal(a[f"particles/{key}"], b[f"particles/{key}"])
+            for key in ("identity", "ptypep", "levelp")
+        )
+
         def particle_keys(handle: h5py.File) -> list[tuple]:
             p = handle["particles"]
             ids, kinds, levels = (np.asarray(p[k]) for k in ("identity", "ptypep", "levelp"))
@@ -1434,6 +1439,14 @@ def compare_m5_coupled(
                     # NEW stars receive sequential rank/list-order labels.
                     # Match their exact birth event, not a newly assigned ID.
                     key = (1, 1, float(birth[i]), *xyz[i])
+                elif same_row_identity:
+                    # Dark-matter rows can use the repeated sentinel ID -1.
+                    # With an unchanged row identity/type/level inventory,
+                    # retain that row mapping and compare coordinates using
+                    # the normal numerical tolerance below. Exact coordinates
+                    # are unsuitable as keys because harmless restart
+                    # roundoff would force all new stars back to row matching.
+                    key = (int(kinds[i]), 0, int(ident), int(levels[i]), i)
                 else:
                     key = (int(kinds[i]), 0, int(ident), int(levels[i]), *xyz[i])
                 keys.append(key)
@@ -1450,10 +1463,6 @@ def compare_m5_coupled(
             # still identical row by row, align those rows and let the normal
             # numerical tolerance report the physical-state differences.
             # This does not accept a changed inventory or relax any tolerance.
-            same_row_identity = all(
-                np.array_equal(a[f"particles/{key}"], b[f"particles/{key}"])
-                for key in ("identity", "ptypep", "levelp")
-            )
             assert same_row_identity, "particle event/identity inventory differs"
             particle_permutation = np.arange(len(keys_a))
             particle_match_method = "exact_row_identity_type_level"
