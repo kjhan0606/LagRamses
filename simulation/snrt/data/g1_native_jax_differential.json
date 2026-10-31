@@ -2,8 +2,8 @@
   "status": "pass",
   "backend": "cpu",
   "jax_version": "0.11.1",
-  "table": "/gpfs/kjhan/LRD_JWST/build/g1_native/g1_synthetic_yields.dat",
-  "native_result": "/gpfs/kjhan/LRD_JWST/build/g1_native/g1_native_interpolation.txt",
+  "table": "/gpfs/kjhan/chimes-cvode-gpu-20261001/build/g1_native/g1_synthetic_yields.dat",
+  "native_result": "/gpfs/kjhan/chimes-cvode-gpu-20261001/build/g1_native/g1_native_interpolation.txt",
   "query_count": 6,
   "matrix": [
     {
