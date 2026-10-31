@@ -388,7 +388,10 @@
         "asset": "chimes_data",
         "source": "https://richings.bitbucket.io/chimes/user_guide/GettingStarted/download.html",
         "data_repository": "https://bitbucket.org/richings/chimes-data",
-        "observation": "Official documentation confirms separate, publicly downloadable CHIMES source and data repositories, with HDF5 data stored through Git LFS. The documentation does not state reuse terms for the data files; the repository API could not be retrieved in this check. Public download is not treated as data permission. Terms remain unresolved."
+        "root_listing_query": "https://api.bitbucket.org/2.0/repositories/richings/chimes-data/src/master/?pagelen=100",
+        "root_listing_next": null,
+        "root_license_like_paths": [],
+        "observation": "Official documentation confirms separate, publicly downloadable CHIMES source and data repositories, with HDF5 data stored through Git LFS. The complete API root listing contains the data directories, README and HDF5 files but no license-like entry; neither the API listing nor documentation establishes reuse terms for data files. Public download is not treated as data permission. Terms remain unresolved."
       },
       {
         "asset": "draine_d03",
@@ -400,13 +403,16 @@
         "asset": "kl16_mirror",
         "source": "https://raw.githubusercontent.com/correac/COLIBRE_yield_tables/acecc180347d9505780a7985ec2c4a8a11f5c61f/README.md",
         "pinned_revision": "acecc180347d9505780a7985ec2c4a8a11f5c61f",
-        "observation": "The pinned README describes package installation and yield-table generation but contains no license statement. The pinned GitHub tree API could not be retrieved in this check; the prior pinned-tree inspection found no root license file. Original yield-data terms remain unresolved."
+        "pinned_tree_query": "https://api.github.com/repos/correac/COLIBRE_yield_tables/git/trees/acecc180347d9505780a7985ec2c4a8a11f5c61f",
+        "pinned_tree_truncated": false,
+        "root_license_like_paths": [],
+        "observation": "The pinned README describes package installation and yield-table generation but contains no license statement. The complete pinned GitHub root tree contains no license-like file. Original yield-data terms remain unresolved."
       },
       {
         "asset": "parsec_v2_vms",
         "source": "https://stev.oapd.inaf.it/PARSEC/tracks_v2_VMS.html",
         "vms_readme": "https://stev.oapd.inaf.it/PARSEC/Database/PARSECv2.0_VMS/readme.html",
-        "observation": "The official PARSEC v2.0 no-rotation VMS page and indexed readme describe stellar tracks, ejecta and ionizing-photon products and request citation of Nguyen et al. (2022) and Costa et al. (2025). No data reuse license was identified. The linked readme timed out in the current retrieval; the retained copy has no established track-data license. Terms remain unresolved, and citation guidance is not treated as a reuse license."
+        "observation": "The official PARSEC v2.0 no-rotation VMS page and indexed readme describe stellar tracks, ejecta and ionizing-photon products and request citation of Nguyen et al. (2022) and Costa et al. (2025). No data reuse license was identified. The linked readme timed out in the browser and failed current curl TLS issuer verification; TLS verification was not disabled. The retained copy has no established track-data license. Terms remain unresolved, and citation guidance is not treated as a reuse license."
       }
     ],
     "draine_d03": {
