@@ -749,6 +749,30 @@ evaluation, with its exact path, size and SHA-256 recorded in the run-local
 cleanup manifest. Both runs remain reference-control evidence, not physical
 production qualification.
 
+A log-level comparison of all 16 coarse steps shows the printed source and
+escaped-photon totals are identical, while absorbed photons and total photon
+count differ by at most `2.69e-13` and `3.13e-14` relative. Printed RAMSES
+`mcons`/`econs` and kinetic/internal-energy summaries are identical at their
+reported precision. The cumulative gas- and dust-heat ledger fields differ by
+at most `5.07e-10` and `1.79e-10` relative; the projection and closure-residual
+columns remain near zero (maximum absolute differences `6.28e-22` and
+`3.79e-22`). These integrated diagnostics are close, but they do not overturn
+the full-state comparator failure or replace per-field inspection.
+
+The effective namelist, sink IC, run script and physical-table hashes match.
+The CPU run used `cohort`; the hybrid run used `level_queue`, and their
+executable/CHIMES libraries are backend-specific. The pair therefore changes
+both the solver path and cell scheduler. Since both final HDF5 dumps are now
+absent, this evidence cannot attribute the state differences to either factor.
+A causal follow-up must hold the scheduler fixed while comparing the CPU and
+hybrid solver paths; no tolerance has been relaxed. The existing cell-level
+CHIMES fixture uses a separate contract: species differences are scaled by
+`1e-17 + 1e-6*|reference|`, with relative temperature and energy limits of
+`1e-6`, nuclei error below `1e-8`, and charge error below `1e-10`. That local
+solver gate is neither proof of integrated equivalence nor the same policy as
+the coupled comparator's `1e-12` relative and `1e-25` absolute limits. Keep
+these scopes distinct when interpreting a future matched-scheduler pair.
+
 ### AGN-only 3-step CPU/A100 operational-path comparison
 
 CPU job `1249188` and A100 job `443906` used the same effective namelist
