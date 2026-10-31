@@ -639,6 +639,48 @@ hybrid `level_queue` scheduler difference remains, so the result tests the
 supported operational CHIMES paths rather than only the GPU kernel. It cannot
 explain the full 128-step mixed-dispatch divergence by itself.
 
+### Current-source thermal AGN receipt and CPU runtime decomposition — 2026-10-31
+
+CPU job `1249188` completed on Grammar `normal` (`grammar028`) with 1 MPI rank,
+8 OpenMP threads, CPU CHIMES, 16 GiB requested, 1,464,836 KiB peak RSS, and
+57:18 Slurm elapsed (RAMSES reports 3,428.808 s). The executable was built by
+job `1249105` from source commit
+`f260266eaf24bfb1e33d5f6f08a7194c848dd053`; its build identity is retained in
+`.m5-ramses-momentum-build-1249105/build-result.txt`. The effective namelist,
+input digests, runner, and compact output are retained under
+`.m5-source-dust-chimes-1249188/`.
+
+The run reports `M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS` after three
+coarse steps, with M5 order 5, live two-size dust, CHIMES, and an accreting BH
+sink; stellar SED is disabled to isolate the AGN source. At step 2 the sidecar
+records positive accretion and a thermal AGN state. The committed M5 receipt
+contains one packet, `1.90503e62` photons and `7.59140e51 erg`. Its printed
+photon-number and radiation-energy residuals are `3.15e-17` and `3.24e-16`.
+The run completes with 16,896 momentum-assertion cells, zero nonfinite/error
+markers, and no raw output directories. These are reference-control wiring
+checks, not production physical qualification.
+
+The total RAMSES `cooling` bucket is 3,423.618 s (99.8% of program time), but
+it combines M5 transport, CHIMES, and material work. The three enclosing M_N
+advance commits sum to 3,383.886 s (98.7% of program time); this is not a
+pure-transport measurement. Existing tile timers further split the commits:
+
+| Level-3 M5 call | Substeps | Commit wall (s) | Material preparation (s) | Dust/IR stage (s) | Unpartitioned remainder (s) | Summed CHIMES photo cell-seconds |
+|---|---:|---:|---:|---:|---:|---:|
+| Source-free | 16 | 583.344 | 2.242 | 293.025 | 288.077 | 0.174 |
+| Source-active | 16 | 2,354.823 | 829.594 | 440.000 | 1,085.229 | 5,770.502 |
+| Follow-up | 1 | 445.719 | 59.489 | 27.496 | 358.734 | 426.041 |
+
+The unpartitioned remainder contains M5 transport and other advance/ledger
+work; it is not isolated as transport alone. `chimes_photo_s` is summed
+per-cell elapsed time across OpenMP workers, not wall time. For the
+source-active commit the dispatch receipt records 3,239,936 CPU closure cells
+and 51,019,776 CPU face operations, with zero GPU operations because this was
+a CPU-only run. No controlled speedup claim follows from comparison with the
+older runs on different nodes/builds. The thermal-source receipt gap is now
+closed on CPU; A100 hybrid job `443906` is queued after CUDA build `443842` to
+check the operational GPU CHIMES path while holding M5 and dust on OpenMP.
+
 ### AGN photon versus jet branch in the two current-source profiles — 2026-10-31
 
 The effective-population run `1248390` has `agn=.true.` and `sink_AGN=.true.`

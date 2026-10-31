@@ -103,10 +103,16 @@ all recorded input hashes verify.
 
 The older AGN-only CPU integration `1244059` contains a positive `THERMAL`
 accretion state and a nonzero M5 source ledger, but predates the new receipt.
-Thus the new receipt has been compiled and exercised in the JET branch, while
-a positive receipt from the THERMAL branch remains to be confirmed on the
-current binary. Do not treat the existing effective-population pass sentinel
-as an AGN-specific photon-deposition audit.
+Current-source CPU job `1249188` closes this evidence gap: at coarse step 2,
+the sidecar records positive accreted BH mass, `feedback_mode=THERMAL`, and
+`Lbol=3.05619e40 erg/s`; the M5 receipt accepts one AGN packet representing
+`1.90503e62` photons and `7.59140e51 erg`. The source-active photon and energy
+ledger residuals are `3.15e-17` and `3.24e-16` in their printed conventions.
+The three-step run exits successfully with the runner's AGN-only PASS sentinel
+and no raw dumps. This confirms the thermal AGN receipt on the current CPU
+binary under reference controls; it does not qualify the physical spectrum or
+the stellar-plus-thermal-AGN combination. Do not treat the effective-profile
+pass sentinel as an AGN-specific photon-deposition audit.
 
 The current evidence supports: (a) stellar SED execution, (b) live BH
 accretion and luminosity, (c) a code-wired AGN-to-M5 path, and (d) a successful
@@ -116,10 +122,12 @@ admission remains blocked by the existing manifest audits.
 
 ## Remaining bounded verification
 
-Confirm job `1249156` reports the effective-population BH state as JET with
-zero accepted AGN packets and still passes the integrated run. This is now
-verified by `1249156`. CUDA build job `443842` is queued on A100 but waiting at
-`QOSMaxGRESPerUser`; after it starts, run the AGN-only reference profile
-through a THERMAL state and require positive accepted AGN packet, photon, and
-energy receipts. Keep physical admission blockers intact. These are reporting
-and verification corrections; they do not alter the selected physical model.
+Job `1249156` verifies the effective-population BH state as JET with zero
+accepted AGN packets while the integrated run passes. The complementary
+current-source THERMAL receipt is verified by CPU job `1249188`. CUDA build
+job `443842` requests one typed A100 and is currently pending with
+`QOSMaxGRESPerUser`. Its dependent runtime job `443906` is queued with
+`afterok:443842`; it holds M5 transport and dust to OpenMP while selecting
+hybrid CHIMES (`level_queue`, one GPU broker, one CUDA stream). That comparison
+must confirm actual GPU CHIMES work as well as the source/ledger checks; it is
+not a production-physics approval. Keep physical admission blockers intact.
