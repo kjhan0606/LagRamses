@@ -40,6 +40,7 @@ readonly OMP_THREADS=${SLURM_CPUS_PER_TASK:-${M5_OMP_THREADS:-8}}
 readonly MPI_RANKS=${SLURM_NTASKS:-${M5_MPI_RANKS:-1}}
 readonly CHIMES_BACKEND=${M5_CHIMES_BACKEND:-cpu}
 readonly CHIMES_GPU_BROKERS=${M5_CHIMES_GPU_BROKERS:-1}
+readonly CUDA_STREAMS=${M5_CUDA_STREAMS:-1}
 CELL_SCHEDULER=${M5_CHIMES_CELL_SCHEDULER:-}
 if [[ -z "$CELL_SCHEDULER" ]]; then
   if [[ "$CHIMES_BACKEND" == hybrid ]]; then CELL_SCHEDULER=level_queue; else CELL_SCHEDULER=cohort; fi
@@ -80,8 +81,11 @@ if [[ "$CHIMES_BACKEND" == hybrid ]]; then
   ((CHIMES_GPU_BROKERS < OMP_THREADS)) || {
     echo 'Hybrid CHIMES needs at least one OpenMP worker outside the GPU broker set' >&2; exit 2;
   }
-elif [[ "$CHIMES_GPU_BROKERS" != 1 ]]; then
-  echo 'M5_CHIMES_GPU_BROKERS applies only to the hybrid CHIMES backend' >&2; exit 2
+  [[ "$CUDA_STREAMS" =~ ^[1-9][0-9]*$ ]] && ((CUDA_STREAMS <= 16)) || {
+    echo 'M5_CUDA_STREAMS must be an integer from 1 through 16' >&2; exit 2;
+  }
+elif [[ "$CHIMES_GPU_BROKERS" != 1 || "$CUDA_STREAMS" != 1 ]]; then
+  echo 'GPU broker/stream settings apply only to the hybrid CHIMES backend' >&2; exit 2
 fi
 if [[ "$CHIMES_BACKEND" == cpu && "$CELL_SCHEDULER" != cohort ]]; then
   echo 'CPU CHIMES uses cohort scheduling; level_queue requires the CUDA hybrid backend' >&2
@@ -317,6 +321,9 @@ fi
 for i in {1..9}; do test -f "$GROUP_DIR/group_$(printf '%02d' "$i").hdf5"; done
 cp -- "$TEMPLATE" "$WORK/effective.nml"
 cp -- "$SOURCE_IC" "$WORK/ic_sink"
+test "$(grep -Ec '^[[:space:]]*n_cuda_streams=1$' "$WORK/effective.nml")" -eq 1
+sed -i "s/^[[:space:]]*n_cuda_streams=1$/  n_cuda_streams=$CUDA_STREAMS/" "$WORK/effective.nml"
+grep -Fqx "  n_cuda_streams=$CUDA_STREAMS" "$WORK/effective.nml"
 if [[ "$PROFILE" == effective_population ]]; then
   test "$(grep -Ec '^[[:space:]]*nstepmax=4$' "$WORK/effective.nml")" -eq 1
   sed -i "s/^[[:space:]]*nstepmax=4$/  nstepmax=$NSTEP_MAX/" "$WORK/effective.nml"
@@ -504,6 +511,7 @@ printf 'TRANSPORT_BACKEND=%s MATERIAL_BACKEND=%s\n' "$TRANSPORT_BACKEND" "$MATER
   | tee -a "$WORK/launch.txt"
 printf 'CHIMES_cell_scheduler=%s\n' "$CELL_SCHEDULER" | tee -a "$WORK/launch.txt"
 printf 'CHIMES_GPU_BROKERS=%s\n' "$CHIMES_GPU_BROKERS" | tee -a "$WORK/launch.txt"
+printf 'CUDA_STREAMS=%s\n' "$CUDA_STREAMS" | tee -a "$WORK/launch.txt"
 printf 'AMR_INTERFACE_CHECK=%s\n' "$AMR_INTERFACE" | tee -a "$WORK/launch.txt"
 printf 'NSTEP_MAX=%s CAPTURE_FINAL_DUMP=%s\n' "$NSTEP_MAX" "$CAPTURE_FINAL_DUMP" | tee -a "$WORK/launch.txt"
 # Explicit OMP_PLACES is needed: generic "cores" can be reconstructed over
