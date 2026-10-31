@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
 # Bounded, source-dark cosmological M5 + grain-mass + CHIMES integration.
 # Reference controls are explicitly NONPRODUCTION; no raw output is scheduled.
-# Only A100/H100 allocations are accepted at runtime (H200 is prohibited).
+# Supported GPU partitions: a10, a40, a100, h100, h200. Override partition
+# and typed GRES together when selecting a card other than the H100 default.
 #SBATCH --job-name=m5-dust-chimes
-#SBATCH --partition=a100,h100
+#SBATCH --partition=h100
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:H100:1
 #SBATCH --mem=128G
 #SBATCH --time=04:00:00
 #SBATCH --output=/gpfs/kjhan/chimes-cvode-gpu-20261001/.m5-cosmo-dust-chimes-%j.log
+
+# Examples:
+#   sbatch --partition=a10  --gres=gpu:A10:1  simulation/snrt/runs/m5_cosmo_dust_chimes_preflight.sbatch
+#   sbatch --partition=a40  --gres=gpu:A40:1  simulation/snrt/runs/m5_cosmo_dust_chimes_preflight.sbatch
+#   sbatch --partition=a100 --gres=gpu:A100:1 simulation/snrt/runs/m5_cosmo_dust_chimes_preflight.sbatch
+#   sbatch --partition=h100 --gres=gpu:H100:1 simulation/snrt/runs/m5_cosmo_dust_chimes_preflight.sbatch
+#   sbatch --partition=h200 --gres=gpu:H200:1 simulation/snrt/runs/m5_cosmo_dust_chimes_preflight.sbatch
 
 set -euo pipefail
 
@@ -38,8 +46,8 @@ module load intel/compiler/2025.3.0 intel/mpi/2021.17 cuda/13.0.2
 
 gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | sed -n '1p')
 case "$gpu_name" in
-  *A100*|*H100*) ;;
-  *) echo "Refusing non-A100/H100 GPU allocation: $gpu_name" >&2; exit 2 ;;
+  *A10*|*A40*|*A100*|*H100*|*H200*) ;;
+  *) echo "Refusing unsupported GPU allocation: $gpu_name" >&2; exit 2 ;;
 esac
 printf 'GPU=%s\nJOB_ID=%s\nSOURCE_HEAD=%s\n' \
   "$gpu_name" "$SLURM_JOB_ID" "$(git -C "$ROOT" rev-parse HEAD)" | tee "$WORK/launch.txt"
