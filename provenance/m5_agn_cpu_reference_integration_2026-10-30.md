@@ -619,6 +619,15 @@ the comparator's `3.70e-14` difference at step 128. The step-1 sidecar value
 is a near-zero diagnostic; it does not identify the first differing evolved
 field in the deleted HDF5 snapshots or establish a causal source.
 
+Source inspection clarifies the printed `gas_heat` receipt: `receipt(6)` sums
+`heat * cell_volume * scale_factor^3`; in the CHIMES branch, `heat` is assigned
+as `gas_next - internal * energy_unit` after CHIMES returns the updated
+chemical state. `gas_next` is derived from the updated total chemical-energy
+state less the nonthermal component. This receipt is therefore a net gas
+internal-energy change, not solely radiative photoheating. A difference in
+this column while the source-photon column is zero does not by itself indicate
+a photon-ledger leak.
+
 The 128-step A10 run enabled several accelerator paths together: hybrid
 CHIMES, GPU M5 closure and GPU dust/material work; face transport stayed on
 CPU. The CPU and hybrid CHIMES schedulers also differ (`cohort` versus
