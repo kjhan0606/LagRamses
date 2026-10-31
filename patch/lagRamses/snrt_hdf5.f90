@@ -159,34 +159,53 @@ contains
     integer(i8b), intent(in) :: offset,total
     integer(HID_T) :: mspace
     integer(HSIZE_T) :: mdims(1),moffset(1),foffset(1),count(1)
-    integer :: status
-    call require_ok(merge(0,1,nvalues>=0.and.nvalues<=size(data)))
-    call require_ok(merge(0,1,offset>=0_i8b))
-    if(nvalues>0)then
-       call require_ok(merge(0,1,offset<=total))
-       call require_ok(merge(0,1,int(nvalues,i8b)<=total-offset))
+    integer :: status,local_status
+    local_status=0
+    if(nvalues<0.or.nvalues>size(data))local_status=1
+    if(offset<0_i8b)local_status=1
+    if(nvalues>0.and.local_status==0)then
+       if(offset>total)then
+          local_status=1
+       else if(int(nvalues,i8b)>total-offset)then
+          local_status=1
+       end if
     end if
+    call require_ok(local_status)
+    local_status=0
     if(nvalues>0)then
        mdims(1)=size(data)
        call h5screate_simple_f(1,mdims,mspace,status)
-       call require_ok(abs(status))
+       local_status=abs(status)
+    end if
+    call require_ok(local_status)
+    local_status=0
+    if(nvalues>0)then
        moffset(1)=0
        foffset(1)=int(offset,HSIZE_T)
        count(1)=int(nvalues,HSIZE_T)
        call h5sselect_hyperslab_f(mspace,H5S_SELECT_SET_F,moffset,count,status)
-       call require_ok(abs(status))
-       call h5sselect_hyperslab_f(dspace,H5S_SELECT_SET_F,foffset,count,status)
-       call require_ok(abs(status))
+       local_status=abs(status)
+       if(local_status==0)then
+          call h5sselect_hyperslab_f(dspace,H5S_SELECT_SET_F,foffset,count,status)
+          local_status=abs(status)
+       end if
+    end if
+    call require_ok(local_status)
+    local_status=0
+    if(nvalues>0)then
        call h5dwrite_f(dset,H5T_NATIVE_DOUBLE,data,mdims,status, &
             mem_space_id=mspace,file_space_id=dspace,xfer_prp=plist)
-       call require_ok(abs(status))
-       call h5sclose_f(mspace,status)
-       call require_ok(abs(status))
-    else
-       ! Empty ranks skip the independent data transfer but still reach the
-       ! same project-level status reduction as every other rank.
-       call require_ok(0)
+       local_status=abs(status)
     end if
+    call require_ok(local_status)
+    local_status=0
+    if(nvalues>0)then
+       call h5sclose_f(mspace,status)
+       local_status=abs(status)
+    end if
+    ! Empty ranks execute the same five status reductions per chunk as ranks
+    ! transferring data, preserving MPI collective order across the level.
+    call require_ok(local_status)
   end subroutine
 
   subroutine snrt_hdf5_stream_read_slice(dset,dspace,plist,data,nvalues,offset,total)
@@ -196,34 +215,53 @@ contains
     integer(i8b), intent(in) :: offset,total
     integer(HID_T) :: mspace
     integer(HSIZE_T) :: mdims(1),moffset(1),foffset(1),count(1)
-    integer :: status
-    call require_ok(merge(0,1,nvalues>=0.and.nvalues<=size(data)))
-    call require_ok(merge(0,1,offset>=0_i8b))
-    if(nvalues>0)then
-       call require_ok(merge(0,1,offset<=total))
-       call require_ok(merge(0,1,int(nvalues,i8b)<=total-offset))
+    integer :: status,local_status
+    local_status=0
+    if(nvalues<0.or.nvalues>size(data))local_status=1
+    if(offset<0_i8b)local_status=1
+    if(nvalues>0.and.local_status==0)then
+       if(offset>total)then
+          local_status=1
+       else if(int(nvalues,i8b)>total-offset)then
+          local_status=1
+       end if
     end if
+    call require_ok(local_status)
+    local_status=0
     if(nvalues>0)then
        mdims(1)=size(data)
        call h5screate_simple_f(1,mdims,mspace,status)
-       call require_ok(abs(status))
+       local_status=abs(status)
+    end if
+    call require_ok(local_status)
+    local_status=0
+    if(nvalues>0)then
        moffset(1)=0
        foffset(1)=int(offset,HSIZE_T)
        count(1)=int(nvalues,HSIZE_T)
        call h5sselect_hyperslab_f(mspace,H5S_SELECT_SET_F,moffset,count,status)
-       call require_ok(abs(status))
-       call h5sselect_hyperslab_f(dspace,H5S_SELECT_SET_F,foffset,count,status)
-       call require_ok(abs(status))
+       local_status=abs(status)
+       if(local_status==0)then
+          call h5sselect_hyperslab_f(dspace,H5S_SELECT_SET_F,foffset,count,status)
+          local_status=abs(status)
+       end if
+    end if
+    call require_ok(local_status)
+    local_status=0
+    if(nvalues>0)then
        call h5dread_f(dset,H5T_NATIVE_DOUBLE,data,mdims,status, &
             mem_space_id=mspace,file_space_id=dspace,xfer_prp=plist)
-       call require_ok(abs(status))
-       call h5sclose_f(mspace,status)
-       call require_ok(abs(status))
-    else
-       ! Empty ranks skip the independent data transfer but still reach the
-       ! same project-level status reduction as every other rank.
-       call require_ok(0)
+       local_status=abs(status)
     end if
+    call require_ok(local_status)
+    local_status=0
+    if(nvalues>0)then
+       call h5sclose_f(mspace,status)
+       local_status=abs(status)
+    end if
+    ! Empty ranks execute the same five status reductions per chunk as ranks
+    ! transferring data, preserving MPI collective order across the level.
+    call require_ok(local_status)
   end subroutine
 
   subroutine snrt_hdf5_stream_close(dset,dspace,plist)
