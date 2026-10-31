@@ -106,6 +106,47 @@ production-approved SED or proof of shared-opacity accuracy. Its intended
 accretion-state domain and high-redshift LRD applicability still require
 review.
 
+### First-pass stellar interaction-moment sensitivity (2026-10-31)
+
+The independent BPASS v2.2.1 radiation-reference source was integrated against
+the [Verner et al. (1996) ground-state H/He photoionization fits](https://arxiv.org/abs/astro-ph/9601009)
+and the authors' [fit-parameter table](https://www.pa.uky.edu/~verner/dima/photo.dat).
+The checked-in source record binds its HDF5 input to SHA256
+`b53d7bf4e8c50ae0a02458eae9d5b6dff5d5782f9f2b23dd40514ad85716c9b3`.
+For each of its 51 tabulated ages and 13 metallicities, the photon-weighted
+group cross section was evaluated as
+`sigma_N = integral(q_lambda * sigma(E)) d(lambda) / integral(q_lambda d(lambda))`,
+using the native 100,000-point wavelength grid, the BPASS builder's photon
+integrand convention, and the nine configured group edges. Groups whose upper
+edge is at or below the species threshold have zero support. For this summary,
+only rows with `Q_group / Q_total(0.01 eV--10 keV) > 1e-8` are included. The high-redshift
+subset `age <= 1000 Myr` contains 403 age-metallicity spectra; 396 contribute
+above that relative threshold in 54.42--500 eV. This is a sensitivity estimate
+from native-grid trapezoids, not an adaptive-quadrature error bound.
+
+| Species | Group (eV) | BPASS `sigma_N` range (cm^2) | BPASS span | Ratio to current pilot kernel |
+|---|---:|---:|---:|---:|
+| H I | 13.6--24.59 | `3.070e-18`--`4.100e-18` | 1.34x | 0.86--1.15 |
+| H I | 24.59--54.42 | `5.775e-19`--`9.759e-19` | 1.69x | 0.95--1.61 |
+| H I | 54.42--500 | `6.827e-20`--`1.222e-19` | 1.79x | 1.50--2.69 |
+| He I | 24.59--54.42 | `4.534e-18`--`6.449e-18` | 1.42x | 0.97--1.38 |
+| He I | 54.42--500 | `1.055e-18`--`1.681e-18` | 1.59x | 1.45--2.31 |
+| He II | 54.42--500 | `9.203e-19`--`1.576e-18` | 1.71x | 1.48--2.53 |
+
+These values establish that even a stellar spectral family can move the
+photon-weighted H/He interaction moments appreciably within a broad group.
+They do **not** directly qualify the active stellar model: the integrated
+profile's runtime receipt identifies `PARSEC_mixed_lowmass_comparison`, while
+this BPASS file is explicitly `independent_radiation_reference`. The current
+PARSEC runtime knots preserve group photon and energy moments, not a resolved
+within-group spectrum or source-specific H/He cross-section moments. Therefore
+the BPASS table is a comparison envelope only. Before accepting a shared
+source-independent kernel, derive the corresponding moments from the actual
+PARSEC Q-constrained source construction and the selected AGN source over their
+declared domains. If only Q/E group moments are available, the missing
+within-group shape must remain an explicit limitation; it cannot be recovered
+uniquely from those two moments.
+
 ## Design question that must be settled in the plan audit
 
 Choose and justify one closure for the shared multigroup state before coding:
