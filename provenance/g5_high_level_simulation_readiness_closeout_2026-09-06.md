@@ -667,3 +667,44 @@ found no changes in `bin/Makefile`, `patch`, `hydro`, `aton`, `amr` or
 `simulation/snrt`. The A100 comparison remains pending `QOSMaxGRESPerUser`;
 this binary/source check validates the comparison setup, not its runtime
 result.
+
+### Current checkout and CPU/JAX verification — 2026-11-01
+
+The active checkout is `/gpfs/kjhan/chimes-cvode-gpu-20261001`, origin
+`kjhan0606/LagRamses`, branch `agent/chimes-cvode-gpu-20261001`, HEAD
+`c1a3120`. The CPU-only Python environment was rebuilt on Grammar `normal`
+job `1251669` (node `grammar025`, 2 CPUs, 16 GiB, 1:07 elapsed, 447616 KiB
+peak RSS) from the committed lock. Python 3.13.9, JAX/jaxlib 0.11.1,
+`pip check`, and the CPU device import passed. Its exact package and input
+hashes are in
+[`snrt_cpu_environment_2026-10-31.json`](../manifests/snrt_cpu_environment_2026-10-31.json);
+the reusable bootstrap is
+[`bootstrap_cpu_environment.sbatch`](../simulation/snrt/tools/bootstrap_cpu_environment.sbatch).
+
+The first G1 attempt exposed a missing `dust_mass_physics.o` prerequisite in
+the standalone runner; the repository Makefile declares that dependency for
+`stellar_yield_tables.o`. The runner now builds that module first and only
+compiles the module closure used by its fixture. Grammar `normal` job
+`1251776` completed the native fixture and six native/JAX interpolation
+queries in 9 seconds (168488 KiB peak RSS). Both maximum absolute and
+relative differences were zero. The run was explicitly
+`G1_NATIVE_DIAGNOSTIC_ONLY`: production-linked build evidence is still absent,
+so this does not pass the production G1 gate. The runner and compact result
+are committed at `c1a3120`.
+
+The current integrated M5+dust+CHIMES restart comparator, job `444740`, is
+still pending on syntax A40 with `QOSMaxGRESPerUser`; it requests one typed
+A40, 2 MPI ranks × 4 CPUs, 32 GiB, and one hour. Slurm currently estimates
+`StartTime=2026-11-01T07:56:47`, which may move as allocations change. A
+read-only `squeue -u kjhan` showed multiple user-owned GPU jobs running across
+A10/A40/H100/H200, consistent with this per-user GRES limit. No duplicate
+comparison was submitted. The job has not started and provides no new runtime
+evidence yet.
+
+The AGN SED source/normalization choice remains unimplemented pending its
+required Fable plan audit; `claude auth status` reports logged out, so no audit
+was issued and no substitute auditor was used. Release blockers remain the
+selected external data-use terms, the exact release-build qualification, and
+an actual-root selected-asset manifest accepted by launch preflight. The
+historical `/gpfs/kjhan/LRD_JWST` G0 manifest remains unbound to this active
+checkout and is not treated as current production evidence.
