@@ -51,6 +51,11 @@ standalone CHIMES measurement.
 ## Outstanding GPU verification
 
 This CPU run was submitted while the A40 queue was blocked by the per-user GPU
-QoS cap. The separate A40 source/run chain (`444740` → `444877` → `444882`)
-remains necessary for the matched-queue RHS check and hybrid integration; this
-CPU result does not replace either.
+QoS cap. Source review then found that test command `rhs` exercises direct
+cell-level RHS parity, while the production `level_queue` comparison is in
+test command `tile`. The GPU script now runs both modes; the corrected script
+was committed as `9803e3a`. The original pending jobs `444877` and `444882`
+were canceled before execution and replaced with `444910` (after-any
+`444740`) and `444911` (after-success `444910`). Parent job `444740` remains
+pending on `QOSMaxGRESPerUser`. This CPU result does not replace either GPU
+verification.
