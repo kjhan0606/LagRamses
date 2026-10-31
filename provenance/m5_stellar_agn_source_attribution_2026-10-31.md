@@ -158,6 +158,22 @@ AGN photons. It does not support a production claim: the spectra and dust
 controls are reference-only, and physical package admission remains blocked by
 the existing manifest audits.
 
+The read-only `simulation_ready_preflight.sh --mode physical-production`
+check was run with the CPU smoke binary from `1249326` and effective namelist
+from `1249327`. It exited 2 with `production_gate_pass=false`, as required for
+these reference artifacts. The release manifest still has
+`status=operator_approved_effective_model_pending_release`, no release commit,
+and `launch_admission_manifest=false`; it lists three unresolved release
+conditions. Per-release license/provenance records are absent for ordinary
+yields, the stellar SED, AGN groups, dust optics and SNIa, while data-use terms
+for CHIMES, Draine D03, KL16 and PARSEC VMS remain unresolved. The probe also
+rejected the smoke binary, namelist, environment and source snapshot as not
+matching that release record, and found the repository dirty. These identity
+mismatches are expected for the smoke run; the physical approval and source
+terms remain genuine release blockers. See
+`manifests/native_m5_release_candidate_2026-10-12.json` for their recorded
+scope and exact conditions.
+
 ## Remaining bounded verification
 
 Jobs `1249156` and `1249188` separately verify the effective-population JET
