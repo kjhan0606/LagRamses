@@ -524,3 +524,47 @@ CPU/A10 HDF5 state comparison are therefore still pending. This is not yet a
 GPU speedup result or production qualification. Preserve both final dumps
 until the comparison is evaluated; afterward remove only the raw snapshots
 owned by these two runs and retain the compact evidence.
+
+## Effective-population CPU/A10 128-step comparison — 2026-10-31
+
+CPU job `1248163` used grammar `normal`, one MPI rank and eight OpenMP threads.
+RAMSES reached step 128, reported `Run completed`, wrote the 102,175,544-byte
+final HDF5 dump, and passed the post-run source, dust, CHIMES, M5, stellar,
+momentum and invalid-state checks. Its RAMSES timer reports 5,314.459 s. The
+Slurm wrapper nevertheless ended `FAILED 2:0`: after `srun` returned, Bash
+reported a syntax error near `|` at runner line 567, so the ordinary runner
+sentinel was not written. The tracked runner's mtime is 09:28:32 KST, during
+this job; its latest commit is at 09:29:04 KST, also while the job was active.
+This makes a live-script edit/read race a plausible explanation, but does not
+prove it. The wrapper failure is an orchestration error and is retained as
+such; future runs must not edit a script while a job may still be reading it.
+
+An independent post-run validator completed the runner's remaining checks and
+performed the existing strict CPU/A10 HDF5 comparison. The comparator returned
+`M5_COUPLED_FINAL_PAIR_FAIL_CLOCK_AND_NUMERIC_TOLERANCE` at its unchanged
+`rtol=1e-12`, `atol=1e-25`. It compared 449 datasets; 70 were bitwise equal.
+Grid coordinates/levels and particle identities matched exactly, with no grid
+reordering or star-ID relabelling. The remaining 149 datasets exceed tolerance
+across gravity (4 datasets, 256 elements), hydro (126, 4,164), particles (7,
+49,212), sinks (10, 10) and SNRT (2, 36,078). The largest tolerance ratio is
+`3.54e7` in particle fields. `time`, `dtnew` and `dtold` also exceed the clock
+tolerance; step and scale-factor fields match. Detailed locations and values
+are retained in
+`.m5-effective-dust-chimes-1248163/cpu-a10-comparison.json`. Tolerances were
+not relaxed. This pair is not accepted as numerically equivalent, and its
+timings must not be presented as a qualified CPU/GPU speedup.
+
+The A10 job `442744` completed with its pass sentinel in 9,638.704 s of RAMSES
+time (Slurm elapsed 02:45:44); the CPU timer is 5,314.459 s (Slurm elapsed
+01:32:28). These are exploratory timings only because the final-state pair
+failed the declared strict comparison. Both final HDF5 files had identical
+size, 102,175,544 bytes. Their SHA256 values before cleanup were CPU
+`3234d34bab82ac9ba621e99c68457ce4e4d55e1e68b080a42b3c80a5a760915b` and A10
+`c88eb10ed3cdbabbb4dd4d6283276993a2685201675812b49614e72a91490657`.
+After evaluation, only those two raw HDF5 files were removed. Effective inputs,
+run logs, output metadata, comparator JSON and post-run evaluation remain in
+the run directories. The file paths, sizes and pre-cleanup checksums above are
+the retained cleanup record. The comparison failure is the next investigation
+target; do not infer whether it comes from numerical trajectory sensitivity,
+executable/runtime differences, or a physical coupling discrepancy without
+isolating it.
