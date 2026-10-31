@@ -11,12 +11,15 @@ checks MPI rank count in both outputs.
 The fixture is periodic: `BOUNDARY_PARAMS` is intentionally absent, selecting
 RAMSES's default `nboundary=0` topology.  This isolates the capture/restart
 contract for five central sinks; it is a fixture workaround, not a repair or
-regression diagnosis for the six-boundary `make_grid_fine` failure preserved
-in the `21d62e4` Lageunha run.  Nonperiodic AMR initialization remains
-unvalidated and requires a separate minimal reproducer and source-level
-investigation before any repair.  The existing Bondi physics test remains
-unchanged.  The preflight rejects any added `BOUNDARY_PARAMS` block so a
-boundary-topology change cannot be mistaken for a capture-ledger test change.
+replacement for the six-boundary `make_grid_fine` failure preserved in the
+`21d62e4` Lageunha run.  A measured Morton-hash omission in physical-boundary
+lists now has a scoped VPATH override and a direct regression under
+`tests/amr/morton_boundary_rebuild/`; see the AMR section below.  That unit
+regression and the earlier isolated initialization diagnostic do not yet
+establish a production capture/restart runtime on this current branch.  The
+existing Bondi physics test remains unchanged.  The preflight rejects any
+added `BOUNDARY_PARAMS` block so a boundary-topology change cannot be
+mistaken for a capture-ledger test change.
 
 The workflow is deliberately two phase. `--prepare` is safe on a login node:
 it creates only two effective namelists, `ic_sink`, a run-local
@@ -370,3 +373,134 @@ hash: `e3d3818f7bc347fb157561c766eb94dc2f6d1a109e9add07c650e18fae400b07`.
 This is a direct backend-level grouping regression, not a full `merge_sink`
 dispatch test: `_KJHAN_TEST` omits the binding-energy `vrel_merge` filter, and
 the production threshold and canonicalization remain unchanged.
+
+## 7. Six-boundary Morton-hash regression
+
+The preserved `21d62e4` failure was traced to `morton_hash_rebuild_level`
+rebuilding each level from `headl/numbl` CPU lists while omitting physical
+boundary grids in `headb/numbb`. `build_comm` can invoke this rebuild after
+boundary grids were inserted, leaving neighbor Morton lookups empty even
+though the boundary children exist. The lagRamses-priority override
+`patch/lagRamses/morton_init.f90` now includes physical-boundary counts and
+entries in full and single-level rebuilds, checks boundary self-lookups and
+levels, and reports them in startup totals. The existing periodic behavior and
+MPI virtual-grid lists are retained.
+
+Run the lightweight source-level regression in a fresh temporary directory:
+
+```bash
+build_parent=$(mktemp -d /tmp/lagramses-morton-check.XXXXXX)
+bash tests/amr/morton_boundary_rebuild/run_test.sh "$build_parent/build"
+```
+
+The harness compiles the real Morton-key, hash, and rebuild sources for both
+64-bit and 128-bit keys. It covers all six faces, full and per-level rebuilds,
+level isolation, renumbered grids, periodic self-neighbors, and an MPI-virtual
+list simulation. It also deliberately deletes a boundary entry and corrupts
+its level; both cases must fail verification. The current capture-ledger
+branch passed both positive runs and both expected rejection cases. This is a
+unit regression.
+As a red/green check, the same fixture compiled against the unmodified
+`patch/cuRamses/morton_init.f90` exits at `full rebuild includes all 27 grids`,
+while the VPATH override passes.
+
+### Six-boundary runtime diagnostic — 2026-10-30
+
+The first current-branch attempt stopped in `init_part` before AMR refinement:
+`yieldtablefilename` was blank, so the unconditional sink/stars initialization
+opened an empty filename on unit 33. The table itself was available. The
+repeatable input `tests/amr/morton_boundary_rebuild/six_boundary_init_only.nml`
+sets `yieldtablefilename='yield_table.asc'` explicitly and uses a run-local
+link to the existing table. No production source change was needed for this
+input setup error.
+
+With the VPATH override binary built from commit `36abfda` (SHA-256
+`2c7377921b4a10856ef189ba0ff261eca16577bdd566e9b01854b6e88563c8ec`), the
+fresh run at
+`/gpfs/kjhan/lagramses_amr_boundary_diagnostic/current-36abfda-init-20261030-v2-yieldtable/`
+reported a full AMR hash rebuild with 333,939 entries, 333,939 self-lookups,
+zero mismatches, and `ALL CHECKS PASSED`; the log reached `Run completed`.
+The ledger validator reported `valid`, with one committed batch containing one
+`BINARY` and one `MULTIPLE` event, no duplicates, incomplete events, or invalid
+JSON. No `output_NNNNN` snapshot directory was created. The effective output
+policy was `noutput=1`, `aout=1.1`, `tout=1.0d100`, `foutput=fbackup=1000000`.
+
+This is a bounded synthetic six-physical-boundary runtime diagnostic, not a
+production galaxy-merger run or a restart-continuity test. Importantly,
+`nstepmax=0` still executes the startup path through one reported coarse/fine
+step in this build; it must not be described as a reader-only preflight. The
+periodic capture/restart smoke and the dedicated unit regression remain
+separate validation gates.
+
+### Strict ledger and moving-pair recheck — 2026-10-30
+
+After adding duplicate-JSON-object-key rejection to the working-tree ledger
+validator, reran its validator, periodic-box, and moving-pair fixture tests:
+35 tests and 15 subtests passed. Then validated the preserved 2026-10-29
+two-rank moving-pair run at
+`/home/kjhan/BACKUP/smbh-capture-restart-mpi2-moving-227a7490-20261029-r1/`
+with the strict validator and reran the two-rank postcheck. Both passed: one
+committed batch, one `BINARY`, one three-member `MULTIPLE`, two unique complete
+events, no duplicate or incomplete events/batches, no invalid JSON lines, and
+verified moving-pair kinematics plus the active restart branch. This is a
+read-only revalidation of the preserved synthetic fixture. The strict
+validator also rechecked the 2026-10-30 six-physical-boundary init-only
+diagnostic: its ledger has one committed batch with one `BINARY` and one
+`MULTIPLE`, and the run directory has no `output_NNNNN` snapshots. The startup
+log completes after one reported coarse/fine step; this is not restart
+continuity or a production capture-rate measurement. No new RAMSES run or
+simulation output mutation was made.
+
+### Read-only ledger revalidation — 2026-10-30
+
+Reran the four focused working-tree suites for ledger schema/duplicates,
+periodic-box handling, moving-pair kinematics, and postcheck state: 40 tests
+and 15 subtests passed. The strict validator independently reports both the
+preserved two-rank moving-pair run and the six-boundary init-only diagnostic
+as schema v2, with one committed batch, one `BINARY`, one `MULTIPLE`, two
+unique complete events, and no duplicate/incomplete records or invalid JSON.
+The moving-pair runtime postcheck also passed on the preserved output,
+including both MPI rank headers, COMPLETE and lineage sidecars, the
+validator-selected active restart branch, mass/sink-state continuity, and
+nonzero relative speed/angular momentum. Read-only revalidation only; no
+simulation output or RAMSES source was changed.
+
+### Pre-append numeric preflight — 2026-11-01
+
+The capture writer now validates the output unit/gravity normalization,
+global capture scalars, member kinematics and sink/Bondi state, group
+center-of-mass fields, and derived pair energy/angular-momentum diagnostics
+before opening the append-only ledger. This prevents `json_real`'s diagnostic
+`null` representation for non-finite values from entering a batch that could
+later receive a post-compaction commit marker. Failures stop before sink-array
+and particle compaction. The transaction-order source regression now checks
+that these diagnostic families are preflighted before the file is opened.
+
+The focused ordering suite passed 4 tests and the schema/ledger validator
+suite passed 24 tests. These are source-order and consumer checks only: the
+modified Fortran source has not yet been rebuilt or exercised in a new RAMSES
+runtime, so the preserved two-rank restart and six-boundary diagnostics above
+do not validate this latest preflight change.
+
+Follow-up source audit (2026-11-01): the preflight now checks all three
+components of every serialized position, velocity, spin, and gas-angular-
+momentum vector, matching the fixed three-component JSON schema rather than
+only the active `ndim` slice. The source-order and strict ledger-validator
+suites now enumerate finite preflights for unit conversions, global and box
+values, member fields, COM values, and pair kinematics/energetics. They also
+compare every `json_real`/`json_optional_real` argument emitted by the writer
+against that coverage map. They passed 28 tests and 11 subtests. This remains
+source/consumer evidence; no rebuild or new runtime was performed.
+
+### Bounded ifx source/code-generation check — 2026-11-01
+
+On the `syntax` login node, the modified `sink_particle.kjhan.f90` passed both
+an `mpiifx -syntax-only` check and an optimized compile-only invocation using
+the Makefile's current definitions, with the object output directed to
+`/dev/null`. This verifies the current source parses and reaches object-code
+generation against the locally available modules, without changing the build
+tree. The 29 focused writer-order and ledger-validator tests passed again.
+This is not the clean, linked binary build required by the smoke protocol and
+does not exercise the Fortran writer at runtime. A build from a committed HEAD
+and a new capture/restart smoke therefore remain open; no RAMSES simulation,
+Slurm query, or job submission was performed here.

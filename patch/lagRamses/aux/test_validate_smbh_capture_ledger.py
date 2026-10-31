@@ -289,6 +289,24 @@ class LedgerValidationTests(unittest.TestCase):
             )
             return validate_ledger(path, **kwargs)
 
+    def test_duplicate_json_object_keys_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "ledger.jsonl"
+            path.write_text(
+                '{"schema_version":2,"record_type":"event_begin",'
+                '"event_uid":"event-a","rmerge_cells":0.1,'
+                '"rmerge_cells":0.2}\n',
+                encoding="utf-8",
+            )
+            report = validate_ledger(path)
+
+        self.assertEqual(report.invalid_json_lines, 1)
+        self.assertTrue(
+            any("duplicate JSON object key 'rmerge_cells'" in error
+                for error in report.errors),
+            report.errors,
+        )
+
     def test_complete_binary(self):
         report = self.validate_rows(binary_rows())
         self.assertTrue(report.valid)

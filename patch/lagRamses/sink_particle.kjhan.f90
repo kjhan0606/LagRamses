@@ -2215,8 +2215,30 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
 
   call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
   scale_m=scale_d*scale_l**3
+  if(.not.ieee_is_finite(scale_l) .or. scale_l<=0d0 .or. &
+       & .not.ieee_is_finite(scale_t) .or. scale_t<=0d0 .or. &
+       & .not.ieee_is_finite(scale_d) .or. scale_d<=0d0 .or. &
+       & .not.ieee_is_finite(scale_v) .or. scale_v<=0d0 .or. &
+       & .not.ieee_is_finite(scale_m) .or. scale_m<=0d0 .or. &
+       & .not.ieee_is_finite(factG) .or. factG<=0d0) then
+     call ledger_group_fatal(0,0,'non-finite output units or gravity normalization')
+  endif
+  if(.not.ieee_is_finite(dx_min) .or. dx_min<=0d0 .or. &
+       & .not.ieee_is_finite(scale) .or. scale<=0d0 .or. &
+       & .not.ieee_is_finite(rmerge) .or. rmerge<0d0 .or. &
+       & .not.ieee_is_finite(rmerge*dx_min) .or. &
+       & .not.ieee_is_finite((rmerge*dx_min)**2) .or. &
+       & .not.ieee_is_finite(boxlen) .or. boxlen<=0d0 .or. &
+       & .not.ieee_is_finite(aexp) .or. &
+       & .not.ieee_is_finite(t) .or. .not.ieee_is_finite(texp) .or. &
+       & .not.ieee_is_finite(omega_m) .or. .not.ieee_is_finite(h0)) then
+     call ledger_group_fatal(0,0,'non-finite global capture diagnostics')
+  endif
   redshift=0d0
   if(aexp > 0d0) redshift=1d0/aexp-1d0
+  if(.not.ieee_is_finite(redshift)) then
+     call ledger_group_fatal(0,0,'non-finite capture redshift')
+  endif
 
   do idim=1,3
      periodic_box_size(idim)=scale*xbound(idim)
@@ -2241,6 +2263,31 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
            call ledger_group_fatal(igrp,isink, &
                 & 'non-finite or non-positive member mass')
         endif
+        ! The JSON schema always writes three components, so preflight the
+        ! serialized extent rather than relying on the active spatial dimension.
+        if(any(.not.ieee_is_finite(xsink(isink,1:3))) .or. &
+             & any(.not.ieee_is_finite(vsink(isink,1:3)))) then
+           call ledger_group_fatal(igrp,isink,'non-finite member kinematics')
+        endif
+        if(.not.ieee_is_finite(tsink(isink)) .or. &
+             & .not.ieee_is_finite(dMsmbh(isink)) .or. &
+             & .not.ieee_is_finite(dMBH_coarse(isink)) .or. &
+             & .not.ieee_is_finite(dMEd_coarse(isink)) .or. &
+             & .not.ieee_is_finite(Esave(isink)) .or. &
+             & .not.ieee_is_finite(spinmag(isink)) .or. &
+             & any(.not.ieee_is_finite(bhspin(isink,1:3))) .or. &
+             & any(.not.ieee_is_finite(jsink(isink,1:3)))) then
+           call ledger_group_fatal(igrp,isink,'non-finite member sink state')
+        endif
+        bondi_context_available=allocated(d_avgptr) .and. &
+             & allocated(c_avgptr) .and. allocated(v_avgptr)
+        if(bondi_context_available) then
+           if(.not.ieee_is_finite(d_avgptr(isink)) .or. &
+                & .not.ieee_is_finite(c_avgptr(isink)) .or. &
+                & .not.ieee_is_finite(v_avgptr(isink))) then
+              call ledger_group_fatal(igrp,isink,'non-finite last Bondi context')
+           endif
+        endif
         if(anchor == 0) anchor=isink
         if(primary_index == 0) then
            primary_index=isink
@@ -2258,6 +2305,91 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
      if(primary_index < 1 .or. primary_index > nsink) then
         call ledger_group_fatal(igrp,primary_index,'invalid primary index')
      endif
+
+     ! The center-of-mass fields and maximum separation are also serialized;
+     ! make sure their weighted sums cannot turn finite member values into
+     ! non-finite diagnostics after the append-only file has been opened.
+     com_pos=0d0
+     com_vel=0d0
+     do isink=1,nsink
+        if(gsink(isink) /= igrp) cycle
+        do idim=1,ndim
+           delta_pos(idim)=xsink(isink,idim)-xsink(anchor,idim)
+           box_size=periodic_box_size(idim)
+           if(delta_pos(idim) >  0.5d0*box_size) &
+                & delta_pos(idim)=delta_pos(idim)-box_size
+           if(delta_pos(idim) < -0.5d0*box_size) &
+                & delta_pos(idim)=delta_pos(idim)+box_size
+           com_pos(idim)=com_pos(idim)+msink(isink)*delta_pos(idim)
+           com_vel(idim)=com_vel(idim)+msink(isink)*vsink(isink,idim)
+        enddo
+     enddo
+     do idim=1,ndim
+        box_size=periodic_box_size(idim)
+        com_pos(idim)=xsink(anchor,idim)+com_pos(idim)/total_mass
+        if(com_pos(idim) >= box_size) com_pos(idim)=com_pos(idim)-box_size
+        if(com_pos(idim) <  0d0) com_pos(idim)=com_pos(idim)+box_size
+        com_vel(idim)=com_vel(idim)/total_mass
+     enddo
+     if(any(.not.ieee_is_finite(com_pos(1:3))) .or. &
+          & any(.not.ieee_is_finite(com_vel(1:3)))) then
+        call ledger_group_fatal(igrp,0,'non-finite group center-of-mass diagnostics')
+     endif
+
+     ! Preflight every pair diagnostic before opening the append-only ledger.
+     ! json_real intentionally serializes non-finite values as null, but such a
+     ! record must never be allowed to reach the post-compaction commit marker.
+     max_separation=0d0
+     do isink=1,nsink-1
+        if(gsink(isink) /= igrp) cycle
+        do jsink_member=isink+1,nsink
+           if(gsink(jsink_member) /= igrp) cycle
+           delta_pos=0d0
+           delta_vel=0d0
+           do idim=1,ndim
+              delta_pos(idim)=xsink(jsink_member,idim)-xsink(isink,idim)
+              box_size=periodic_box_size(idim)
+              if(delta_pos(idim) >  0.5d0*box_size) &
+                   & delta_pos(idim)=delta_pos(idim)-box_size
+              if(delta_pos(idim) < -0.5d0*box_size) &
+                   & delta_pos(idim)=delta_pos(idim)+box_size
+              delta_vel(idim)=vsink(jsink_member,idim)-vsink(isink,idim)
+           enddo
+           separation2=sum(delta_pos(1:ndim)**2)
+           separation=sqrt(separation2)
+           vrel2=sum(delta_vel(1:ndim)**2)
+           vrel=sqrt(vrel2)
+           reduced_mass=msink(isink)*msink(jsink_member)/ &
+                & (msink(isink)+msink(jsink_member))
+           relative_kinetic=0.5d0*reduced_mass*vrel2
+           specific_h(1)=delta_pos(2)*delta_vel(3)-delta_pos(3)*delta_vel(2)
+           specific_h(2)=delta_pos(3)*delta_vel(1)-delta_pos(1)*delta_vel(3)
+           specific_h(3)=delta_pos(1)*delta_vel(2)-delta_pos(2)*delta_vel(1)
+           relative_L=reduced_mass*specific_h
+           if(.not.ieee_is_finite(separation2) .or. &
+                & .not.ieee_is_finite(separation) .or. &
+                & .not.ieee_is_finite(vrel2) .or. &
+                & .not.ieee_is_finite(vrel) .or. &
+                & .not.ieee_is_finite(reduced_mass) .or. &
+                & .not.ieee_is_finite(relative_kinetic) .or. &
+                & any(.not.ieee_is_finite(specific_h)) .or. &
+                & any(.not.ieee_is_finite(relative_L))) then
+              call ledger_group_fatal(igrp,isink,'non-finite pair diagnostics')
+           endif
+           max_separation=max(max_separation,separation)
+           if(separation > tiny(0d0)) then
+              potential_1overr=-factG*msink(isink)*msink(jsink_member)/separation
+              specific_energy=0.5d0*vrel2-factG* &
+                   & (msink(isink)+msink(jsink_member))/separation
+              legacy_binding_proxy=factG*msink(isink)*msink(jsink_member)/separation2
+              if(.not.ieee_is_finite(potential_1overr) .or. &
+                   & .not.ieee_is_finite(specific_energy) .or. &
+                   & .not.ieee_is_finite(legacy_binding_proxy)) then
+                 call ledger_group_fatal(igrp,isink,'non-finite pair binding diagnostics')
+              endif
+           endif
+        enddo
+     enddo
   enddo
 
   iomsg=''

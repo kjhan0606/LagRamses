@@ -17,6 +17,17 @@ from typing import Any, Iterable
 SCHEMA_VERSION = 2
 
 
+def _reject_duplicate_json_object_keys(
+    pairs: list[tuple[str, Any]],
+) -> dict[str, Any]:
+    record: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in record:
+            raise ValueError(f"duplicate JSON object key {key!r}")
+        record[key] = value
+    return record
+
+
 @dataclass
 class EventBlock:
     begin: dict[str, Any]
@@ -519,10 +530,14 @@ def validate_ledger(
             if not raw_line.strip():
                 continue
             try:
-                record = json.loads(raw_line)
-            except json.JSONDecodeError as exc:
+                record = json.loads(
+                    raw_line,
+                    object_pairs_hook=_reject_duplicate_json_object_keys,
+                )
+            except ValueError as exc:
                 report.invalid_json_lines += 1
-                report.errors.append(f"line {line_number}: invalid JSON: {exc.msg}")
+                detail = exc.msg if isinstance(exc, json.JSONDecodeError) else str(exc)
+                report.errors.append(f"line {line_number}: invalid JSON: {detail}")
                 if current is not None:
                     report.incomplete_events += 1
                     current = None
