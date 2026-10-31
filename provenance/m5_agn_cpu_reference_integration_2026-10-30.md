@@ -568,3 +568,36 @@ the retained cleanup record. The comparison failure is the next investigation
 target; do not infer whether it comes from numerical trajectory sensitivity,
 executable/runtime differences, or a physical coupling discrepancy without
 isolating it.
+
+## CHIMES backend-path isolation run — 2026-10-31
+
+CPU job `1248390` completed on grammar `normal` with one MPI rank and eight
+OpenMP threads. It reached coarse step 16, emitted
+`M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS`, and exited successfully after
+6:43 Slurm elapsed (391.060 s RAMSES time). The final HDF5 is retained for the
+paired hybrid evaluation at
+`.m5-effective-dust-chimes-1248390/output_00001/data_00001.h5` (101,372,728
+bytes; SHA256
+`9812a0c012c43b5839ff963d2559939146f0ef32dbe34044d59dffefa19d99db`). Its
+cooling timer is 363.547 s (93.0%); feedback is 26.671 s (6.8%).
+
+Across 16 photo rows covering 64 cells each, the CPU CHIMES path recorded
+92,020 CVODE steps, 116,525 RHS evaluations and 87,706 linear iterations.
+The `chimes_photo_s` field sums per-cell elapsed time (1,024.409 s here), so
+it overlaps across OpenMP workers and is not wall time. The corresponding
+dark-solve sum is 13.556 cell-seconds. These are the CPU baseline counters for
+the pending 16-step hybrid comparison.
+
+The paired A100 job `443660` requests one typed A100, eight CPUs and 64 GiB.
+At 10:50 KST it remained pending with `QOSMaxGRESPerUser`. The syntax
+`normal` QoS reports `MaxTRESPU=gres/gpu=8`; the user's running jobs then held
+four A10, one A100 PCIe and three H200 cards. No existing job was altered.
+
+The CPU runner enforces CHIMES `cohort` scheduling, while the hybrid runner
+requires `level_queue`; CPU `level_queue` is rejected by the runner. Thus this
+pair compares the supported CPU and hybrid runtime paths, including their
+required schedulers, rather than isolating only GPU-kernel execution. The
+CPU and A10 build commits differ only in provenance files under the relevant
+runtime comparison; their `patch/lagRamses` and `simulation/snrt` source trees
+are identical, and the staged CHIMES object files have matching SHA256 values.
+The CPU final dump remains until the A100 run and pair evaluation finish.
