@@ -195,9 +195,10 @@ The earlier M5+dust+CHIMES restart result from job `440742` was numerically rest
 consistent, but its resumed leg recorded zero CHIMES GPU calls. The follow-up
 sentinel rule and stricter per-rank runner check are awaiting a repeat run, so that
 earlier result does not qualify hybrid restart execution. The cooperative
-tile/level queue is currently called by the radiation-off dark-material
-runtime; M5's `material_tile` instead uses its OpenMP dynamic cell loop and the
-per-RHS cohort dispatcher.
+level queue is used by M5's `material_tile` in hybrid mode and by the
+radiation-off dark-material runtime. The CPU-only M5 path retains its OpenMP
+dynamic cell loop. M5's spectral photo operator remains on the CPU; the hybrid
+device path accelerates only eligible dark chemistry RHS and cooling work.
 On the paired manual `lageunha` Ada smoke (same binary/inputs, MPI2/OMP4),
 CHIMES CPU vs hybrid elapsed times differed by less than 1% in both continuous
 and resumed legs; this shows no end-to-end speedup and does not qualify
