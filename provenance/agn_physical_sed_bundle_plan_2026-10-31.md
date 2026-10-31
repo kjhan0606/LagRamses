@@ -147,6 +147,67 @@ declared domains. If only Q/E group moments are available, the missing
 within-group shape must remain an explicit limitation; it cannot be recovered
 uniquely from those two moments.
 
+### Actual active PARSEC-model kernel sensitivity (2026-10-31)
+
+The active source profile was checked directly in both continuous and resumed
+logs for job 444355: `parsec_mixed_lowmass_truncated_v1`, with the shared
+spectral contract still admitted as `reference_control`. The matching source
+package declares `full_ssp=false`, `same_evolution=false`, mass 2--600 Msun,
+and 11 metallicities. This is a comparison profile, not a complete SSP or a
+production-approved stellar SED.
+
+An offline sweep covered all 979 active source nodes and verified the
+runtime package's 283,185-knot extent, then evaluated the pinned PARSEC
+cumulative-Q tables at their native uncompressed rows. It followed
+the source builder's five-band Q-constrained Planck prior for measured rows
+and separately used its actual-track L/Teff Planck tail. Ground-state H I,
+He I, and He II interaction moments use the same Verner et al. (1996) fits
+as `snrt_core.primordial`. The photon support cut is
+`Q_group/Q_total(0.01 eV--10 keV) > 1e-8`. The reported distributions are
+unweighted instantaneous knots, not IMF- or time-weighted population means.
+It ran as CPU job 1251422 on Grammar `normal` (2 CPUs, 16 GiB requested,
+503,444 KiB peak RSS, 4m56s elapsed).
+The compact result and all 24 PARSEC input hashes are recorded in
+`simulation/snrt/data/parsec_shared_kernel_sensitivity_20261031.json`;
+its SHA256 is
+`5256c3c5caf298805fb8c4f4b12a620b375dad3fd670df4d59d6a5444460355b`.
+
+| Species | Group (eV) | PARSEC Q-constrained sigma range (cm^2) | Span | Range / current pilot | Best possible max relative error* |
+|---|---:|---:|---:|---:|---:|
+| H I | 13.6--24.59 | `2.781e-18`--`5.361e-18` | 1.93x | 0.78--1.50 | 31.7% |
+| H I | 24.59--54.42 | `4.613e-19`--`1.238e-18` | 2.68x | 0.76--2.04 | 45.7% |
+| H I | 54.42--500 | `5.534e-20`--`1.074e-19` | 1.94x | 1.22--2.37 | 32.0% |
+| He I | 24.59--54.42 | `3.885e-18`--`7.432e-18` | 1.91x | 0.83--1.59 | 31.3% |
+| He I | 54.42--500 | `8.864e-19`--`1.529e-18` | 1.73x | 1.22--2.10 | 26.6% |
+| He II | 54.42--500 | `7.571e-19`--`1.403e-18` | 1.85x | 1.22--2.26 | 29.9% |
+
+*For a single fixed value chosen to minimize the maximum relative error over
+the measured minimum-to-maximum interval, the lower bound is
+`(sigma_max-sigma_min)/(sigma_max+sigma_min)`. This is a range bound on the
+sampled model states, not a source-population error estimate.
+
+In the track-Planck-tail sample, spans for H I groups 13.6--24.59,
+24.59--54.42, 54.42--500, and 500--2000 eV are 2.05x, 2.65x, 2.76x,
+and 1.03x; for He I groups 24.59--54.42, 54.42--500, and 500--2000 eV they
+are 1.92x, 2.35x, and 1.03x; for He II groups 54.42--500 and 500--2000 eV
+they are 2.59x and 1.03x. The 500--2000 eV group has support above the cut
+only in the track-tail sample; the 2--10 keV group has no stellar support
+above the cut. Across representative masses 2, 8, 12, 13, 14,
+20, 50, 80, 120, 200, 300, and 600 Msun at every metallicity, order-64 and
+order-128 cross-section integrations differed by at most `5.9e-13` in either
+phase. Thus quadrature error is negligible compared with the within-group
+shape range for this assumed source reconstruction.
+
+This does not recover a unique atmosphere spectrum from runtime Q/E moments:
+the within-band Planck shape is an explicit source-builder prior, while the
+runtime stores only photon and energy moments. The table is conditional on
+that prior, and its ratios compare against a pilot reference kernel that is
+itself marked `reference_control_not_science_approved`. No accepted opacity
+error tolerance is yet declared, and no candidate AGN spectrum has yet been
+integrated. The numbers therefore expose the shared-kernel precision choice
+for the upcoming audit; they do not approve a new kernel, source family, or
+runtime change.
+
 ## Design question that must be settled in the plan audit
 
 Choose and justify one closure for the shared multigroup state before coding:
@@ -185,13 +246,15 @@ the first bundle.
 
 **Driver recommendation:** evaluate option 1 first because it preserves the
 current transported state and avoids doubling the M5, AMR, and checkpoint
-payload. Keep it only if one documented source-independent interaction kernel
-represents the selected stellar and AGN spectra within an accuracy tolerance
-the audit can justify. If the nine broad groups cannot meet that condition,
-carry source-resolved channels as required work rather than presenting an
-unbounded single-kernel approximation as production-ready. Option 2 is a valid
-effective-model choice only with an explicit mixture and domain; it is not a
-shortcut to calling an AGN spectrum physically coupled.
+payload. The active PARSEC reconstruction already spans 1.7--2.7x in the
+principal photoionizing groups, corresponding to a 27--46% best-case maximum
+relative error for any one fixed value over those sampled states. The audit
+must decide whether that conditional stellar-only range can meet the declared
+effective-model accuracy target once the selected AGN spectrum is included.
+If not, carry source-resolved channels as required work rather than
+presenting an unbounded single-kernel approximation as production-ready.
+Option 2 is a valid effective-model choice only with an explicit mixture and
+domain; it is not a shortcut to calling an AGN spectrum physically coupled.
 
 ## Literature comparison and proposed direction
 
