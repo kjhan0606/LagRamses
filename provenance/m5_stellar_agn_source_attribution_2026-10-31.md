@@ -81,6 +81,30 @@ strict tolerance (gravity 4, hydro 96, particles 3, sinks 10, SNRT 2); clock
 checks had no tolerance violations. Consequently the timing remains
 conditional until the divergence is understood.
 
+The retained launch records and effective namelists narrow the interpretation
+of that comparison. Jobs `443809` and `443816` have identical effective
+namelists except `n_cuda_streams=1` versus `3`, and both request three CHIMES
+GPU brokers. The stream pool is global: CHIMES, M5 transport, and other GPU
+modules obtain leases from the same configured pool. The result is therefore
+a whole-run stream-count comparison, not a CHIMES-only stream test. The
+successful `gpu_calls` counter increments once per completed GPU RHS request;
+`gpu_batches` separately counts CUDA batches. The recorded counts were
+156,507 requests / 10,083 batches for `443809` and 440,151 / 29,245 for
+`443816`, with zero device errors in both. The higher GPU request count does
+not by itself demonstrate improved accuracy or accepted speedup; changing
+the global lease pool changes which asynchronous CPU/GPU work can overlap.
+
+The other comparison, `443660` versus `443809`, held the effective namelist at
+its one-stream value but changed the broker count from the runner default of
+one to three. It is a broker-policy comparison, not a second stream-count
+comparison. Its GPU request counts were 296,538 and 156,507, respectively.
+Both comparisons fail the same strict final-state tolerance. The retained
+comparison JSON does not preserve reference values at the largest normalized
+errors, and the raw HDF5 dumps were removed after evaluation; the physical
+magnitude and source of the trajectory differences therefore remain
+unresolved. The runner defaults to one broker and one stream; the pending
+current-source A40 chain is intended to exercise that default path.
+
 After both pair evaluations completed, the three `output_00001` directories
 for jobs `443660`, `443809`, and `443816` were removed. Their 42 exact files,
 including the three 101,372,728-byte HDF5 dumps and SHA256 hashes, are recorded
