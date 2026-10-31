@@ -156,8 +156,10 @@ contains
     integer :: status
     call require_ok(merge(0,1,nvalues>=0.and.nvalues<=size(data)))
     call require_ok(merge(0,1,offset>=0_i8b))
-    call require_ok(merge(0,1,offset<=total))
-    call require_ok(merge(0,1,int(nvalues,i8b)<=total-offset))
+    if(nvalues>0)then
+       call require_ok(merge(0,1,offset<=total))
+       call require_ok(merge(0,1,int(nvalues,i8b)<=total-offset))
+    end if
     mdims(1)=size(data)
     call h5screate_simple_f(1,mdims,mspace,status)
     call require_ok(abs(status))
@@ -191,8 +193,10 @@ contains
     integer :: status
     call require_ok(merge(0,1,nvalues>=0.and.nvalues<=size(data)))
     call require_ok(merge(0,1,offset>=0_i8b))
-    call require_ok(merge(0,1,offset<=total))
-    call require_ok(merge(0,1,int(nvalues,i8b)<=total-offset))
+    if(nvalues>0)then
+       call require_ok(merge(0,1,offset<=total))
+       call require_ok(merge(0,1,int(nvalues,i8b)<=total-offset))
+    end if
     mdims(1)=size(data)
     call h5screate_simple_f(1,mdims,mspace,status)
     call require_ok(abs(status))
