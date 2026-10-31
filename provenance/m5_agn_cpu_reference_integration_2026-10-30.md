@@ -638,3 +638,28 @@ their GPU dispatch from this short pair. The required CPU `cohort` versus
 hybrid `level_queue` scheduler difference remains, so the result tests the
 supported operational CHIMES paths rather than only the GPU kernel. It cannot
 explain the full 128-step mixed-dispatch divergence by itself.
+
+### AGN photon versus jet branch in the two current-source profiles — 2026-10-31
+
+The effective-population run `1248390` has `agn=.true.` and `sink_AGN=.true.`
+in its effective namelist, and the runner loads the stellar SED. Its BH sidecar
+at coarse step 2 reports Eddington ratio `8.410e-9` and `feedback_mode=JET`,
+below `X_floor=1e-2`. In `agn_partition_release`, that low-chi branch assigns
+the released accretion energy to the jet share and zero to the electromagnetic
+share. `agn_pending_erg` carries the electromagnetic `radiated_new` receipt,
+which the M5 source update converts into AGN photons only when it is positive.
+Thus this effective run exercises AGN accretion/mechanical feedback and stellar
+SED wiring, but it does not demonstrate an AGN photon contribution. Its printed
+`AGN_state=not_requested` is emitted by the final-dump runner branch without a
+runtime AGN-state check; interpret it as no AGN-photon assertion in that result,
+not as proof that AGN accretion is disabled. The aggregate M5 source ledger
+does not separate stellar and AGN photon contributions.
+
+The AGN-only job `1244059` supplies the complementary radiative case. At coarse
+step 2 its sidecar reports Eddington ratio `83.918`, positive accepted BH mass,
+and `feedback_mode=THERMAL`; the stellar SED is disabled by that profile. Its
+M5 ledger records positive source `8.532e-3` and positive absorption. This
+supports the high-chi AGN photon path under reference controls, but it does not
+prove simultaneous stellar photons and high-chi AGN photons in one coupled
+run. Such a combined-source case remains unqualified for release if that is
+the selected production profile.
