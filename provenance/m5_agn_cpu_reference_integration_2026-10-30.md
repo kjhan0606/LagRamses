@@ -586,12 +586,29 @@ Across 16 photo rows covering 64 cells each, the CPU CHIMES path recorded
 The `chimes_photo_s` field sums per-cell elapsed time (1,024.409 s here), so
 it overlaps across OpenMP workers and is not wall time. The corresponding
 dark-solve sum is 13.556 cell-seconds. These are the CPU baseline counters for
-the pending 16-step hybrid comparison.
+the completed 16-step hybrid comparison below.
 
-The paired A100 job `443660` requests one typed A100, eight CPUs and 64 GiB.
-At 10:50 KST it remained pending with `QOSMaxGRESPerUser`. The syntax
-`normal` QoS reports `MaxTRESPU=gres/gpu=8`; the user's running jobs then held
-four A10, one A100 PCIe and three H200 cards. No existing job was altered.
+The paired A100 job `443660` completed on `syn101` with one A100-SXM4-80GB,
+eight CPUs and 64 GiB requested. It ran 16 coarse steps with hybrid CHIMES,
+while M5 transport and dust/material work stayed on OpenMP; elapsed time was
+794.590 s in RAMSES (13:44 Slurm). The runtime receipt records 296,538 GPU
+calls, zero CPU fallbacks, 9,771 batches, zero device errors, two warm-table
+uploads, peak two in-flight batches and one stream.
+
+The retained `pair-comparison-summary.json` reports
+`M5_COUPLED_FINAL_PAIR_FAIL_NUMERIC_TOLERANCE` at the unchanged
+`rtol=1e-12`, `atol=1e-25`: 111 of 449 datasets are bitwise equal, all six
+clock fields are bitwise equal, and there are no clock-tolerance violations.
+The failing datasets span gravity (4), hydro (97), particles (3), sinks (10)
+and SNRT (2). The largest listed difference is `particles/v_3`, absolute
+`6.84e-19`, with a tolerance ratio of `1.59e6`. This proves the strict
+full-state CPU/hybrid comparison fails without a timestep-clock divergence;
+it does not identify the cause or establish that the physical trajectory is
+unacceptable. The A100 raw HDF5 dump was already absent during this audit, so
+the retained summary cannot be independently recomputed element by element.
+The CPU dump was kept until this paired evaluation completed and is removed
+under the cleanup record in
+`.m5-effective-dust-chimes-1248390/cleanup_manifest.txt`.
 
 The CPU runner enforces CHIMES `cohort` scheduling, while the hybrid runner
 requires `level_queue`; CPU `level_queue` is rejected by the runner. Thus this
@@ -600,7 +617,10 @@ required schedulers, rather than isolating only GPU-kernel execution. The
 CPU and A10 build commits differ only in provenance files under the relevant
 runtime comparison; their `patch/lagRamses` and `simulation/snrt` source trees
 are identical, and the staged CHIMES object files have matching SHA256 values.
-The CPU final dump remains until the A100 run and pair evaluation finish.
+The A100 run and pair evaluation are complete. The CPU raw HDF5 has been
+removed after evaluation; effective input, logs, hashes, and pair summary are
+retained. The A100 HDF5 was already absent at the time of this audit, with no
+per-file cleanup record available in that run directory.
 
 ### Retained-trace analysis of the 128-step CPU/A10 mismatch — 2026-10-31
 
@@ -632,7 +652,7 @@ The 128-step A10 run enabled several accelerator paths together: hybrid
 CHIMES, GPU M5 closure and GPU dust/material work; face transport stayed on
 CPU. The CPU and hybrid CHIMES schedulers also differ (`cohort` versus
 `level_queue`). Therefore the retained evidence cannot attribute the strict
-pair failure to a single module. The pending 16-step A100 run keeps M5
+pair failure to a single module. The completed 16-step A100 run kept M5
 transport and dust material on CPU while selecting hybrid CHIMES, removing
 their GPU dispatch from this short pair. The required CPU `cohort` versus
 hybrid `level_queue` scheduler difference remains, so the result tests the
@@ -678,8 +698,9 @@ source-active commit the dispatch receipt records 3,239,936 CPU closure cells
 and 51,019,776 CPU face operations, with zero GPU operations because this was
 a CPU-only run. No controlled speedup claim follows from comparison with the
 older runs on different nodes/builds. The thermal-source receipt gap is now
-closed on CPU; A100 hybrid job `443906` is queued after CUDA build `443842` to
-check the operational GPU CHIMES path while holding M5 and dust on OpenMP.
+closed on CPU. A100 hybrid job `443906` later completed the operational GPU
+CHIMES path while holding M5 and dust on OpenMP; its paired CPU runtime is
+recorded below.
 
 ### AGN photon versus jet branch in the two current-source profiles — 2026-10-31
 
@@ -705,3 +726,49 @@ supports the high-chi AGN photon path under reference controls, but it does not
 prove simultaneous stellar photons and high-chi AGN photons in one coupled
 run. Such a combined-source case remains unqualified for release if that is
 the selected production profile.
+
+## Completed A100 CHIMES hybrid integrations — 2026-11-01
+
+### Effective-population 16-step CPU/A100 pair
+
+The CPU job `1248390` and A100 job `443660` used byte-identical effective
+namelists (SHA-256
+`29830de0743aeca90f142af2b39d54c92d428bcb6cc26aacd3a0c42c094510e2`). Their
+relevant `patch/lagRamses` and `simulation/snrt` source trees are identical at
+the two recorded build commits. The runtime paths are operationally distinct:
+CPU CHIMES uses `cohort` scheduling, while hybrid CHIMES uses `level_queue`;
+both keep M5 and dust/material work on OpenMP. The 16-step CPU runtime was
+391.060 s and the A100 hybrid runtime was 794.590 s. This small reference
+profile therefore did not demonstrate a hybrid speedup, and its full-state
+pair failed the strict tolerance described above. Do not relax the comparator
+or claim CPU/A100 numerical equivalence from the matching clock fields.
+
+The A100 output directory no longer contains `output_00001/data_00001.h5`;
+the pair summary remains. The CPU counterpart was removed after the pair
+evaluation, with its exact path, size and SHA-256 recorded in the run-local
+cleanup manifest. Both runs remain reference-control evidence, not physical
+production qualification.
+
+### AGN-only 3-step CPU/A100 operational-path comparison
+
+CPU job `1249188` and A100 job `443906` used the same effective namelist
+(SHA-256 `b63d24b1b9274f03151377b0e3145f2fbc7310e5ac0f05a0b3ba8554dfc1a349`)
+and sink IC (SHA-256
+`971d2f0f2b0c4731fd2b9801ebc5c363dd9cd51268660eb3cf801e7a34d88a54`). Both
+ran one MPI rank, eight OpenMP threads, M5 order 5, live two-size dust, and a
+thermal AGN source; the stellar SED was disabled. CPU CHIMES completed in
+3,428.784 s of RAMSES time (57:18 Slurm). The A100 hybrid path completed in
+4,098.174 s (1:08:31 Slurm), 19.5% longer. Its log confirms actual device
+work: 781,416 GPU calls, 26,525 CPU fallback calls, 17,366 batches, zero
+device errors, two table uploads, peak two in-flight batches and one stream.
+M5 transport and dust/material work remained on OpenMP. The CPU path used
+`cohort` scheduling and the hybrid path `level_queue`; this is an operational
+backend comparison, not an isolated kernel benchmark or a controlled
+cross-node speedup measurement.
+
+Both runs accepted one AGN packet with `1.9050267260808e62` photons and
+`7.5914002025812e51 erg`. On the source-active M5 call, the radiation-energy
+residual was `3.24e-16` for CPU and `4.15e-17` for A100; both runs completed
+without device errors. The A100 hybrid path is therefore wired and executes,
+but these matched controls do not show a runtime benefit and are not
+production physical approval.
