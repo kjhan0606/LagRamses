@@ -63,7 +63,8 @@ SNRT_CHIMES_CVODE_BACKEND=invalid timeout 30 ./test /gpfs/kjhan/LRD_JWST/.dust-e
 test "$config_rc" -eq 5
 unset SNRT_CHIMES_CVODE_BACKEND
 timeout 240 ./test /gpfs/kjhan/LRD_JWST/.dust-extension.AOz7mU/chimes-data/chimes_main_data.hdf5
-# Exercise the production hybrid RHS with CPU and GPU arms on the same
-# level_queue; this separates backend parity from the integrated runner's
-# cohort-versus-level_queue scheduling difference.
+# Isolate the cell RHS backend math and measure the direct CPU/GPU arms.
 timeout 240 ./test /gpfs/kjhan/LRD_JWST/.dust-extension.AOz7mU/chimes-data/chimes_main_data.hdf5 rhs
+# Exercise the production level_queue CPU/GPU brokers, busy-pool fallback, and
+# compact/full result parity. The rhs mode above does not enter this scheduler.
+timeout 240 ./test /gpfs/kjhan/LRD_JWST/.dust-extension.AOz7mU/chimes-data/chimes_main_data.hdf5 tile
