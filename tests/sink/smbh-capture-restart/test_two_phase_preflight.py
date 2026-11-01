@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import hashlib
 import importlib.util
+import os
 import shutil
 import subprocess
 import tempfile
@@ -265,6 +266,64 @@ Filesystem kbytes quota limit grace files quota limit grace
         PREPARE_MODULE.validate_info_ncpu(info, 2)
         with self.assertRaisesRegex(SystemExit, "expected ncpu=1"):
             PREPARE_MODULE.validate_info_ncpu(info, 1)
+
+    def test_slurm_mpi2_launcher_uses_rank_sealed_execution(self) -> None:
+        launcher = HERE / "run_smoke_mpi2.slurm"
+        launcher_text = launcher.read_text(encoding="utf-8")
+        runner_text = (HERE / "run_smoke.sh").read_text(encoding="utf-8")
+        self.assertIn("#SBATCH --ntasks=2", launcher_text)
+        self.assertIn("--mpi-ranks 2", launcher_text)
+        self.assertIn("--mpi=pmi2 --nodes=1 --ntasks=2", runner_text)
+        self.assertIn('--expected-mpi-ranks "$expected_mpi_ranks"', runner_text)
+
+        for script in (HERE / "run_smoke.sh", launcher):
+            result = subprocess.run(
+                ["bash", "-n", str(script)], text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+
+        accepted = self.command(
+            "execution-context", "--execution-mode", "slurm",
+            "--hostname", "syntax", "--slurm-job-id", "12345",
+        )
+        self.assertEqual(accepted.returncode, 0, accepted.stdout)
+        rejected = self.command(
+            "execution-context", "--execution-mode", "slurm",
+            "--hostname", "syntax",
+        )
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("requires SLURM_JOB_ID", rejected.stdout)
+
+    def test_slurm_execute_accepts_mpi2_before_failing_closed_on_manifest(
+        self,
+    ) -> None:
+        fake_bin = Path(self.temp.name) / "fake-bin"
+        fake_bin.mkdir()
+        fake_srun = fake_bin / "srun"
+        fake_srun.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_srun.chmod(0o755)
+        environment = dict(os.environ)
+        environment["PATH"] = (
+            f"{fake_bin}{os.pathsep}{environment.get('PATH', '')}"
+        )
+        environment["SLURM_JOB_ID"] = "test-job"
+        unprepared_run = Path(self.temp.name) / "not-prepared"
+        result = subprocess.run(
+            [
+                "bash", str(HERE / "run_smoke.sh"), "--execute",
+                "--run-dir", str(unprepared_run), "--binary", "/bin/true",
+                "--manifest-sha256", "0" * 64, "--mpi-ranks", "2",
+            ],
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("execution_context=PASS mode=slurm", result.stdout)
+        self.assertNotIn("choose exactly one execution mode", result.stdout)
+        self.assertNotIn("usage:", result.stdout.lower())
 
 
 if __name__ == "__main__":

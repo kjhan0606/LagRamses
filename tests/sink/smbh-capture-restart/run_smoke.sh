@@ -5,7 +5,7 @@ here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 usage() {
   echo "prepare: $0 --prepare --run-dir NEW_DIR --binary RAMSES --source-tree CLEAN_TREE --expected-source-commit COMMIT --yield-table-source FILE --bytes-per-output BYTES [--reserve-bytes BYTES] [--mpi-ranks 1|2]" >&2
-  echo "execute: $0 --execute --run-dir PREPARED_DIR --binary RAMSES --manifest-sha256 SHA256" >&2
+  echo "execute: $0 --execute --run-dir PREPARED_DIR --binary RAMSES --manifest-sha256 SHA256 [--mpi-ranks 1|2]" >&2
   echo "manual:  $0 --manual-lageunha --run-dir PREPARED_DIR --binary RAMSES --manifest-sha256 SHA256" >&2
   echo "mpi2:    $0 --manual-lageunha-mpi2 --run-dir PREPARED_DIR --binary RAMSES --manifest-sha256 SHA256" >&2
   exit 2
@@ -64,7 +64,9 @@ if [[ $prepare == true ]]; then
     --mpi-ranks "$mpi_ranks"
   exit 0
 fi
-[[ $mpi_ranks_specified == false ]] || usage
+if [[ $mpi_ranks_specified == true ]]; then
+  [[ $execute == true && ( $mpi_ranks == 1 || $mpi_ranks == 2 ) ]] || usage
+fi
 host=$(hostname -s)
 if [[ $execute == true ]]; then
   python3 "$here/prepare_and_validate.py" execution-context --execution-mode slurm \
@@ -100,6 +102,9 @@ fi
 run_dir=$(realpath -- "$run_dir")
 expected_mpi_ranks=1
 [[ $execution_mode == manual-lageunha-mpi2 ]] && expected_mpi_ranks=2
+if [[ $execution_mode == slurm && $mpi_ranks_specified == true ]]; then
+  expected_mpi_ranks=$mpi_ranks
+fi
 python3 "$here/prepare_and_validate.py" launch-check "$run_dir" --binary "$binary" \
   --manifest-sha256 "$manifest_sha256" --expected-mpi-ranks "$expected_mpi_ranks"
 
@@ -136,8 +141,13 @@ source_commit=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[
 (
   cd "$run_dir"
   if [[ $execution_mode == slurm ]]; then
-    srun --kill-on-bad-exit=1 --nodes=1 --ntasks=1 --cpus-per-task=1 \
-      "$binary" stage1.nml >stage1.log 2>&1
+    if [[ $expected_mpi_ranks == 2 ]]; then
+      srun --kill-on-bad-exit=1 --mpi=pmi2 --nodes=1 --ntasks=2 --cpus-per-task=1 \
+        "$binary" stage1.nml >stage1.log 2>&1
+    else
+      srun --kill-on-bad-exit=1 --nodes=1 --ntasks=1 --cpus-per-task=1 \
+        "$binary" stage1.nml >stage1.log 2>&1
+    fi
   elif [[ $execution_mode == manual-lageunha-mpi2 ]]; then
     OMP_NUM_THREADS=1 mpirun -n 2 "$binary" stage1.nml >stage1.log 2>&1
   else
@@ -146,8 +156,13 @@ source_commit=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[
   [[ -f output_00001/COMPLETE ]]
   [[ -f output_00001/SMBH_CAPTURE_LINEAGE ]]
   if [[ $execution_mode == slurm ]]; then
-    srun --kill-on-bad-exit=1 --nodes=1 --ntasks=1 --cpus-per-task=1 \
-      "$binary" stage2.nml >stage2.log 2>&1
+    if [[ $expected_mpi_ranks == 2 ]]; then
+      srun --kill-on-bad-exit=1 --mpi=pmi2 --nodes=1 --ntasks=2 --cpus-per-task=1 \
+        "$binary" stage2.nml >stage2.log 2>&1
+    else
+      srun --kill-on-bad-exit=1 --nodes=1 --ntasks=1 --cpus-per-task=1 \
+        "$binary" stage2.nml >stage2.log 2>&1
+    fi
   elif [[ $execution_mode == manual-lageunha-mpi2 ]]; then
     OMP_NUM_THREADS=1 mpirun -n 2 "$binary" stage2.nml >stage2.log 2>&1
   else
