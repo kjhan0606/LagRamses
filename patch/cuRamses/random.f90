@@ -121,6 +121,7 @@ contains
     implicit none
     integer :: N
     integer :: StartVal
+    integer(kind=8) :: SeedMagnitude
     integer,dimension( ncpu, IRandNumSize ) :: SeedArray
 
     integer,dimension( IRandNumSize ) :: atothek
@@ -137,10 +138,17 @@ contains
        SeedArray( 1, 3 ) = DefaultSeed( 3 )
        SeedArray( 1, 4 ) = DefaultSeed( 4 )
     else
-       SeedArray( 1, 1 ) = abs( StartVal )
-       SeedArray( 1, 2 ) = IZero
-       SeedArray( 1, 3 ) = IZero
-       SeedArray( 1, 4 ) = IZero
+       ! RANF stores the 48-bit state in four base-4096 limbs.  STARTVAL
+       ! is a scalar integer seed, so split its magnitude into valid limbs
+       ! before integer products in RANFMODMULT can overflow.
+       SeedMagnitude = abs(int(StartVal,kind=8))
+       SeedArray( 1, 1 ) = int(modulo(SeedMagnitude,4096_8))
+       SeedMagnitude = SeedMagnitude / 4096_8
+       SeedArray( 1, 2 ) = int(modulo(SeedMagnitude,4096_8))
+       SeedMagnitude = SeedMagnitude / 4096_8
+       SeedArray( 1, 3 ) = int(modulo(SeedMagnitude,4096_8))
+       SeedMagnitude = SeedMagnitude / 4096_8
+       SeedArray( 1, 4 ) = int(modulo(SeedMagnitude,4096_8))
     endif
     
     if( N .eq. 1 ) then

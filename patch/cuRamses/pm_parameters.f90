@@ -12,6 +12,7 @@ module pm_parameters
 #endif
   integer::nsink=0                  ! Actual number of sinks
   integer::iseed=0                  ! Seed for stochastic star formation
+  integer::sidm_rng_seed=-1           ! Optional SIDM collision seed; -1 uses iseed
   real(dp)::mstar_tot=0             ! Total star mass
   real(dp)::mstar_lost=0            ! Missing star mass
 

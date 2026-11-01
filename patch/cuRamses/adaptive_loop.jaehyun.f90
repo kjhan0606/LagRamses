@@ -4,6 +4,8 @@ subroutine adaptive_loop
   use pm_commons
   use poisson_commons
   use cooling_module
+  use sidm_kinetic_transport_diag, only: sidm_kinetic_diag_initial, &
+       sidm_kinetic_diag_step_complete,sidm_kinetic_diag_export_input_state
   use dust_mass_physics, only: dust_chimes_enabled
   use ksection, only: ksection_trim_done
   use morton_hash, only: morton_hash_epoch
@@ -83,15 +85,17 @@ subroutine adaptive_loop
   if(cosmo)then
      ! Compute cooling table at current aexp
   endif
-#else  
+#else
   ! CHIMES owns the thermal rates in this admitted mode. Retain init_time's
   ! initial gas temperature, but do not build the unused RAMSES CIE table.
   if(cooling.and..not.neq_chem.and..not.dust_chimes_enabled()) &
        call set_table(dble(aexp))    ! Initialize cooling look up table
 #endif
   if(pic)call init_part              ! Initialize particle variables
+  if(pic)call sidm_kinetic_diag_export_input_state()
   if(pic)call init_tree              ! Initialize particle tree
   if(nrestart==0)call init_refine_2  ! Build initial AMR grid again
+  call sidm_kinetic_diag_initial()
 #ifdef SNRT_CHIMES
   call initialize_chimes_live_state
 #endif
@@ -226,7 +230,7 @@ subroutine adaptive_loop
               call make_virtual_fine_dp_bulk(f,ndim,ilevel)
            end if
         end do
-        
+
         ! Build refinement map
         do ilevel=levelmin-1,1,-1
            call flag_fine(ilevel,2)
@@ -248,6 +252,7 @@ subroutine adaptive_loop
 
      ! New coarse time-step
      nstep_coarse=nstep_coarse+1
+     call sidm_kinetic_diag_step_complete(nstep_coarse,t)
 
      call check_jobcontrol
 

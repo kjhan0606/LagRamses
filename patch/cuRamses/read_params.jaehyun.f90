@@ -70,6 +70,7 @@ subroutine read_params
   namelist/ede_params/omega_ede,z_ede,w_ede
   namelist/sgs_params/sgs_C_prod,sgs_C_diss,sgs_C_smag,sgs_floor,sgs_cap,sgs_e_init,sgs_hydro
   namelist/sidm_params/sidm,sidm_cross_section,sidm_npart_min, &
+       & sidm_rng_seed, &
        & sidm_type,sidm_v0,sidm_power, &
        & sidm_courant, &
        & sidm_estimator_diagnostics, &

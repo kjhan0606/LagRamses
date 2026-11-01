@@ -247,6 +247,8 @@ subroutine sync(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   use amr_commons
   use pm_commons
   use poisson_commons
+  use sidm_kinetic_transport_diag, only: sidm_kinetic_diag_is_enabled, &
+       sidm_kinetic_diag_gravitykick
   use cooling_module, ONLY: XH=>X, rhoc, mH
   use scalar_de_commons, only: sde_phip_of_a
 #include "amr_index.h"
@@ -258,6 +260,7 @@ subroutine sync(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   !
   !
   logical::error
+  logical::kinetic_diag_enabled
   integer::i,j,ind,idim,nx_loc,isink
   integer(i8b):: ksink
   real(dp)::dx,length,scale,r2
@@ -277,11 +280,14 @@ subroutine sync(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   integer ,dimension(1:nvector,1:twotondim)::igrid,icell,indp,kg
   real(dp),dimension(1:3)::skip_loc
   real(dp),dimension(1:ndim)::vrel
+  real(dp)::force_diag(3),kick_diag(3),delta_diag(3)
   integer ::nlevelmax_loc
   real(dp)::dx_min,vol_min,dx_temp,dx_min_loc
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   real(dp)::d0,mstar,nISM,nCOM,e,d,u,v,w,ekk
   integer:: info
+
+  kinetic_diag_enabled=sidm_kinetic_diag_is_enabled()
 
   ! Conversion factor from user units to cgs units
   call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
@@ -583,6 +589,17 @@ subroutine sync(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
         end do
      endif
   end do
+  if(kinetic_diag_enabled) then
+     do j=1,np
+        force_diag=0.0d0
+        kick_diag=0.0d0
+        delta_diag=0.0d0
+        force_diag(1:ndim)=ff(j,1:ndim)
+        kick_diag(1:ndim)=0.5d0*dteff(j)*ff(j,1:ndim)
+        delta_diag(1:ndim)=new_vp(j,1:ndim)-vp(ind_part(j),1:ndim)
+        call sidm_kinetic_diag_gravitykick(1,force_diag,kick_diag,delta_diag)
+     end do
+  end if
   do idim=1,ndim
      do j=1,np
         vp(ind_part(j),idim)=new_vp(j,idim)

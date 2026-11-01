@@ -320,7 +320,7 @@ VPATH = $(PATCH):../patch/cuda:../patch/oct_tree:../patch/cuRamses:../$(SOLVER):
 #############################################################################
 # All objects
 MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons.o amr_index.o random.o pm_parameters.o pm_commons.o poisson_parameters.o \
-	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
+	 poisson_commons.o sidm_kinetic_transport_math.o sidm_kinetic_transport_diag.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
 	 cosmic_ray_physics.o dust_mass_physics.o dust_phase_state.o dust_drag.o dust_multifluid.o \
@@ -338,7 +338,11 @@ ifeq ($(SOLVER),mhd)
 endif
 
 # SIDM object (depends on amr_commons, pm_commons, random)
-SIDM_OBJ = sidm_scatter.o sidm_angular.o sidm_estimator.o
+SIDM_OBJ = sidm_particle_geometry.o sidm_scatter.o sidm_angular.o sidm_estimator.o
+sidm_particle_geometry.o: amr_commons.kjhan.o
+sidm_scatter.o: sidm_particle_geometry.o
+sidm_kinetic_transport_diag.o: sidm_kinetic_transport_math.o amr_commons.kjhan.o pm_commons.o poisson_commons.o
+sidm_scatter.o adaptive_loop.jaehyun.o amr_step.jaehyun.o move_fine.kjhan.o newdt_fine.kjhan.o synchro_fine.kjhan.o force_fine.kjhan.o: sidm_kinetic_transport_diag.o
 # Atomic Dark Matter objects
 ADM_OBJ = dark_cooling_fine.o adm_hpm_mod.o adm_hpm_fine.o
 # Evaporating primordial black hole objects

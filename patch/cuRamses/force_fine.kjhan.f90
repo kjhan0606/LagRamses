@@ -55,6 +55,9 @@ subroutine force_fine(ilevel,icount)
   use pm_commons
   use poisson_commons
   use dark_energy_commons, only: cosmo_poisson_fourpi
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use sidm_kinetic_transport_diag, only: sidm_kinetic_diag_is_enabled, &
+       sidm_kinetic_diag_forcecell
 #include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
@@ -66,11 +69,14 @@ subroutine force_fine(ilevel,icount)
   ! the maximum density rho_max, and the potential energy
   !----------------------------------------------------------
   integer::igrid,ngrid,ncache,i,ind,ix,iy,iz
-  integer::info,ibound,nx_loc,idim
+  integer::info,ibound,nx_loc,idim,cell
+  integer(kind=8)::diag_nleaf,diag_nonfinite
   real(dp)::dx,dx_loc,scale,fact,fourpi
+  real(dp)::diag_force_max
   real(kind=8)::rho_loc,rho_all,epot_loc,epot_all
   real(dp),dimension(1:twotondim,1:3)::xc
   real(dp),dimension(1:3)::skip_loc
+  logical::kinetic_diag_enabled
 
   ! Work arrays (thread-private via OMP private clause)
   integer ,dimension(1:nvector)::ind_grid_w,ind_cell_w
@@ -174,6 +180,31 @@ subroutine force_fine(ilevel,icount)
      if(simple_boundary)call make_boundary_force(ilevel)
 
   endif
+
+  kinetic_diag_enabled=sidm_kinetic_diag_is_enabled()
+  if(kinetic_diag_enabled) then
+     diag_nleaf=0_8
+     diag_nonfinite=0_8
+     diag_force_max=0.0d0
+!$omp parallel do private(igrid,ind,cell,idim) &
+!$omp& reduction(+:diag_nleaf,diag_nonfinite) reduction(max:diag_force_max) schedule(static)
+     do igrid=1,active(ilevel)%ngrid
+        do ind=1,twotondim
+           cell=ICELL_OF(active(ilevel)%igrid(igrid),ind)
+           if(son(cell)/=0) cycle
+           diag_nleaf=diag_nleaf+1_8
+           do idim=1,ndim
+              if(ieee_is_finite(f(cell,idim))) then
+                 diag_force_max=max(diag_force_max,abs(f(cell,idim)))
+              else
+                 diag_nonfinite=diag_nonfinite+1_8
+              end if
+           end do
+        end do
+     end do
+!$omp end parallel do
+     call sidm_kinetic_diag_forcecell(diag_nleaf,diag_force_max,diag_nonfinite)
+  end if
 
   !----------------------------------------------
   ! Compute gravity potential and maximum density

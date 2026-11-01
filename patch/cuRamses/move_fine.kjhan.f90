@@ -264,6 +264,8 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   use amr_commons
   use pm_commons
   use poisson_commons
+  use sidm_kinetic_transport_diag, only: sidm_kinetic_diag_is_enabled, &
+       sidm_kinetic_diag_gravitykick,sidm_kinetic_diag_drift
   use hydro_commons, ONLY: uold,smallr,gamma
   use cooling_module, ONLY: XH=>X, rhoc, mH
   use scalar_de_commons, only: sde_phip_of_a
@@ -280,9 +282,11 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   ! This routine is called by move_fine.
   !------------------------------------------------------------
   logical::error
+  logical::kinetic_diag_enabled
   integer::i,j,ind,idim,nx_loc,isink
   integer(i8b):: ksink
   real(dp)::dx,length,dx_loc,scale,vol_loc,r2
+  real(dp)::force_diag(3),kick_diag(3),delta_diag(3)
   real(dp)::fric_cde2
   ! Grid-based arrays
   integer ,dimension(1:nvector)::father_cell
@@ -304,6 +308,7 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
 
   ! Conversion factor from user units to cgs units
   call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
+  kinetic_diag_enabled=sidm_kinetic_diag_is_enabled()
 
   ! Mesh spacing in that level
   dx=0.5D0**ilevel 
@@ -618,6 +623,18 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
      end do
   endif
 
+  if(kinetic_diag_enabled) then
+     do j=1,np
+        force_diag=0.0d0
+        kick_diag=0.0d0
+        delta_diag=0.0d0
+        force_diag(1:ndim)=ff(j,1:ndim)
+        kick_diag(1:ndim)=0.5d0*dtnew(ilevel)*ff(j,1:ndim)
+        delta_diag(1:ndim)=new_vp(j,1:ndim)-vp(ind_part(j),1:ndim)
+        call sidm_kinetic_diag_gravitykick(2,force_diag,kick_diag,delta_diag)
+     end do
+  end if
+
   ! Store velocity
   do idim=1,ndim
      do j=1,np
@@ -674,6 +691,13 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
         end do
      endif
   end do
+  if(kinetic_diag_enabled) then
+     do j=1,np
+        call sidm_kinetic_diag_drift(mp(ind_part(j)), &
+             & xp(ind_part(j),1:3),new_xp(j,1:3), &
+             & new_vp(j,1:3),dtnew(ilevel))
+     end do
+  end if
   do idim=1,ndim
      do j=1,np
         xp(ind_part(j),idim)=new_xp(j,idim)
