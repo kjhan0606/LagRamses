@@ -225,6 +225,132 @@ def multiple_rows(uid: str = "20-1-7-11-3") -> list[dict]:
     return [begin, *members, *pairs, end]
 
 
+def four_member_multiple_rows(uid: str = "30-1-7-13-4") -> list[dict]:
+    boxlen = 10.0
+    merge_radius = 1.5
+    member_specs = (
+        (7, 2.0, [9.5, 0.0, 0.0], [0.0, 0.0, 0.0]),
+        (9, 3.0, [0.5, 0.0, 0.0], [0.0, 2.0, 0.0]),
+        (11, 5.0, [1.5, 0.0, 0.0], [0.0, 10.0, 0.0]),
+        (13, 1.0, [3.5, 0.0, 0.0], [0.0, 4.0, 0.0]),
+    )
+    total_mass = sum(spec[1] for spec in member_specs)
+
+    def minimum_image(vector: list[float]) -> list[float]:
+        return [(value + 0.5 * boxlen) % boxlen - 0.5 * boxlen for value in vector]
+
+    anchor = member_specs[0][2]
+    com_position = [0.0, 0.0, 0.0]
+    com_velocity = [0.0, 0.0, 0.0]
+    for _, mass, position, velocity in member_specs:
+        delta = minimum_image([b - a for a, b in zip(anchor, position)])
+        for axis in range(3):
+            com_position[axis] += mass * delta[axis]
+            com_velocity[axis] += mass * velocity[axis]
+    com_position = [
+        (anchor[axis] + com_position[axis] / total_mass) % boxlen
+        for axis in range(3)
+    ]
+    com_velocity = [value / total_mass for value in com_velocity]
+
+    members = [
+        {
+            "schema_version": 1,
+            "record_type": "member",
+            "event_uid": uid,
+            "member_index": index,
+            "sink_id": sink_id,
+            "primary_sink_id": 11,
+            "is_primary": sink_id == 11,
+            "mass_code": mass,
+            "position_code": position,
+            "velocity_code": velocity,
+        }
+        for index, (sink_id, mass, position, velocity) in enumerate(member_specs, 1)
+    ]
+    pairs = []
+    max_separation = 0.0
+    for left in range(len(member_specs) - 1):
+        id1, mass1, position1, velocity1 = member_specs[left]
+        for right in range(left + 1, len(member_specs)):
+            id2, mass2, position2, velocity2 = member_specs[right]
+            delta_position = minimum_image(
+                [b - a for a, b in zip(position1, position2)]
+            )
+            delta_velocity = [b - a for a, b in zip(velocity1, velocity2)]
+            separation = sum(value * value for value in delta_position) ** 0.5
+            relative_speed = sum(value * value for value in delta_velocity) ** 0.5
+            reduced_mass = mass1 * mass2 / (mass1 + mass2)
+            relative_kinetic = 0.5 * reduced_mass * relative_speed**2
+            potential = -mass1 * mass2 / separation
+            specific_energy = (
+                0.5 * relative_speed**2 - (mass1 + mass2) / separation
+            )
+            specific_h = [
+                delta_position[1] * delta_velocity[2]
+                - delta_position[2] * delta_velocity[1],
+                delta_position[2] * delta_velocity[0]
+                - delta_position[0] * delta_velocity[2],
+                delta_position[0] * delta_velocity[1]
+                - delta_position[1] * delta_velocity[0],
+            ]
+            legacy_proxy = mass1 * mass2 / separation**2
+            pairs.append(
+                {
+                    "schema_version": 1,
+                    "record_type": "pair",
+                    "event_uid": uid,
+                    "pair_index": len(pairs) + 1,
+                    "sink_id_1": id1,
+                    "sink_id_2": id2,
+                    "delta_position_code": delta_position,
+                    "separation_code": separation,
+                    "delta_velocity_code": delta_velocity,
+                    "relative_speed_code": relative_speed,
+                    "reduced_mass_code": reduced_mass,
+                    "relative_kinetic_code": relative_kinetic,
+                    "newtonian_potential_1overr_code": potential,
+                    "two_body_specific_energy_code": specific_energy,
+                    "specific_angular_momentum_code": specific_h,
+                    "relative_angular_momentum_code": [
+                        reduced_mass * value for value in specific_h
+                    ],
+                    "within_rmerge": separation <= merge_radius,
+                    "two_body_bound": specific_energy < 0.0,
+                    "legacy_binding_proxy_1overr2_code": legacy_proxy,
+                    "legacy_pair_bound": relative_kinetic < legacy_proxy,
+                }
+            )
+            max_separation = max(max_separation, separation)
+
+    begin = {
+        "schema_version": 1,
+        "record_type": "event_begin",
+        "event_uid": uid,
+        "classification": "MULTIPLE",
+        "primary_sink_id": 11,
+        "nmember": len(members),
+        "expected_pairs": len(pairs),
+        "boxlen": boxlen,
+        "factG_code": 1.0,
+        "merge_radius_code": merge_radius,
+        "total_mass_code": total_mass,
+        "com_position_code": com_position,
+        "com_velocity_code": com_velocity,
+        "max_pair_separation_code": max_separation,
+        "complete": False,
+    }
+    end = {
+        "schema_version": 1,
+        "record_type": "event_end",
+        "event_uid": uid,
+        "nmember": len(members),
+        "npair": len(pairs),
+        "complete": True,
+    }
+    return [begin, *members, *pairs, end]
+
+
 def committed_batch(
     rows: list[dict], batch_uid: str = "10-1", attempt_uid: str = "attempt-a"
 ) -> list[dict]:
@@ -598,6 +724,65 @@ class LedgerValidationTests(unittest.TestCase):
         self.assertTrue(report.valid, report.errors)
         self.assertEqual(report.unique_events, 1)
         self.assertEqual(report.multiple_events, 1)
+
+    def test_optional_multiple_preservation_marker_matches_event_cardinality(self):
+        for rows, expected in (
+            (binary_rows(), False),
+            (multiple_rows(), True),
+        ):
+            with self.subTest(expected=expected):
+                rows[-1]["multiple_members_preserved"] = expected
+                report = self.validate_rows(rows)
+                self.assertTrue(report.valid, report.errors)
+
+    def test_optional_multiple_preservation_marker_rejects_mismatch_and_bad_type(self):
+        rows = multiple_rows()
+        rows[-1]["multiple_members_preserved"] = False
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertTrue(
+            any("multiple_members_preserved is inconsistent" in item
+                for item in report.errors),
+            report.errors,
+        )
+
+        rows = multiple_rows()
+        rows[-1]["multiple_members_preserved"] = 1
+        report = self.validate_rows(rows)
+        self.assertFalse(report.valid)
+        self.assertTrue(
+            any("multiple_members_preserved must be a boolean" in item
+                for item in report.errors),
+            report.errors,
+        )
+
+    def test_derived_multiple_marker_does_not_change_restart_event_identity(self):
+        legacy = multiple_rows()
+        marked = copy.deepcopy(legacy)
+        marked[-1]["multiple_members_preserved"] = True
+        report = self.validate_rows(legacy + marked)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.unique_events, 1)
+        self.assertEqual(report.duplicate_events, 1)
+
+    def test_four_member_multiple_preserves_all_six_pairs(self):
+        rows = four_member_multiple_rows()
+        report = self.validate_rows(rows)
+        self.assertTrue(report.valid, report.errors)
+        self.assertEqual(report.unique_events, 1)
+        self.assertEqual(report.multiple_events, 1)
+        begin = rows[0]
+        members = [row for row in rows if row["record_type"] == "member"]
+        pairs = [row for row in rows if row["record_type"] == "pair"]
+        self.assertEqual(begin["classification"], "MULTIPLE")
+        self.assertEqual(begin["nmember"], 4)
+        self.assertEqual(begin["expected_pairs"], 6)
+        self.assertEqual({row["sink_id"] for row in members}, {7, 9, 11, 13})
+        self.assertEqual(sum(row["is_primary"] for row in members), 1)
+        self.assertEqual(
+            {(row["sink_id_1"], row["sink_id_2"]) for row in pairs},
+            {(7, 9), (7, 11), (7, 13), (9, 11), (9, 13), (11, 13)},
+        )
 
     def test_multiple_conservation_and_binding_failures_are_rejected(self):
         mutations = {

@@ -114,7 +114,7 @@ class SinkMergeLedgerOrderTest(unittest.TestCase):
         self.assertLess(ledger, pending_commit)
         self.assertLess(pending_commit, sink_count_commit)
 
-    def test_all_group_failures_are_preflighted_before_open(self) -> None:
+    def test_group_pair_count_is_preflighted_and_serialization_is_rechecked(self) -> None:
         source = SOURCE.read_text(encoding="utf-8")
         match = re.search(
             r"(?mis)^subroutine write_smbh_capture_ledger\([^\n]*&\n.*?"
@@ -127,17 +127,19 @@ class SinkMergeLedgerOrderTest(unittest.TestCase):
             line.split("!", 1)[0] for line in ledger.splitlines()
         )
         opened = executable.index("open(newunit=ledger_unit")
-        fatal_pattern = re.compile(
-            r"call\s+ledger_group_fatal\([^)]*?'([^']+)'\)", re.I | re.S
-        )
-        before_open = set(fatal_pattern.findall(executable[:opened]))
-        after_open = set(fatal_pattern.findall(executable[opened:]))
+        preflight = executable[:opened]
+        post_open = executable[opened:]
 
-        self.assertTrue(after_open)
-        self.assertTrue(
-            after_open.issubset(before_open),
-            f"group failures lack a pre-open preflight: {after_open - before_open}",
+        pair_count_check = preflight.index(
+            "call checked_pair_count(igrp,nmember,expected_pairs_wide)"
         )
+        self.assertLess(pair_count_check, opened)
+        self.assertIn("enumerated member count differs from nmember", post_open)
+        self.assertIn(
+            "enumerated pair count differs from nmember choose two", post_open
+        )
+        self.assertIn("checked_pair_count", executable)
+        self.assertNotIn("nmember*(nmember-1)/2", executable)
 
     def test_fortran_writer_preserves_all_members_and_pairs_for_multiple(self) -> None:
         source = SOURCE.read_text(encoding="utf-8")
@@ -153,7 +155,11 @@ class SinkMergeLedgerOrderTest(unittest.TestCase):
         )
 
         self.assertIn("count(gsink(1:nsink) == igrp) >= 2", executable)
-        self.assertIn("expected_pairs=nmember*(nmember-1)/2", executable)
+        self.assertIn(
+            "call checked_pair_count(igrp,nmember,expected_pairs_wide)", executable
+        )
+        self.assertIn("expected_pairs=int(expected_pairs_wide)", executable)
+        self.assertNotIn("expected_pairs=nmember*(nmember-1)/2", executable)
         self.assertRegex(
             executable,
             r"(?is)if\s*\(nmember\s*==\s*2\)\s*then\s*"
@@ -188,6 +194,8 @@ class SinkMergeLedgerOrderTest(unittest.TestCase):
         self.assertIn("trim(json_int(pair_index))", executable.split(
             '"record_type":"event_end"', 1
         )[1])
+        event_end_record = executable.split('"record_type":"event_end"', 1)[1]
+        self.assertIn("multiple_members_preserved", event_end_record)
 
     def test_every_serialized_numeric_family_is_preflighted_before_open(self) -> None:
         source = SOURCE.read_text(encoding="utf-8")

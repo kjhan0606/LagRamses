@@ -2174,7 +2174,7 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   integer::nmember,member_index,pair_index,anchor,min_id,max_id
   integer::primary_index,primary_sink_id
   integer::expected_pairs
-  integer(int64)::id_sum,population_identity,id64
+  integer(int64)::id_sum,population_identity,id64,expected_pairs_wide
   integer(i8b)::batch_seq
   real(dp)::box_size,total_mass,max_separation
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v,scale_m
@@ -2254,6 +2254,11 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   do igrp=1,ngrp
      nmember=count(gsink(1:nsink) == igrp)
      if(nmember < 2) cycle
+     ! The pair loop and JSON writer use default integers for their indices.
+     ! Compute C(n,2) without an overflowing intermediate even if default
+     ! integers are promoted to int64 in a future build, then bound the result
+     ! before opening the append-only ledger.
+     call checked_pair_count(igrp,nmember,expected_pairs_wide)
      anchor=0
      primary_index=0
      total_mass=0d0
@@ -2496,7 +2501,9 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
      else
         classification='MULTIPLE'
      endif
-     expected_pairs=nmember*(nmember-1)/2
+     ! The preflight pass above guarantees this conversion is representable.
+     call checked_pair_count(igrp,nmember,expected_pairs_wide)
+     expected_pairs=int(expected_pairs_wide)
 
      iomsg=''
      write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
@@ -2590,6 +2597,11 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
         if(ios /= 0) call ledger_io_fatal('write member',event_uid,ios,iomsg)
      enddo
 
+     if(member_index /= nmember) then
+        call ledger_group_fatal(igrp,0, &
+             & 'enumerated member count differs from nmember')
+     endif
+
      pair_index=0
      do isink=1,nsink-1
         if(gsink(isink) /= igrp) cycle
@@ -2665,12 +2677,22 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
         enddo
      enddo
 
+     if(pair_index /= expected_pairs) then
+        call ledger_group_fatal(igrp,0, &
+             & 'enumerated pair count differs from nmember choose two')
+     endif
+
+     ! This certifies that the event ledger retains the complete pre-compaction
+     ! MULTIPLE population and pair graph; it does not claim that runtime sink
+     ! compaction leaves those members as separate particles.
      iomsg=''
      write(ledger_unit,'(A)',iostat=ios,iomsg=iomsg) &
           & '{"schema_version":2,"record_type":"event_end","batch_uid":"'// &
           & trim(batch_uid)//'","event_uid":"'//trim(event_uid)// &
           & '","nmember":'//trim(json_int(nmember))// &
-          & ',"npair":'//trim(json_int(pair_index))//',"complete":true}'
+          & ',"npair":'//trim(json_int(pair_index))// &
+          & ',"multiple_members_preserved":'//trim(json_logical(nmember > 2))// &
+          & ',"complete":true}'
      if(ios /= 0) call ledger_io_fatal('write event_end',event_uid,ios,iomsg)
      iomsg=''
      flush(ledger_unit,iostat=ios,iomsg=iomsg)
@@ -2694,6 +2716,33 @@ subroutine write_smbh_capture_ledger(ilevel,ngrp,gsink,dx_min,scale,xbound,factG
   if(ios /= 0) call ledger_io_fatal('close','',ios,iomsg)
 
 contains
+
+  subroutine checked_pair_count(group_index,member_count,pair_count)
+    integer,intent(in)::group_index,member_count
+    integer(int64),intent(out)::pair_count
+    integer(int64)::factor_left,factor_right
+
+    if(member_count < 2) then
+       call ledger_group_fatal(group_index,0,'pair count requested for fewer than two members')
+    endif
+    ! Divide the even factor first, then prove the multiplication fits int64.
+    ! This remains safe if default INTEGER is configured as 64 bit.
+    if(mod(member_count,2) == 0) then
+       factor_left=int(member_count/2,kind=int64)
+       factor_right=int(member_count-1,kind=int64)
+    else
+       factor_left=int(member_count,kind=int64)
+       factor_right=int((member_count-1)/2,kind=int64)
+    endif
+    if(factor_right <= 0_int64 .or. &
+         & factor_left > huge(pair_count)/factor_right) then
+       call ledger_group_fatal(group_index,0,'pair count exceeds 64-bit arithmetic range')
+    endif
+    pair_count=factor_left*factor_right
+    if(pair_count > int(huge(expected_pairs),kind=int64)) then
+       call ledger_group_fatal(group_index,0,'pair count exceeds supported integer range')
+    endif
+  end subroutine checked_pair_count
 
   subroutine ledger_io_fatal(operation,uid,status,message)
     character(len=*),intent(in)::operation,uid,message

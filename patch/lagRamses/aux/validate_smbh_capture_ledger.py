@@ -142,8 +142,24 @@ def _minimum_image_delta(
 
 
 def _event_digest(rows: list[dict[str, Any]]) -> str:
+    # This field is a derived cardinality summary added to event_end without
+    # changing the ledger schema.  It is validated below, but omitting it from
+    # the semantic digest keeps old and new serializations of the same event
+    # deduplicable across restart attempts.
     payload = "\n".join(
-        json.dumps(row, sort_keys=True, separators=(",", ":")) for row in rows
+        json.dumps(
+            {
+                key: value
+                for key, value in row.items()
+                if not (
+                    row.get("record_type") == "event_end"
+                    and key == "multiple_members_preserved"
+                )
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        for row in rows
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -406,6 +422,14 @@ def _validate_complete_block(
         errors.append(f"{uid}: member count does not match begin/end records")
     if len(block.pairs) != expected_pairs or end.get("npair") != expected_pairs:
         errors.append(f"{uid}: pair count does not equal nmember choose two")
+    if "multiple_members_preserved" in end:
+        preserved = _require_logical(
+            end, "multiple_members_preserved", uid, errors
+        )
+        if preserved is not None and preserved != (nmember > 2):
+            errors.append(
+                f"{uid}: multiple_members_preserved is inconsistent with event cardinality"
+            )
 
     member_indices = [row.get("member_index") for row in block.members]
     if member_indices != list(range(1, nmember + 1)):
