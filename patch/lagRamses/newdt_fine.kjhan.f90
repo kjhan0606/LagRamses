@@ -4,6 +4,7 @@ subroutine newdt_fine(ilevel)
   use hydro_commons
   use poisson_commons, ONLY: gravity_type
   use fdm_commons, ONLY: hbar_code
+  use sidm_kinetic_transport_diag, only: sidm_kinetic_diag_clip_dt
 #ifdef RT
   use rt_parameters, ONLY: rt_advect, rt_nsubcycle
 #endif
@@ -277,6 +278,8 @@ subroutine newdt_fine(ilevel)
      write(*,'(" HJM_CFL_DBG: dtold=",1PE10.3," dt_final=",1PE10.3)') &
           dtold(ilevel), dtnew(ilevel)
   end if
+
+  call sidm_kinetic_diag_clip_dt(dtnew(ilevel))
 
 #ifdef _OPENMP
 111 format('  +Entering newdt_fine for level ',I2)

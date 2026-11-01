@@ -7,6 +7,10 @@ recursive subroutine amr_step(ilevel,icount)
 #endif
   use amr_commons
   use pm_commons
+  use sidm_kinetic_transport_diag, only: sidm_kinetic_diag_begin_scatter, &
+       sidm_kinetic_diag_target,sidm_kinetic_diag_should_stop, &
+       sidm_kinetic_diag_step_complete, &
+       sidm_kinetic_diag_orderly_stop
   use hydro_commons
   use poisson_commons
   use pbh_commons, only: use_pbh, pbh_mark_level
@@ -703,6 +707,12 @@ recursive subroutine amr_step(ilevel,icount)
         if(use_fdm) call fdm_step(ilevel)
 
         ! SIDM scattering (after velocity sync, before timestep)
+        call sidm_kinetic_diag_begin_scatter(dtnew(ilevel))
+        call sidm_kinetic_diag_target(ilevel,nstep_coarse,t)
+        if(sidm_kinetic_diag_should_stop()) then
+           call sidm_kinetic_diag_step_complete(nstep_coarse,t,.true.)
+           call sidm_kinetic_diag_orderly_stop()
+        end if
         if(sidm) call sidm_scatter(ilevel)
 
         ! DM-baryon drag force (after DM-DM scatter)

@@ -192,15 +192,15 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   use pm_commons
   use amr_commons
   use random
+  use sidm_particle_geometry, only: sidm_particle_subcell_index
+  use sidm_kinetic_transport_diag, only: sidm_kinetic_diag_is_enabled, &
+       sidm_kinetic_diag_probability,sidm_kinetic_diag_scatter
   implicit none
   integer,intent(in)::ilevel,icpu,kgrid,subnump
   integer,intent(in)::mythread_loc,nthreads_in
   integer,dimension(IRandNumSize,0:nthreads_in-1)::thread_seeds
   external sidm_sample_rutherford_cosine,sidm_rotate_scattered_direction
   external sidm_pair_probability
-
-  ! External function
-  integer,external::cell_index_from_part
 
   ! Shared counters (common with sidm_scatter)
   integer::sidm_n_scatter,sidm_n_pairs,sidm_n_up,sidm_n_down
@@ -232,7 +232,8 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   ! Per-cell particle index buffer (grown to numbp(igrid) as needed;
   ! a fixed nvector-sized buffer silently dropped particles beyond
   ! nvector and clamped the (N-1) rate factor in dense cells)
-  integer,dimension(:),allocatable::ind_dm
+  integer,dimension(:),allocatable::ind_dm,particle_cell
+  real(dp),dimension(1:3)::skip_loc
   integer::itemp,ipair
   integer,dimension(IRandNumSize)::seed_loc
 
@@ -254,6 +255,7 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   real(dp)::mu,KE_cm,KE_cm_new,delta_KE,v_rel_new_mag
   real(dp)::mchi_g,mu_chi
   logical::do_transition
+  logical::kinetic_diag_enabled
   integer::istate_1,istate_2,new_state_1,new_state_2
   integer::n_channels,ichan,j1,j2
   real(dp)::R_inel,Ei_1,Ei_2,dE
@@ -262,6 +264,7 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   real(dp)::chan_dE(55)
 
   if(subnump<=0) return
+  kinetic_diag_enabled=sidm_kinetic_diag_is_enabled()
 
   ! Unit conversions
   call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
@@ -272,6 +275,10 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   dx = 0.5D0**ilevel
   nx_loc = (icoarse_max-icoarse_min+1)
   scale = boxlen/dble(nx_loc)
+  skip_loc = 0.0d0
+  if(ndim>0) skip_loc(1)=dble(icoarse_min)
+  if(ndim>1) skip_loc(2)=dble(jcoarse_min)
+  if(ndim>2) skip_loc(3)=dble(kcoarse_min)
   dx_loc = dx*scale
 
   ! Physical (proper) cell volume [cm^3]: scale_l is already proper
@@ -309,7 +316,7 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   P_max_loc     = 0.0d0
   expected_rate_loc = 0.0d0
 
-  allocate(ind_dm(1024))
+  allocate(ind_dm(1024),particle_cell(1024))
 
   ! Loop over grids assigned to this thread
   igrid = kgrid
@@ -321,8 +328,19 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
         cycle
      end if
      if(npart1>size(ind_dm)) then
-        deallocate(ind_dm); allocate(ind_dm(npart1))
+        deallocate(ind_dm,particle_cell)
+        allocate(ind_dm(npart1),particle_cell(npart1))
      end if
+
+     ! Classify each particle once in global lattice coordinates. xp is
+     ! physical, while xg and skip_loc follow the particle_tree convention.
+     ipart = headp(igrid)
+     do jp=1,npart1
+        particle_cell(jp)=sidm_particle_subcell_index( &
+             xp(ipart,1:ndim),xg(igrid,1:ndim),scale, &
+             skip_loc(1:ndim),ndim)
+        ipart = nextp(ipart)
+     end do
 
      ! Loop over 8 subcells (twotondim=8 in 3D)
      do ind=1,twotondim
@@ -337,7 +355,7 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
         ipart = headp(igrid)
         do jp=1,npart1
            ! Check if this particle belongs to subcell 'ind'
-           if(cell_index_from_part(ipart,igrid,ilevel)==ind) then
+           if(particle_cell(jp)==ind) then
               if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. ptypep(ipart)/=PTYPE_SINK) then
                  ndm_cell = ndm_cell+1
                  ind_dm(ndm_cell) = ipart
@@ -453,6 +471,8 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
            ! reproduce the exact N(N-1)/2 pair rate for odd N too
            call sidm_pair_probability(sigma_over_m,m1,m2,v_rel_mag, &
                 & dt_phys,vol_phys,ndm_cell,npairs,P_scatter)
+           if(kinetic_diag_enabled) &
+                & call sidm_kinetic_diag_probability(P_scatter)
            if(dt_phys>0.0d0) then
               expected_rate_loc = expected_rate_loc + P_scatter/dt_phys
            end if
@@ -651,6 +671,14 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
            if(dp_mag > dp_max_loc) dp_max_loc = dp_mag
            if(abs(dEk_evt) > dEk_max_loc) dEk_max_loc = abs(dEk_evt)
 
+           if(kinetic_diag_enabled) then
+              call sidm_kinetic_diag_scatter( &
+                   & xp(ind_dm(ipair),1),xp(ind_dm(ipair+1),1), &
+                   & mp(ind_dm(ipair)),mp(ind_dm(ipair+1)), &
+                   & vp(ind_dm(ipair),1:3),vp(ind_dm(ipair+1),1:3), &
+                   & v1_new(1:3)/scale_v,v2_new(1:3)/scale_v)
+           end if
+
            ! Write new velocities (physical -> code units)
            vp(ind_dm(ipair),   1:3) = v1_new(1:3) / scale_v
            vp(ind_dm(ipair+1), 1:3) = v2_new(1:3) / scale_v
@@ -661,7 +689,7 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
      igrid = next(igrid)
   end do  ! grids
 
-  deallocate(ind_dm)
+  deallocate(ind_dm,particle_cell)
 
   ! Save seed back to per-thread array (no race)
   thread_seeds(:,mythread_loc) = seed_loc
@@ -794,25 +822,35 @@ subroutine sidm_init_excited()
 end subroutine sidm_init_excited
 !################################################################
 !################################################################
-! Helper: determine subcell index (1..8) for a particle in a grid
+!################################################################
+!################################################################
+! Compatibility wrapper used by ADM and dark-cooling force routines.
+! Keep the legacy external signature while sharing the corrected lattice
+! coordinate transform used by SIDM scattering and baryon drag.
 !################################################################
 integer function cell_index_from_part(ipart,igrid,ilevel)
   use pm_commons, only: xp
-  use amr_commons, only: xg,dp
+  use amr_commons, only: xg,boxlen,icoarse_min,icoarse_max, &
+       jcoarse_min,kcoarse_min,ndim,dp
+  use sidm_particle_geometry, only: sidm_particle_subcell_index
   implicit none
   integer,intent(in)::ipart,igrid,ilevel
-  integer::ix,iy,iz
+  integer::nx_loc
+  real(dp)::scale
+  real(dp),dimension(1:3)::skip_loc
 
-  ! Subcell indices (0 or 1 in each dimension)
-  ix = 0; iy = 0; iz = 0
-  if(xp(ipart,1) > xg(igrid,1)) ix = 1
-  if(xp(ipart,2) > xg(igrid,2)) iy = 1
-#if NDIM==3
-  if(xp(ipart,3) > xg(igrid,3)) iz = 1
-#endif
-
-  ! RAMSES subcell ordering: ind = 1 + ix + 2*iy + 4*iz
-  cell_index_from_part = 1 + ix + 2*iy + 4*iz
+  nx_loc=icoarse_max-icoarse_min+1
+  if(nx_loc<=0 .or. boxlen<=0.0d0) then
+     cell_index_from_part=0
+     return
+  end if
+  scale=boxlen/dble(nx_loc)
+  skip_loc=0.0d0
+  if(ndim>0) skip_loc(1)=dble(icoarse_min)
+  if(ndim>1) skip_loc(2)=dble(jcoarse_min)
+  if(ndim>2) skip_loc(3)=dble(kcoarse_min)
+  cell_index_from_part=sidm_particle_subcell_index( &
+       xp(ipart,1:ndim),xg(igrid,1:ndim),scale,skip_loc(1:ndim),ndim)
 
 end function cell_index_from_part
 !################################################################
@@ -884,6 +922,7 @@ end subroutine sidm_report_excited_fraction
 subroutine sidm_baryon_drag(ilevel)
   use pm_commons
   use amr_commons
+  use sidm_particle_geometry, only: sidm_particle_subcell_index
   use hydro_commons, only: uold,nvar,gamma
 #include "amr_index.h"
   implicit none
@@ -894,12 +933,14 @@ subroutine sidm_baryon_drag(ilevel)
 
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
   real(dp)::dx,dx_loc,scale,vol_phys,vol_code,dt_phys
+  real(dp),dimension(1:3)::skip_loc
   real(dp)::rho_b_phys,sigma_eff
   real(dp),dimension(1:3)::v_gas_phys,v_dm_phys,v_rel,dv_dm,dv_gas
   real(dp)::v_rel_mag,v_rel_kms,drag_coeff
   real(dp)::m_dm_phys,m_gas_phys,dEk_dm,dv_max,dv_mag
   integer::igrid,jgrid,ind,iskip,icell,nx_loc
   integer::ipart,jpart,npart1,info
+  integer,dimension(:),allocatable::particle_cell
   ! Diagnostics
   integer::n_drag_loc,n_drag_tot
   real(dp)::dp_drag_loc(3),dp_drag_tot(3),dv_max_loc,dv_max_tot
@@ -913,6 +954,10 @@ subroutine sidm_baryon_drag(ilevel)
   dx = 0.5D0**ilevel
   nx_loc = (icoarse_max-icoarse_min+1)
   scale = boxlen/dble(nx_loc)
+  skip_loc = 0.0d0
+  if(ndim>0) skip_loc(1)=dble(icoarse_min)
+  if(ndim>1) skip_loc(2)=dble(jcoarse_min)
+  if(ndim>2) skip_loc(3)=dble(kcoarse_min)
   dx_loc = dx*scale
   vol_code = dx_loc**3
   vol_phys = (dx_loc*scale_l)**3  ! proper volume (scale_l is proper)
@@ -921,6 +966,7 @@ subroutine sidm_baryon_drag(ilevel)
   n_drag_loc  = 0
   dp_drag_loc = 0.0d0
   dv_max_loc  = 0.0d0
+  allocate(particle_cell(1024))
 
   ! Loop over local grids
   igrid = headl(myid,ilevel)
@@ -931,6 +977,19 @@ subroutine sidm_baryon_drag(ilevel)
         igrid = next(igrid)
         cycle
      end if
+
+     if(npart1>size(particle_cell)) then
+        deallocate(particle_cell)
+        allocate(particle_cell(npart1))
+     end if
+
+     ipart = headp(igrid)
+     do jpart=1,npart1
+        particle_cell(jpart)=sidm_particle_subcell_index( &
+             xp(ipart,1:ndim),xg(igrid,1:ndim),scale, &
+             skip_loc(1:ndim),ndim)
+        ipart = nextp(ipart)
+     end do
 
      ! Loop over 8 subcells
      do ind=1,twotondim
@@ -954,7 +1013,7 @@ subroutine sidm_baryon_drag(ilevel)
            ! DM only (idp>0, ptypep is DM or excited iSIDM)
            if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. ptypep(ipart)/=PTYPE_SINK) then
               ! Check subcell match
-              if(cell_index_from_part_inline(ipart,igrid)==ind) then
+              if(particle_cell(jpart)==ind) then
                  ! DM velocity (proper peculiar)
                  v_dm_phys(1) = vp(ipart,1) * scale_v
                  v_dm_phys(2) = vp(ipart,2) * scale_v
@@ -1033,6 +1092,8 @@ subroutine sidm_baryon_drag(ilevel)
      igrid = next(igrid)
   end do  ! grids
 
+  deallocate(particle_cell)
+
   ! MPI reduce diagnostics
   call MPI_ALLREDUCE(n_drag_loc, n_drag_tot, 1, MPI_INTEGER, &
        MPI_SUM, MPI_COMM_WORLD, info)
@@ -1046,17 +1107,5 @@ subroutine sidm_baryon_drag(ilevel)
           ' IDM level ',ilevel,': n_drag=',n_drag_tot, &
           ' dv_max=',dv_max_tot*1d-5,' km/s'
   end if
-
-contains
-  ! Inline subcell index (avoids external function in tight loop)
-  integer function cell_index_from_part_inline(ip,ig)
-    integer,intent(in)::ip,ig
-    integer::ixx,iyy,izz
-    ixx=0; iyy=0; izz=0
-    if(xp(ip,1) > xg(ig,1)) ixx=1
-    if(xp(ip,2) > xg(ig,2)) iyy=1
-    if(xp(ip,3) > xg(ig,3)) izz=1
-    cell_index_from_part_inline = 1 + ixx + 2*iyy + 4*izz
-  end function cell_index_from_part_inline
 
 end subroutine sidm_baryon_drag
