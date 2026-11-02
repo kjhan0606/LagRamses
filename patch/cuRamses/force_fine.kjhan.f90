@@ -665,7 +665,7 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
   real(dp)::g_ext_code(1:3)
   real(dp)::dx,scale,dx_loc,fourpi
   integer::nx_loc
-  integer::ig_left,ig_right,ih_left,ih_right
+  integer::ig_left,ig_right
   integer::ind_nb_left,ind_nb_right
   real(dp)::gnorm_nb,x_nb,func_m1
   real(dp)::h_right,h_left,div_h
@@ -748,7 +748,7 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
 
 !$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
-!$omp&  ig_left,ig_right,ih_left,ih_right, &
+!$omp&  ig_left,ig_right, &
 !$omp&  ind_nb_left,ind_nb_right, &
 !$omp&  gnorm_nb,x_nb,func_m1, &
 !$omp&  h_right,h_left,div_h,skip_cell) schedule(dynamic)
@@ -792,11 +792,11 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
            do idim=1,ndim
               ig_left =ggg(idim,1,ind)
               ig_right=ggg(idim,2,ind)
-              ih_left = ICELL_OF(1,hhh(idim,1,ind))-1
-              ih_right = ICELL_OF(1,hhh(idim,2,ind))-1
-
-              ind_nb_left =igridn_w(i,ig_left )+ih_left
-              ind_nb_right=igridn_w(i,ig_right)+ih_right
+              ! Cell storage is blocked in groups of amr_block_size grids.
+              ! A grid index plus a child offset addresses the wrong cell
+              ! outside the first block.
+              ind_nb_left =ICELL_OF(igridn_w(i,ig_left ),hhh(idim,1,ind))
+              ind_nb_right=ICELL_OF(igridn_w(i,ig_right),hhh(idim,2,ind))
 
               ! Left neighbor
               gnorm_nb = sqrt((f(ind_nb_left,1)+g_ext_code(1))**2 &
