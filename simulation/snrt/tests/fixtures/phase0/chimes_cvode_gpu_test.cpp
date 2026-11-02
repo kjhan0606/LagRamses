@@ -279,6 +279,9 @@ static void tile_test(){
     const double gpu=evolve_tile(trial);compare(reference,trial,"tile-staged");
     snrt_chimes_rhs_counts(after);
     require(after[0]>before[0] && after[3]==before[3],"tile real GPU work without device errors");
+    const auto staged_gpu_calls=after[0]-before[0];
+    const auto staged_gpu_batches=after[2]-before[2];
+    const auto staged_gpu_errors=after[3]-before[3];
     int held[3];for(int i=0;i<3;i++){held[i]=cuda_acquire_stream();require(held[i]>=0,"tile busy lease");}
     evolve_tile(trial);compare(reference,trial,"tile-whole-CPU-fallback");
     for(int i=0;i<3;i++)cuda_release_stream(held[i]);
@@ -374,7 +377,7 @@ static void tile_test(){
     unsetenv("SNRT_CHIMES_CELL_SCHEDULER");unsetenv("SNRT_CHIMES_GPU_WORKER");
     puts("CHIMES_LEVEL_BROKER_PARITY_PASS");
     std::printf("TILE_STAGED_TIME cpu_omp8_s=%.9g tile_gpu_s=%.9g gpu_calls=%llu batches=%llu errors=%llu\n",
-        cpu,gpu,after[0]-before[0],after[2]-before[2],after[3]-before[3]);
+        cpu,gpu,staged_gpu_calls,staged_gpu_batches,staged_gpu_errors);
     snrt_chimes_rhs_finalize();cuda_pool_finalize();
     puts("CHIMES_TILE_STAGED_PARITY_PASS");
 }
