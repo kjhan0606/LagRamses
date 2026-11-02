@@ -846,8 +846,8 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
      diag_sample_i=0
      diag_sample_ind=0
      diag_target(:,1)=(/0.58d0,0.50d0,0.50d0/)
-     diag_target(:,2)=(/0.70d0,0.50d0,0.50d0/)
-     diag_target(:,3)=(/0.85d0,0.50d0,0.50d0/)
+     diag_target(:,2)=(/0.50d0,0.50d0,0.70d0/)
+     diag_target(:,3)=(/0.68d0,0.68d0,0.68d0/)
      do diag_i=1,ncache
         diag_igrid=active(ilevel)%igrid(diag_i)
         do diag_ind=1,twotondim
