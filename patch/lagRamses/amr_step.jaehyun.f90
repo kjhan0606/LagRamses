@@ -561,6 +561,14 @@ recursive subroutine amr_step(ilevel,icount)
 #endif
         call multigrid_fine(levelmin,icount)
      end if
+     ! On a cold restart the saved checkpoint phi is deliberately not used
+     ! as the first solve's predictor, but save_phi_old at entry has already
+     ! copied that stale checkpoint field into phi_old.  Seed the temporal
+     ! history with the freshly solved field before a later subcycle can use
+     ! phi-phi_old in interpol_phi.
+     if(nrestart>0.and.allocated(phi_checkpoint_level_valid))then
+        if(.not.phi_checkpoint_level_valid(ilevel))call save_phi_old(ilevel)
+     end if
      if(allocated(phi_checkpoint_level_valid)) &
           phi_checkpoint_level_valid(ilevel)=.true.
      ! FFT direct solves bypass the generic initial-guess block, so consume
