@@ -214,7 +214,7 @@ static int compare(const Cell *ref,const Cell *trial,const char *label,bool stri
     std::printf("STATUSES %s mismatch=%d cpu_rejected=%d trial_rejected=%d compared=%d physics_available=%d\n",
         label,mismatch,cpu_rejected,trial_rejected,nc-failed,failed<nc);
     if(wi>=0)std::printf("WORST_SPECIES %s cell=%d species=%d cpu=%.17g gpu=%.17g abs_diff=%.17g\n",label,wi,ws,ref[wi].next[ws],trial[wi].next[ws],std::abs(ref[wi].next[ws]-trial[wi].next[ws]));
-    require(failed<nc || diagnostic_mode,"all fixture cells rejected");
+    require(failed==0 || diagnostic_mode,"all fixture cells accepted");
     if(diagnostic_mode)require(nuclei<1e-8 && charge<1e-10,"dark CPU/GPU conservation diagnostic");
     else require(species<=1 && temp<1e-6 && energy<1e-6 && nuclei<1e-8 && charge<1e-10,"dark CPU/GPU physics parity");
     return mismatch;

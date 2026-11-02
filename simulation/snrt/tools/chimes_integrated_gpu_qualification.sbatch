@@ -14,6 +14,7 @@ module purge
 module load gnu13 intel/mpi/2021.17 cuda/12.8.1
 root=/gpfs/kjhan/chimes-cvode-gpu-20261001
 sun=/gpfs/kjhan/LRD_JWST/.snrt-performance.jDx9Iz/sundials-release
+sun_source=/gpfs/kjhan/LRD_JWST/.dust-extension.AOz7mU/sundials
 chimes=$root/.cvode-gpu/chimes
 table=/gpfs/kjhan/LRD_JWST/.dust-extension.AOz7mU/chimes-data/chimes_main_data.hdf5
 build=$root/.cvode-gpu/integrated-$SLURM_JOB_ID
@@ -39,20 +40,20 @@ export LD_LIBRARY_PATH="$build/library:$sun/lib64:/home/kjhan/local/lib:${LD_LIB
 common=(-O3 -ffp-contract=off -fPIC -DCHIMES_USE_DOUBLE_PRECISION -I"$sun/include" -I/home/kjhan/local/include -I"$chimes/src" -I"$root/patch/lagRamses")
 sunlibs=(-L"$sun/lib64" -lsundials_cvode -lsundials_nvecserial -lsundials_sunlinsoldense -lsundials_sunmatrixdense)
 mpicc "${common[@]}" -DSNRT_CHIMES_CUDA -c "$root/patch/lagRamses/snrt_chimes_bridge.c" -o bridge.o
-nvcc -O3 -std=c++17 -arch="$test_arch" --fmad=false -Xcompiler -fopenmp -I"$sun/include" -c "$root/patch/lagRamses/snrt_chimes_cvode_cuda.cu" -o backend.o
+nvcc -O3 -std=c++17 -arch="$test_arch" --fmad=false -Xcompiler -fopenmp -I"$sun/include" -I"$sun_source/include" -c "$root/patch/lagRamses/snrt_chimes_cvode_cuda.cu" -o backend.o
 nvcc -O3 -std=c++17 -arch="$test_arch" --fmad=false -Xcompiler -fopenmp -DSNRT_CHIMES_RHS_TESTING -DCHIMES_USE_DOUBLE_PRECISION -I"$sun/include" -I/home/kjhan/local/include -I"$chimes/src" -c "$root/patch/lagRamses/snrt_chimes_rhs_cuda.cu" -o rhs.o
 nvcc -O3 -std=c++17 -arch="$test_arch" -c "$root/patch/cuRamses/cuda_stream_pool.cu" -o pool.o
-mpicxx "${common[@]}" -std=c++17 -fopenmp -DSNRT_CHIMES_RHS_TESTING -c "$root/simulation/snrt/tests/fixtures/phase0/chimes_cvode_gpu_test.cpp" -o test.o
+mpicxx "${common[@]}" -std=c++17 -fopenmp -DSNRT_CHIMES_RHS_TESTING -DSNRT_CHIMES_TEST_NCELL=80 -c "$root/simulation/snrt/tests/fixtures/phase0/chimes_cvode_gpu_test.cpp" -o test.o
 cuda_root=$(dirname "$(dirname "$(command -v nvcc)")")
 mpicxx -fopenmp -Wl,--export-dynamic test.o bridge.o backend.o rhs.o pool.o -L"$build/library" -lchimes "${sunlibs[@]}" -L"$cuda_root/lib64" -lcudart -lcublas -L/home/kjhan/local/lib -lhdf5 -lcrypto -ldl -lm -o test
 ldd ./test
-if ldd ./test | rg 'not found'; then exit 3; fi
+if ldd ./test | grep -E 'not found'; then exit 3; fi
 sha256sum ./test ./library/libchimes.so
 
 if [ "${SNRT_CHIMES_TILE_REGRESSION_ONLY:-0}" = 1 ]; then
   unset SNRT_CHIMES_COMPUTE_BACKEND
   timeout 180 ./test "$table" tile > tile-regression.log 2>&1
-  rg 'PHYSICS|STATUSES|TILE_STAGED|PARITY_PASS|FAIL' tile-regression.log
+  grep -E 'PHYSICS|STATUSES|TILE_STAGED|PARITY_PASS|FAIL' tile-regression.log
   exit 0
 fi
 
@@ -62,10 +63,14 @@ fi
 if [ "${SNRT_CHIMES_RETRY_REGRESSION_ONLY:-0}" = 1 ]; then
   unset SNRT_CHIMES_COMPUTE_BACKEND
   timeout 180 ./test "$table" rhs > retry-regression.log 2>&1
-  rg 'PHYSICS|RHS_MIDCELL_RETRIES|RHS_CPU_S|PARITY_PASS|FAIL' retry-regression.log
-  # Exercise contention between LU and RHS as well as isolated RHS leases.
-  SNRT_CHIMES_COMPUTE_BACKEND=cuda_integrated timeout 180 ./test "$table" check-integrated > retry-integrated.log 2>&1
-  rg 'PHYSICS|INTEGRATED_COLD|BUNDLE_GPU_WORK|BUNDLE_PASS|FAIL' retry-integrated.log
+  grep -E 'PHYSICS|RHS_MIDCELL_RETRIES|RHS_CPU_S|PARITY_PASS|FAIL' retry-regression.log
+  for composition in default mixed; do
+    if [ "$composition" = mixed ]; then export SNRT_CHIMES_TEST_COMPOSITION=mixed; else unset SNRT_CHIMES_TEST_COMPOSITION; fi
+    # Exercise each physical composition once through the integrated CPU/GPU backend.
+    SNRT_CHIMES_COMPUTE_BACKEND=cuda_integrated timeout 240 ./test "$table" check-integrated > "retry-integrated-$composition.log" 2>&1
+    echo "TRACE_INTEGRATED_COMPOSITION=$composition"
+    grep -E 'PHYSICS|STATUSES|INTEGRATED_COLD|BUNDLE_GPU_WORK|BUNDLE_PASS|FAIL' "retry-integrated-$composition.log"
+  done
   exit 0
 fi
 
@@ -77,7 +82,7 @@ for composition in default mixed; do
     SNRT_CHIMES_COMPUTE_BACKEND=cuda_integrated SNRT_CHIMES_TEST_DT_FACTOR=$factor \
       timeout 180 ./test "$table" check-integrated > "check-$composition-$factor.log" 2>&1 || rc=$?
     echo "INTEGRATED_QUALIFICATION composition=$composition dt_factor=$factor rc=$rc"
-    rg 'integrated compute backend|PHYSICS|STATUSES|INTEGRATED_COLD|BUNDLE_GPU_WORK|FAIL' "check-$composition-$factor.log" || true
+    grep -E 'integrated compute backend|PHYSICS|STATUSES|INTEGRATED_COLD|BUNDLE_GPU_WORK|FAIL' "check-$composition-$factor.log" || true
     if [ "$rc" -ne 0 ]; then failures=1; fi
   done
 done
@@ -86,7 +91,7 @@ if [ "$failures" -eq 0 ]; then
   rc=0
   timeout 180 ./test "$table" check-lu > check-lu.log 2>&1 || rc=$?
   echo "LU_MULTISTREAM_QUALIFICATION rc=$rc"
-  rg 'PHYSICS|STATUSES|BUNDLE_GPU_WORK|FAIL' check-lu.log || true
+  grep -E 'PHYSICS|STATUSES|BUNDLE_GPU_WORK|FAIL' check-lu.log || true
   if [ "$rc" -ne 0 ]; then failures=1; fi
 fi
 
@@ -97,7 +102,7 @@ if [ "$failures" -eq 0 ]; then
       SNRT_CHIMES_COMPUTE_BACKEND=cuda_integrated SNRT_CHIMES_TEST_DT_FACTOR=$factor \
         timeout 240 ./test "$table" bench-integrated > "bench-$composition-$factor.log" 2>&1
       echo "INTEGRATED_TIMING composition=$composition dt_factor=$factor"
-      rg 'BUNDLE_TIME|BUNDLE_GPU_WORK' "bench-$composition-$factor.log"
+      grep -E 'BUNDLE_TIME|BUNDLE_GPU_WORK' "bench-$composition-$factor.log"
     done
   done
 fi
