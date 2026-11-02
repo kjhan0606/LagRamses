@@ -777,3 +777,86 @@ decision above.
   operator adoption or revision; candidate spectrum/comparison results have
   not been inspected. Candidate SED implementation and the external-data
   release/admission blockers remain open.
+
+### Trace-CHIMES CPU/A100 integrated M5 bundle — 2026-11-02
+
+Astra's read-only bundle audit returned **Q-GOAL: yes**, **Q-LEAN:
+proportionate**, and **PASS for this bounded integration bundle**. It does not
+approve physical production readiness. Astra found that the existing native
+fixture plus the paired four-step CPU/A100 runs are sufficient; no additional
+simulation or audit matrix is needed for this bundle.
+
+The matched CPU job `1257328` completed on Grammar `normal` (1 MPI rank × 8
+OpenMP threads), and hybrid job `447348` completed on syntax `a100_pcie` with
+one typed A100. Both used trace CHIMES, the same effective namelist SHA-256
+`01e623647752e38b00ea6dde9fb2be95925c923a81ac5453e5dc4f93c67a4104`, the
+same selected reference-control inputs, and four M5 steps. Both report
+`M5_SOURCE_ACTIVE_DUST_CHIMES_TRACE_PASS`, active dust heating, stellar and
+thermal-AGN source receipts, and `raw_outputs=0`. Their preserved compact
+records are in `.m5-effective-dust-chimes-grammar-cpu-1257328/` and
+`.m5-effective-dust-chimes-447348/`.
+
+The CPU executable SHA-256 is
+`1a3c832742a8e1786eddaad8cf307368f8c30d977cae3f5b73aa8f0d7e30bf60`; the
+A100 executable SHA-256 is
+`711cd6a16b43df9f5d9b6913e5c06813c0a5fdf1489efecb420733d216d3ddea`. The
+CPU and hybrid builds came from `d61a211` and `d5e9791`; their source delta is
+the A100 partition allowlist/comment only. The patched `chimes.c` SHA-256 is
+`cacd7bdcca2b8f466f4120d61209880da33d48b225b58d6c1c5fbeb2f8f9268f`, and
+the trace patch SHA-256 is
+`dd625057b6f58549646c69a1ac78e400a8dab5e540ed079216efba6e867035c4`.
+
+The native fixture job `447270` accepted all 80/80 cells in both default and
+mixed modes with species-parity and conservation checks. The integrated A100
+run completed all 64 queued cells on each step, recorded 57,258 GPU RHS calls,
+zero device errors, and zero CPU fallback calls. This does not mean CPU
+chemistry was absent: the hybrid still uses host-side CVODE/LU and CPU workers.
+It also ran GPU M5 closures, so this pair compares complete integrated
+execution configurations rather than isolating the CHIMES backend.
+
+Astra independently checked the comparison. Maximum CPU/hybrid differences
+were `8.58e-10` for absorbed photons, `1.46e-9` for gas heat, `8.32e-10` for
+dust heat, and `2.54e-12` for photon inventory. The photon residual/source
+ratio remained below `2.73e-11`. The corrected dust-heat bound is
+`8.32e-10`; the earlier `<7e-10` summary was too low. Near-zero projection
+and residual quantities should be compared with absolute or budget-normalized
+errors, not relative errors against their own near-zero values. The 256
+momentum assertions cover 64 cell updates across four steps, not 256 distinct
+cells.
+
+The application times were 96.959 s (CPU) and 119.149 s (hybrid), making this
+small hybrid run about 23% slower. Different hosts/schedulers and GPU M5
+dispatch prevent attributing the difference to CHIMES alone; this is not a
+performance qualification. The patched `chimes.c` and extracted library
+`.text`/`.rodata` hashes match; full shared-library hashes differ because the
+ELF RUNPATH encodes distinct Intel MPI installation paths.
+
+Interpret `econs` carefully. The selected VPATH source,
+`patch/cuRamses/update_time.f90`, uses the legacy normalized cosmological
+energy diagnostic. Its `ekin_tot` accumulator is populated from the RAMSES
+conserved total-energy field `uold(:,ndim+2)`; despite the variable name, it
+already includes gas internal energy, so adding `eint_tot` would double-count
+it. The diagnostic does not provide cumulative, source-inclusive closure for
+feedback, cooling, radiation, and dust exchanges. This fixture has
+`cosmo=.false.`; its logged value near `0.969` is not a measured 96.9% energy
+loss and by itself neither indicates an energy bug nor proves total energy
+closure. The SNRT photon-number and radiation-energy ledgers remain sufficient
+for this bundle's bounded transport/coupling verdict, but do not close every
+gas+radiation+dust+feedback reservoir.
+
+Three earlier wrapper attempts stopped before physical integration and are
+classified as harness failures, not physics failures: job `447280` rejected
+the actual `a100_pcie` partition until its allowlist was corrected; job
+`447313` lacked the build-result provenance file; and job `447325` had
+`USE_CUDA=1` while CHIMES was still built with `CHIMES_CUDA=0`, correctly
+tripping the hybrid guard. The final `447348` run used the corrected build
+contract and passed.
+
+Following Astra's recommendation, the M5 momentum-closure build recipe now
+defaults to `CHIMES_LIBRARY_MODE=trace`; set
+`M5_CHIMES_LIBRARY_MODE=reference` to build the explicit diagnostic control.
+This selection applies to the tested M5 configuration and its eligible dark
+thermal solves; it does not certify all irradiated chemistry regimes. The
+compute backend remains CPU by default at runtime. Physical inputs in these
+jobs remain `reference_control`, so this result does not change the
+`BLOCKED` physical-production decision or external-data/license blockers.

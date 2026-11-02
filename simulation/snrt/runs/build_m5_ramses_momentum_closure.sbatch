@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Isolated incremental M5+CHIMES build for RAMSES-state momentum closure checks.
 # The baseline build tree and executable are kept untouched.
-# M5_CHIMES_LIBRARY_MODE=trace opts into the separately qualified dark-trace
-# CVODE recovery; the default reference library remains unchanged.
+# The trace CHIMES library is the default for this bounded M5 configuration.
+# Set M5_CHIMES_LIBRARY_MODE=reference to build the explicit diagnostic control.
 #SBATCH --job-name=m5-momentum-build
 # CUDA toolkit modules are available on syntax's GPU nodes, not grammar normal.
 # The compiler does not execute kernels, but reserve one typed GPU for the build.
@@ -29,7 +29,7 @@ readonly BUILD=$ROOT/.m5-ramses-momentum-build-$SLURM_JOB_ID
 readonly SOURCE_TREE=$BUILD/committed-source
 readonly BIN=$BUILD/bin/ramses_m5_ramses_momentum_closure_v13d
 readonly EXEC=$BUILD/bin/ramses_m5_ramses_momentum_closure_v1
-readonly CHIMES_LIBRARY_MODE=${M5_CHIMES_LIBRARY_MODE:-reference}
+readonly CHIMES_LIBRARY_MODE=${M5_CHIMES_LIBRARY_MODE:-trace}
 readonly CHIMES_SOURCE_ROOT=$ROOT/.cvode-gpu/chimes
 readonly CHIMES_LIBRARY_BUILDER=$ROOT/simulation/snrt/tools/build_chimes_cpu_library.sh
 readonly CHIMES_TRACE_PATCH=$ROOT/simulation/snrt/data/chimes_trace_solver.patch
