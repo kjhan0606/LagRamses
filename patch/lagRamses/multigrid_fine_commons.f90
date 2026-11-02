@@ -4002,6 +4002,15 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
    real(dp) :: my_xmin, my_xmax
    logical :: overlap
    logical :: local_changed, global_changed
+   ! Opt-in one-rank trace of the source read by each uniform FFTW solve.
+   logical :: qumond_diag_on
+   character(len=8) :: qumond_diag_env
+   integer :: qumond_diag_status, qumond_diag_igrid, qumond_diag_ind
+   integer :: qumond_diag_cell
+   integer, save :: qumond_diag_call = 0
+   integer(i8b) :: qumond_diag_ncell
+   real(dp) :: qumond_diag_value, qumond_diag_sum, qumond_diag_sum2
+   real(dp) :: qumond_diag_min, qumond_diag_max
 #ifdef FDMDEBUG
    integer :: fftp_path
    real(kind=8) :: fftp_total_wall,fftp_total_cpu
@@ -4019,6 +4028,45 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
    dx2_fft = dx_fft * dx_fft
    twopi   = 2.0d0 * acos(-1.0d0)
    use_distributed = (N_total >= 256_i8b**3 .and. ncpu > 1)
+   qumond_diag_on=.false.
+   if(solve_mode==0) then
+      qumond_diag_env=''
+      call get_environment_variable('RAMSES_QUMOND_SOURCE_DIAG', &
+           qumond_diag_env,status=qumond_diag_status)
+      qumond_diag_on=(qumond_diag_status==0 .and. trim(qumond_diag_env)=='1')
+      if(qumond_diag_on) then
+         if(ncpu/=1) then
+            if(myid==1) write(*,'(A)') ' [QUMOND_FFT_DIAG] requires one MPI rank'
+            call clean_stop
+         end if
+         qumond_diag_call=qumond_diag_call+1
+         qumond_diag_ncell=int(active(ilevel)%ngrid,i8b)*int(twotondim,i8b)
+         qumond_diag_sum=0d0
+         qumond_diag_sum2=0d0
+         qumond_diag_min=huge(1d0)
+         qumond_diag_max=-huge(1d0)
+         do qumond_diag_igrid=1,active(ilevel)%ngrid
+            do qumond_diag_ind=1,twotondim
+               qumond_diag_cell=ICELL_OF(active(ilevel)%igrid(qumond_diag_igrid),qumond_diag_ind)
+               qumond_diag_value=rho(qumond_diag_cell)
+               qumond_diag_sum=qumond_diag_sum+qumond_diag_value
+               qumond_diag_sum2=qumond_diag_sum2+qumond_diag_value**2
+               qumond_diag_min=min(qumond_diag_min,qumond_diag_value)
+               qumond_diag_max=max(qumond_diag_max,qumond_diag_value)
+            end do
+         end do
+         if(qumond_diag_ncell>0_i8b) then
+            write(*,'(A,I0,A,I0,A,I0,A,I0,A,ES18.10)') &
+                 ' [QUMOND_FFT_DIAG] call=',qumond_diag_call,' step=',nstep_coarse, &
+                 ' level=',ilevel,' cells=',qumond_diag_ncell,' rho_tot=',rho_tot
+            write(*,'(A,4(1X,ES18.10))') &
+                 ' [QUMOND_FFT_DIAG] input_source mean rms min max=', &
+                 qumond_diag_sum/dble(qumond_diag_ncell), &
+                 sqrt(qumond_diag_sum2/dble(qumond_diag_ncell)), &
+                 qumond_diag_min,qumond_diag_max
+         end if
+      end if
+   end if
 #ifdef FDMDEBUG
    fftp_path=merge(2,1,use_distributed)
    call fftp_start(fftp_total_wall,fftp_total_cpu)
@@ -4812,6 +4860,13 @@ subroutine fftw_uniform_solve_engine(ilevel,icount,solve_mode,m2,step_frac,relax
             end if
          end do
       end do
+      if(qumond_diag_on) then
+         write(*,'(A,I0,A,4(1X,ES18.10))') &
+              ' [QUMOND_FFT_DIAG] call=',qumond_diag_call,' packed_rhs mean rms min max=', &
+              sum(rhs_local(0:N_total-1))/dble(N_total), &
+              sqrt(sum(rhs_local(0:N_total-1)**2)/dble(N_total)), &
+              minval(rhs_local(0:N_total-1)),maxval(rhs_local(0:N_total-1))
+      end if
 #ifdef FDMDEBUG
       call fftp_stop(fftp_path,FFTP_PACK,fftp_phase_wall,fftp_phase_cpu, &
            int(ngrid_loc,kind=8)*int(twotondim,kind=8))

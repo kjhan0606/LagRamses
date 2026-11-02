@@ -671,6 +671,20 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
   real(dp)::h_right,h_left,div_h
   logical::skip_cell
 
+  ! Opt-in, single-rank source audit for the uniform QUMOND solver gate.
+  ! The physics update below is unchanged when the diagnostic is enabled.
+  logical::diag_enabled
+  character(len=8)::diag_env
+  character(len=18)::diag_name
+  integer::diag_status,diag_i,diag_igrid,diag_ind,diag_idim,diag_dir
+  integer::diag_missing_cell,diag_nb(0:twondim),diag_field,diag_sample
+  integer::diag_sample_i(3),diag_sample_ind(3)
+  integer(kind=8)::diag_ncell,diag_skipped,diag_missing_faces
+  real(dp),allocatable::diag_rho_before(:,:)
+  real(dp)::diag_sum(3),diag_sum2(3),diag_min(3),diag_max(3),diag_vals(3)
+  real(dp)::diag_old,diag_new,diag_ph,diag_x(3),diag_d2,diag_best_d2(3)
+  real(dp)::diag_target(3,3)
+
   integer,dimension(1:3,1:2,1:8)::ggg,hhh
   integer,dimension(1:nvector)::ind_grid_w,ind_cell_w
   integer,dimension(1:nvector,0:twondim)::igridn_w
@@ -700,6 +714,37 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
   ggg(2,2,1:8)=(/0,0,4,4,0,0,4,4/); hhh(2,2,1:8)=(/3,4,1,2,7,8,5,6/)
   ggg(3,1,1:8)=(/5,5,5,5,0,0,0,0/); hhh(3,1,1:8)=(/5,6,7,8,1,2,3,4/)
   ggg(3,2,1:8)=(/0,0,0,0,6,6,6,6/); hhh(3,2,1:8)=(/5,6,7,8,1,2,3,4/)
+
+  diag_env=''
+  call get_environment_variable('RAMSES_QUMOND_SOURCE_DIAG',diag_env,status=diag_status)
+  diag_enabled=(diag_status==0 .and. trim(diag_env)=='1' .and. .not.is_aqual)
+  if(diag_enabled) then
+     if(ncpu/=1) then
+        if(myid==1) write(*,'(A)') ' [QUMOND_SOURCE_DIAG] requires one MPI rank'
+        call clean_stop
+     end if
+     allocate(diag_rho_before(ncache,twotondim))
+     diag_ncell=int(ncache,8)*int(twotondim,8)
+     diag_skipped=0_8
+     diag_missing_faces=0_8
+     do diag_i=1,ncache
+        diag_igrid=active(ilevel)%igrid(diag_i)
+        diag_nb(0)=diag_igrid
+        do diag_dir=1,2*ndim
+           diag_nb(diag_dir)=morton_nbor_grid(diag_igrid,ilevel,diag_dir)
+        end do
+        do diag_ind=1,twotondim
+           diag_rho_before(diag_i,diag_ind)=rho(ICELL_OF(diag_igrid,diag_ind))
+           diag_missing_cell=0
+           do diag_idim=1,ndim
+              if(diag_nb(ggg(diag_idim,1,diag_ind))==0) diag_missing_cell=diag_missing_cell+1
+              if(diag_nb(ggg(diag_idim,2,diag_ind))==0) diag_missing_cell=diag_missing_cell+1
+           end do
+           if(diag_missing_cell>0) diag_skipped=diag_skipped+1_8
+           diag_missing_faces=diag_missing_faces+int(diag_missing_cell,8)
+        end do
+     end do
+  end if
 
 !$omp parallel do private(igrid,ngrid,i,ind,idim, &
 !$omp&  ind_grid_w,ind_cell_w,igridn_w, &
@@ -791,6 +836,75 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
         end do  ! i
      end do  ! ind
   end do  ! igrid
+
+  if(diag_enabled) then
+     diag_sum=0d0
+     diag_sum2=0d0
+     diag_min=huge(1d0)
+     diag_max=-huge(1d0)
+     diag_best_d2=huge(1d0)
+     diag_sample_i=0
+     diag_sample_ind=0
+     diag_target(:,1)=(/0.58d0,0.50d0,0.50d0/)
+     diag_target(:,2)=(/0.70d0,0.50d0,0.50d0/)
+     diag_target(:,3)=(/0.85d0,0.50d0,0.50d0/)
+     do diag_i=1,ncache
+        diag_igrid=active(ilevel)%igrid(diag_i)
+        do diag_ind=1,twotondim
+           diag_old=diag_rho_before(diag_i,diag_ind)
+           diag_new=rho(ICELL_OF(diag_igrid,diag_ind))
+           diag_ph=diag_new-diag_old
+           diag_vals=(/diag_old,diag_ph,diag_new/)
+           diag_sum=diag_sum+diag_vals
+           diag_sum2=diag_sum2+diag_vals**2
+           diag_min=min(diag_min,diag_vals)
+           diag_max=max(diag_max,diag_vals)
+           diag_x(1)=xg(diag_igrid,1)+(dble(mod(diag_ind-1,2))-0.5d0)*dx
+           diag_x(2)=xg(diag_igrid,2)+(dble(mod((diag_ind-1)/2,2))-0.5d0)*dx
+           diag_x(3)=xg(diag_igrid,3)+(dble((diag_ind-1)/4)-0.5d0)*dx
+           do diag_sample=1,3
+              diag_d2=sum((diag_x-diag_target(:,diag_sample))**2)
+              if(diag_d2<diag_best_d2(diag_sample)) then
+                 diag_best_d2(diag_sample)=diag_d2
+                 diag_sample_i(diag_sample)=diag_i
+                 diag_sample_ind(diag_sample)=diag_ind
+              end if
+           end do
+        end do
+     end do
+     write(*,'(A,I0,A,I0,A,ES18.10,A,ES18.10)') &
+          ' [QUMOND_SOURCE_DIAG] step=',nstep_coarse,' level=',ilevel, &
+          ' a0_code=',a0_code,' fourpi=',fourpi
+     write(*,'(A,4(1X,I0))') &
+          ' [QUMOND_SOURCE_DIAG] cells updated skipped missing_faces=', &
+          diag_ncell,diag_ncell-diag_skipped,diag_skipped,diag_missing_faces
+     do diag_field=1,3
+        select case(diag_field)
+        case(1); diag_name='newtonian_source'
+        case(2); diag_name='phantom_source'
+        case(3); diag_name='combined_source'
+        end select
+        write(*,'(A,A,A,4(1X,ES18.10))') &
+             ' [QUMOND_SOURCE_DIAG] ',trim(diag_name),' mean rms min max=', &
+             diag_sum(diag_field)/dble(diag_ncell), &
+             sqrt(diag_sum2(diag_field)/dble(diag_ncell)), &
+             diag_min(diag_field),diag_max(diag_field)
+     end do
+     do diag_sample=1,3
+        diag_i=diag_sample_i(diag_sample)
+        diag_ind=diag_sample_ind(diag_sample)
+        diag_igrid=active(ilevel)%igrid(diag_i)
+        diag_x(1)=xg(diag_igrid,1)+(dble(mod(diag_ind-1,2))-0.5d0)*dx
+        diag_x(2)=xg(diag_igrid,2)+(dble(mod((diag_ind-1)/2,2))-0.5d0)*dx
+        diag_x(3)=xg(diag_igrid,3)+(dble((diag_ind-1)/4)-0.5d0)*dx
+        diag_old=diag_rho_before(diag_i,diag_ind)
+        diag_new=rho(ICELL_OF(diag_igrid,diag_ind))
+        write(*,'(A,I0,A,3(1X,ES17.9),A,3(1X,ES17.9))') &
+             ' [QUMOND_SOURCE_DIAG] sample=',diag_sample,' xyz=',diag_x, &
+             ' rho_N/ph/rho_sum=',diag_old,diag_new-diag_old,diag_new
+     end do
+     deallocate(diag_rho_before)
+  end if
 
 end subroutine compute_mond_phantom_density
 !#########################################################
