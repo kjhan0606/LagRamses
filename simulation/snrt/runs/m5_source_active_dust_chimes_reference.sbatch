@@ -10,6 +10,7 @@
 # A10: --partition=a10 --gres=gpu:A10:1
 # A40: --partition=a40 --gres=gpu:A40:1
 # A100: --partition=a100 --gres=gpu:A100:1
+# A100 PCIe: --partition=a100_pcie --gres=gpu:A100:1
 # H200: --partition=h200 --gres=gpu:H200:1
 # CPU-only CHIMES: submit on grammar with --partition=normal --gres=none and M5_CHIMES_BACKEND=cpu.
 #SBATCH --partition=h100
@@ -44,7 +45,7 @@ if [[ -n "${M5_CHIMES_BACKEND:-}" ]]; then
   CHIMES_BACKEND=$M5_CHIMES_BACKEND
 else
   case "${SLURM_JOB_PARTITION:-}" in
-    h200|h100|a100|a40|a10) CHIMES_BACKEND=hybrid ;;
+    h200|h100|a100|a100_pcie|a40|a10) CHIMES_BACKEND=hybrid ;;
     normal) CHIMES_BACKEND=cpu ;;
     *)
       echo "Set M5_CHIMES_BACKEND explicitly for Slurm partition ${SLURM_JOB_PARTITION:-unknown}" >&2
@@ -76,7 +77,7 @@ case "$CELL_SCHEDULER" in
 esac
 if [[ "$CHIMES_BACKEND" == hybrid ]]; then
   case "${SLURM_JOB_PARTITION:-}" in
-    h200|h100|a100|a40|a10) ;;
+    h200|h100|a100|a100_pcie|a40|a10) ;;
     *) echo "Hybrid CHIMES requires an approved GPU partition, got: ${SLURM_JOB_PARTITION:-unknown}" >&2; exit 2 ;;
   esac
 else
