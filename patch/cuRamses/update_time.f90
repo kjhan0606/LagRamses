@@ -205,6 +205,17 @@ subroutine update_time(ilevel)
   dt=dtnew(ilevel)
   itest=0
 
+  ! Output-aligned steps must make representable progress in the global
+  ! clock.  Do not silently repeat a zero-advance step if a physical limit
+  ! becomes smaller than one ULP of t; report the limiting level and stop.
+  if(cosmo.and.(match_aout.or.(use_fdm.and.fdm_match_aout)))then
+     if(dt>0.0d0.and.t+dt<=t)then
+        if(myid==1)write(*,'("ERROR: match_aout timestep cannot advance time: level=",I4, &
+             & " t=",ES24.16," dt=",ES24.16)')ilevel,t,dt
+        call clean_stop
+     end if
+  end if
+
 #ifndef WITHOUTMPI
   if(myid==1)then
      if(ttstart.eq.0.0)ttstart=MPI_WTIME()

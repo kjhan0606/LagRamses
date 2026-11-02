@@ -32,6 +32,7 @@ subroutine newdt_fine(ilevel)
 #endif
 
   real(kind=8)::dt_loc,dt_all,ekin_loc,ekin_all,dt_acc_min,dt_to_out,tau_out
+  real(kind=8)::dt_match_floor
   real(kind=8)::idt_loc,iekin_loc
   real(kind=8)::jdt_loc,jekin_loc
   real(dp)::tff,fourpi,threepi2
@@ -90,6 +91,16 @@ subroutine newdt_fine(ilevel)
         ! Cross the comparison threshold by round-off only, so dump_all
         ! reliably advances iout while the written epoch remains the target.
         dt_to_out=(tau_out-t)*(1.0d0+1.0d-12)
+        ! A relative epsilon can leave this candidate below the smallest
+        ! representable increment in update_time, especially after AMR
+        ! subcycling.  Floor only the output-alignment candidate: physical
+        ! timestep constraints remain authoritative when candidates are
+        ! combined below.
+        dt_match_floor=2.0d0*(nearest(t,1.0d0)-t)
+        do ilev=levelmin,nlevelmax-1
+           dt_match_floor=dt_match_floor*dble(max(1,nsubcycle(ilev)))
+        end do
+        dt_to_out=max(dt_to_out,dt_match_floor)
         if(dt_to_out>0.0d0) dtnew(ilevel)=MIN(dtnew(ilevel),dt_to_out)
      end if
   end if
