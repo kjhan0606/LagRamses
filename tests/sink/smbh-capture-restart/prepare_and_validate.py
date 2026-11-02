@@ -653,6 +653,43 @@ def validate_info_ncpu(info_path: Path, ranks: int) -> None:
         fail(f"{info_path}: expected ncpu={ranks}")
 
 
+def validate_runtime_multiple_markers(records: list[dict]) -> None:
+    """Require current-writer preservation markers on every smoke event."""
+    begins = [row for row in records if row.get("record_type") == "event_begin"]
+    ends = [row for row in records if row.get("record_type") == "event_end"]
+    begin_uids = [row.get("event_uid") for row in begins]
+    end_uids = [row.get("event_uid") for row in ends]
+    if (
+        not begins
+        or any(
+            not isinstance(uid, str) or not uid
+            for uid in (*begin_uids, *end_uids)
+        )
+        or len(begin_uids) != len(set(begin_uids))
+        or len(end_uids) != len(set(end_uids))
+        or set(begin_uids) != set(end_uids)
+    ):
+        fail(
+            "event begin/end coverage is incomplete for MULTIPLE preservation check"
+        )
+    end_by_uid = {row["event_uid"]: row for row in ends}
+    for begin in begins:
+        uid = begin["event_uid"]
+        member_count = begin.get("nmember")
+        if type(member_count) is not int or member_count < 2:
+            fail(
+                f"event {uid}: nmember is invalid for MULTIPLE preservation check"
+            )
+        expected = member_count > 2
+        end = end_by_uid[uid]
+        if type(end.get("multiple_members_preserved")) is not bool:
+            fail(
+                f"event {uid}: missing or invalid multiple_members_preserved marker"
+            )
+        if end["multiple_members_preserved"] is not expected:
+            fail(f"event {uid}: multiple_members_preserved disagrees with member count")
+
+
 def postcheck(args: argparse.Namespace) -> None:
     run_dir = args.run_dir.resolve()
     ranks = args.expected_mpi_ranks
@@ -702,6 +739,7 @@ def postcheck(args: argparse.Namespace) -> None:
         if summary.get(key) != value:
             fail(f"ledger {key}: expected {value!r}, found {summary.get(key)!r}")
     records = [json.loads(line) for line in (run_dir / LEDGER_NAME).read_text(encoding="utf-8").splitlines() if line.strip()]
+    validate_runtime_multiple_markers(records)
     attempts = [row for row in records if row.get("record_type") == "attempt_begin"]
     if len(attempts) != 2 or attempts[0].get("parent_checkpoint_uid") is not None:
         fail("expected one fresh attempt followed by one restart attempt")

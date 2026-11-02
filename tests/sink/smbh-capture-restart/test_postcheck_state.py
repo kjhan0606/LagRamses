@@ -22,6 +22,21 @@ SINK_ROWS = (
 )
 
 
+def _runtime_event_records() -> list[dict]:
+    return [
+        {"record_type": "event_begin", "event_uid": "binary", "nmember": 2},
+        {
+            "record_type": "event_end", "event_uid": "binary",
+            "multiple_members_preserved": False,
+        },
+        {"record_type": "event_begin", "event_uid": "multiple", "nmember": 3},
+        {
+            "record_type": "event_end", "event_uid": "multiple",
+            "multiple_members_preserved": True,
+        },
+    ]
+
+
 class PostcheckStateTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -64,6 +79,54 @@ class PostcheckStateTest(unittest.TestCase):
 
     def test_accepts_conserved_continuous_finite_state(self) -> None:
         VALIDATOR.validate_sink_state(self.run_dir, self.capture_events)
+
+    def test_runtime_postcheck_accepts_complete_binary_and_multiple_markers(
+        self,
+    ) -> None:
+        VALIDATOR.validate_runtime_multiple_markers(_runtime_event_records())
+
+    def test_runtime_postcheck_rejects_missing_multiple_marker(self) -> None:
+        records = _runtime_event_records()
+        del records[-1]["multiple_members_preserved"]
+        with self.assertRaisesRegex(
+            SystemExit, "missing or invalid multiple_members_preserved"
+        ):
+            VALIDATOR.validate_runtime_multiple_markers(records)
+
+    def test_runtime_postcheck_rejects_marker_that_disagrees_with_member_count(
+        self,
+    ) -> None:
+        records = _runtime_event_records()
+        records[-1]["multiple_members_preserved"] = False
+        with self.assertRaisesRegex(
+            SystemExit, "disagrees with member count"
+        ):
+            VALIDATOR.validate_runtime_multiple_markers(records)
+
+    def test_runtime_postcheck_requires_a_boolean_marker(self) -> None:
+        records = _runtime_event_records()
+        records[-1]["multiple_members_preserved"] = 1
+        with self.assertRaisesRegex(
+            SystemExit, "missing or invalid multiple_members_preserved"
+        ):
+            VALIDATOR.validate_runtime_multiple_markers(records)
+
+    def test_runtime_postcheck_rejects_unpaired_event_end(self) -> None:
+        records = _runtime_event_records()
+        records[-1]["event_uid"] = "other"
+        with self.assertRaisesRegex(SystemExit, "event begin/end coverage is incomplete"):
+            VALIDATOR.validate_runtime_multiple_markers(records)
+
+    def test_runtime_postcheck_calls_multiple_marker_guard(self) -> None:
+        source = (HERE / "prepare_and_validate.py").read_text(encoding="utf-8")
+        start = source.index("def postcheck(")
+        end = source.index("\ndef main(", start)
+        postcheck_source = source[start:end]
+        records_read = postcheck_source.index("records = [json.loads(line)")
+        marker_guard = postcheck_source.index(
+            "validate_runtime_multiple_markers(records)"
+        )
+        self.assertLess(records_read, marker_guard)
 
     def test_rejects_nonfinite_sink_rate(self) -> None:
         path = self.run_dir / "output_00002" / "sink_00002.csv"
