@@ -722,3 +722,58 @@ selected external data-use terms, the exact release-build qualification, and
 an actual-root selected-asset manifest accepted by launch preflight. The
 historical `/gpfs/kjhan/LRD_JWST` G0 manifest remains unbound to this active
 checkout and is not treated as current production evidence.
+
+### Current syntax GPU verification and AGN SED plan disposition — 2026-11-02
+
+This section supersedes the preceding AGN-plan-audit sentence and records the
+latest bounded evidence; it does not change the `BLOCKED` physical-production
+decision above.
+
+- The active checkout is now at `c4b29ea` on
+  `agent/chimes-cvode-gpu-20261001`, pushed to `kjhan0606/LagRamses`.
+- A40 Slurm job `444911` completed a four-step, order-5 M5 integration with
+  effective stellar population, the thermal-AGN reference source, live dust,
+  and hybrid CHIMES. The runner returned
+  `M5_SOURCE_ACTIVE_DUST_CHIMES_REFERENCE_PASS`; its log reports 43,014 GPU
+  RHS calls, 2,117 batches, zero CPU fallback calls, and zero device errors.
+  It used the executable from build `444265` (source commit `2d3426fe`), so
+  retain this as bounded integration evidence, not exact-HEAD qualification or
+  approval of the reference physical inputs.
+- Typed-A40 fixture job `447192` completed with exit 0 from the source state
+  subsequently committed as `77edfdf`. The 80-cell fixture passed four-broker
+  parity; 73 cells were compared and seven matching status-41 rejections were
+  not successful integrations. The staged timing was 0.0333 s CPU versus
+  0.2374 s GPU, so it establishes correctness/concurrency only and shows no
+  speedup for this fixture. The corrected staged-only counters were 20,322 GPU
+  calls, 599 batches, zero errors. Astra's bounded bundle audit returned
+  Q-GOAL yes, Q-LEAN proportionate, PASS, while expressly withholding
+  production and performance approval.
+- The initial typed-A100 job `447203` remained pending on the busy `a100`
+  partition; it was cancelled before starting and the same job was submitted
+  across `a100_pcie,a100` as `447217`. The scheduler placed it on idle
+  `syn103`; it completed in 19 s with exit 0 and logged
+  `NVIDIA A100 80GB PCIe -> sm_80`. The 80-cell fixture reported matching
+  CPU/GPU statuses on all 80 cells: 73 integrations were compared and seven
+  cells were rejected by both paths with status 41. The parity markers passed,
+  but those seven cells are not successful integrations. This establishes
+  A100 architecture dispatch and fixture-level parity, not a full production
+  run. It showed no speedup: RHS CPU time was 0.0274 s versus 0.4207 s for the
+  warm GPU path (reported speedup 0.065); staged tile CPU time was 0.0250 s
+  versus 0.1651 s GPU. These tiny-fixture timings are overhead-dominated and
+  are not a production-scale performance estimate.
+- Astra's read-only execution audit confirms this bounded parity verdict and
+  no production/performance qualification. It also found that the fixture's
+  acceptance predicate allows any matching rejection count below 80 rather
+  than pinning the seven known status-41 cells; the zero-valued
+  `RHS_PAIRED_MAX` line is emitted with `paired_return=none`, so it is not a
+  paired-RHS accuracy result. Conditional forced-failure tests were not enabled
+  by this runner. Interpret its pass markers only with the explicit
+  73-integrated/7-rejected scope above.
+- Astra's read-only AGN SED **plan** audit returned Q-GOAL yes, Q-LEAN
+  proportionate, and PASS for planning feasibility only. The plan now defines
+  the checked-`L_bol` versus explicitly labelled `L_grid` denominator,
+  unsupported spectral tails, and the first fixture's diagnostic
+  `f_escape=1` assumption. The proposed 10% comparison target still requires
+  operator adoption or revision; candidate spectrum/comparison results have
+  not been inspected. Candidate SED implementation and the external-data
+  release/admission blockers remain open.
