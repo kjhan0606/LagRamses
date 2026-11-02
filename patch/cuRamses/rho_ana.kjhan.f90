@@ -21,6 +21,7 @@ subroutine rho_ana(x,d,dx,ncell)
   real(dp)::dmass,emass,xmass,ymass,zmass,rr,rx,ry,rz,dd
   real(dp)::fourpi,star_norm,gas_norm,halo_norm,concentration
   real(dp)::radius_cyl,star_height,gas_height,halo_x
+  real(dp)::source_cutoff,taper_inner,taper_width,taper_r,taper_z
 
   if(gravity_type==-2.or.gravity_type==-3)then
      ! Fixed, cell-centred mass model for the controlled disc force pilot.
@@ -39,6 +40,10 @@ subroutine rho_ana(x,d,dx,ncell)
            call clean_stop
         end if
      end if
+     if(gravity_params(10)<0d0)then
+        write(*,'(A)') 'ERROR: negative analytic disc cutoff radius'
+        call clean_stop
+     end if
      fourpi=4d0*acos(-1d0)
      star_norm=gravity_params(1)/(fourpi*gravity_params(2)**2*gravity_params(3))
      gas_norm=gravity_params(4)/(fourpi*gravity_params(5)**2*gravity_params(6))
@@ -48,7 +53,10 @@ subroutine rho_ana(x,d,dx,ncell)
         halo_norm=gravity_params(7)/(fourpi*gravity_params(8)**3* &
              (log(1d0+concentration)-concentration/(1d0+concentration)))
      end if
-!$omp parallel do private(i,rx,ry,rz,rr,dd,radius_cyl,star_height,gas_height,halo_x)
+     source_cutoff=gravity_params(10)
+     taper_inner=0.8d0*source_cutoff
+     taper_width=0.2d0*source_cutoff
+!$omp parallel do private(i,rx,ry,rz,rr,dd,radius_cyl,star_height,gas_height,halo_x,taper_r,taper_z)
      do i=1,ncell
         rx=x(i,1)-0.5d0*boxlen
         ry=x(i,2)-0.5d0*boxlen
@@ -58,6 +66,16 @@ subroutine rho_ana(x,d,dx,ncell)
         gas_height=1d0/cosh(rz/gravity_params(6))**2
         dd=star_norm*exp(-radius_cyl/gravity_params(2))*star_height &
              +gas_norm*exp(-radius_cyl/gravity_params(5))*gas_height
+        ! Optional compact support leaves the measured inner disc unchanged.
+        ! A cosine taper from 0.8*cutoff to cutoff matches the same finite
+        ! baryonic source on periodic boxes of different physical lengths.
+        if(source_cutoff>0d0)then
+           taper_r=0.5d0*(1d0+cos((fourpi/4d0)* &
+                min(1d0,max(0d0,(radius_cyl-taper_inner)/taper_width))))
+           taper_z=0.5d0*(1d0+cos((fourpi/4d0)* &
+                min(1d0,max(0d0,(abs(rz)-taper_inner)/taper_width))))
+           dd=dd*taper_r*taper_z
+        end if
         if(gravity_type==-3)then
            rr=sqrt(radius_cyl**2+rz**2)
            if(rr<=gravity_params(9))then
