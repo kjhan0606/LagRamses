@@ -1,14 +1,15 @@
 # AGN source spectrum closure — bounded bundle plan (draft)
 
-Date: 2026-10-31. Workspace: `/gpfs/kjhan/chimes-cvode-gpu-20261001`,
+Plan initiated 2026-10-31; revised after Astra review 2026-11-02.
+Workspace: `/gpfs/kjhan/chimes-cvode-gpu-20261001`,
 `kjhan0606/LagRamses`.
 
 ## Q-GOAL — ask first
 
-Does replacing the current reference-only AGN group contract with a
-literature-based intrinsic AGN spectrum, integrated consistently onto the
-existing SNRT groups and coupled to live dust, directly advance the approved
-galaxy-scale effective-model goal? Identify any scope mismatch before reviewing
+Does adding a literature-based AGN emission shape, comparing its
+moment-matched interaction rates to the actual runtime reconstruction, and
+coupling it through existing SNRT/gas/dust paths advance the approved
+galaxy-scale effective-model goal? Identify scope mismatch before reviewing
 implementation details.
 
 ## Q-LEAN — ask second
@@ -23,22 +24,24 @@ The successful M5 + stellar/thermal-AGN + dust + CHIMES integrations verify
 source routing and coupling under reference controls. They do not validate the
 AGN SED. `snrt_group_contract_reference_control_v1.nml` is explicitly marked
 `reference_control_not_science_approved`; the nine-group contract is bound to a
-pilot ledger, and its represented energy fraction is about 0.1815. The native
-transport uses a single shared group-opacity contract, so adopting per-sink
-spectral shapes without changing how mixed group opacities are defined would
-be inconsistent.
+pilot ledger, and its represented energy fraction is about 0.1815. The runtime
+transports group photon-number and energy moments and reconstructs a positive
+within-group spectrum with the shared MaxEnt prior in
+[`snrt_band_spectrum.h`](../patch/lagRamses/snrt_band_spectrum.h); CHIMES
+interaction rates integrate that reconstructed spectrum in
+[`snrt_chimes_spectrum.cpp`](../patch/lagRamses/snrt_chimes_spectrum.cpp).
+Thus the relevant comparison is against the actual moment-matched runtime
+reconstruction, not against a fixed group coefficient alone.
 
 ### Code-path constraints confirmed before implementation
 
-- `snrt_spectral_contract` publishes one shared set of group mean energies,
-  group fractions, H/He cross-sections, and excess energies. The M5 source and
-  coupling paths consume those shared moments; AGN photon budgets use the
-  shared group fractions and means, while stellar particles provide their own
-  group photon counts and may carry source-energy corrections. CHIMES group
-  binding and the absorption/heating path still use the shared group-energy
-  closure. Therefore loading an AGN-derived contract in a mixed STAR+AGN run
-  also changes how stellar photons are interpreted. A fixed AGN template alone
-  does not close the mixed-source spectral approximation.
+- The source builders can emit source-specific group photon and energy
+  moments, but the material interaction path reconstructs a spectrum from the
+  transported moments using one shared MaxEnt prior. Candidate SED work must
+  compare rates produced by that exact runtime reconstruction against the
+  resolved candidate spectrum, with matched group moments. Merely replacing a
+  shared coefficient or splitting STAR and AGN labels does not measure or
+  remove within-family spectral variation or attenuation-induced hardening.
 - `candidate_explicit_sed` currently passes file/value inspection but is not
   runtime-admissible. The only runtime statuses are `approved_production` and
   `reference_control` with `SNRT_ALLOW_REFERENCE_CONTROL=1`; the current
@@ -50,6 +53,49 @@ be inconsistent.
   group contract and sets `launch_admission_manifest=false`. The latest
   reference-control integration therefore proves wiring only; it is not
   physical-SED or production qualification evidence.
+
+## Astra plan-audit result (read-only)
+
+**Q-GOAL — conditional yes.** A literature-based AGN emission shape followed
+through M5, gas chemistry, dust absorption, and the existing energy ledger
+supports the effective galaxy-formation goal. A fixed group-coefficient swap
+alone would not establish this because the actual runtime uses the moment-based
+MaxEnt reconstruction.
+
+**Q-LEAN — conditional.** Keep the initial bundle to one bounded source
+contract, one comparison against the runtime reconstruction, and one coupled
+confirmation. Reuse the existing runner and conservation evidence. Add
+source-resolved mesh state only if the measured shared reconstruction misses a
+declared accuracy target and source mixing is shown to cause that miss. Such a
+split would not by itself fix within-family variation or spectral hardening.
+
+The audit recommends Su et al. `agnSED` as a shape-only candidate for the first
+bounded fixture. Preserve LagRamses's accepted electromagnetic-energy receipt
+and mechanical partition; do not derive a second bolometric normalization from
+Su and add it to the existing feedback budget. The sink currently carries a
+scalar pending-energy reservoir rather than a per-event spectral history, so
+the first candidate must declare a fixed template evaluated at consumption
+time. Event-weighted spectra would require explicit reservoir, merge, and
+restart changes and are not part of this bundle.
+
+For evidence, compare the resolved candidate spectrum with the actual runtime
+MaxEnt reconstruction at matched group photon and energy moments for pure
+stellar, pure AGN, mixed, and representative attenuated spectra. Summarize the
+materially contributing photoionization/heating rates, CHIMES rates, dust
+absorbed energy and momentum, and transmitted photon number and energy. Astra
+proposed a 10% relative engineering target for materially contributing rates
+and transfers, with an absolute contribution floor for near-zero channels and
+integration error smaller than that target. This is not a universal physical
+guarantee; the driver must declare or revise it before inspecting candidate
+comparison results.
+
+The coupled candidate run must demonstrate an in-domain black hole and
+accepted electromagnetic receipt, distinct stellar source moments reaching
+M5 alongside AGN photons, consistent gas/chemistry and dust/IR transfers, and
+no duplicated mechanical or absorbed/reprocessed energy. Candidate admission
+must fail closed in both AGN and spectral-model loaders and remain separate
+from production admission. The audit does not approve production use or clear
+external data-use and release-manifest blockers.
 
 ### Candidate-data audit (2026-10-31)
 
@@ -139,17 +185,35 @@ uncapped ratio `X=Bondi/Mdot_Edd(code)`, it is
 efficiency can also include the MAD jet-mode reduction, while Su et al.'s SED
 assumes zero spin and does not encode that reduction.
 
-Before generating a candidate ledger, the plan audit must choose its
-normalization contract: (a) use the Su interpolator for spectral shape and
-renormalize its sampled `L_nu` to LagRamses's existing
-`effective_efficiency * Mdot_inflow * c^2`, explicitly treating Su as a
-shape-only closure; or (b) use the interpolator's own radiative output and
-reconcile its radiative efficiency with the existing thermal/jet energy
-partition. These choices are physically different. Option (b) changes the
-current feedback energy contract and cannot be introduced as a mere SED file
-conversion. Source escape/obscuration remains another explicit source-side
-choice; local gas and dust absorption must still process injected energy only
-once.
+**Selected first-bundle normalization:** use the Su interpolator for spectral
+shape only. Define the spectral-fraction denominator before clipping to the
+transport bands: use the model-reported bolometric luminosity only if the
+candidate data/code exposes it and its consistency with the spectrum can be
+checked. Otherwise use the integral over the complete supported SED grid,
+label it `L_grid` rather than `L_bol`, compare it with a paper-reported
+bolometric value when available, and carry the unsupported low/high-energy
+tails as a normalization uncertainty. For each group,
+`f_g = integral_group(L_nu dnu) / L_denominator` and
+`E_g = f_g * E_EM,accepted`; then `N_g = E_g / <h nu>_g`. If the denominator
+is a supported-grid integral, report the in-band fraction of that grid and do
+not call its omitted fraction a bolometric remainder. If it is a checked
+bolometric value, report the true out-of-band remainder explicitly. Never
+renormalize only the sampled in-band groups to sum to one. Here
+`E_EM,accepted` is the energy already accepted into `agn_pending_erg`; do not
+count it again as thermal/mechanical feedback. The existing high-accretion
+branch allocates 85% of released energy to electromagnetic feedback and 15%
+to mechanical feedback; the low branch is jet-only and emits no AGN photons.
+The candidate must preserve that partition.
+
+Compute `mdot_Su` from the accepted/capped inflow rate, not the requested
+Bondi rate or the code's spin-dependent Eddington ratio. The first fixture is
+`M_BH=1e8 Msun`, `mdot_Su=0.1`, zero spin/MAD, and must verify that the actual
+`X_floor` selects the electromagnetic branch. Any source-side escape or
+obscuration is explicit. For this bounded fixture, set the unresolved source
+escape fraction to `f_escape=1`: inject the selected intrinsic SED at the
+resolved transport boundary without an unresolved torus/obscurer correction.
+This is a declared diagnostic assumption, not a general AGN escape model.
+Resolved gas and dust then process the injected radiation once.
 
 ### First-pass stellar interaction-moment sensitivity (2026-10-31)
 
@@ -247,59 +311,32 @@ This does not recover a unique atmosphere spectrum from runtime Q/E moments:
 the within-band Planck shape is an explicit source-builder prior, while the
 runtime stores only photon and energy moments. The table is conditional on
 that prior, and its ratios compare against a pilot reference kernel that is
-itself marked `reference_control_not_science_approved`. No accepted opacity
-error tolerance is yet declared, and no candidate AGN spectrum has yet been
-integrated. The numbers therefore expose the shared-kernel precision choice
-for the upcoming audit; they do not approve a new kernel, source family, or
-runtime change.
+itself marked `reference_control_not_science_approved`. The operator has not
+yet adopted or revised Astra's proposed comparison target, and no candidate
+AGN spectrum has yet been integrated. These values motivate the matched-source
+comparison; they do not approve a new kernel, source family, or runtime change.
 
-## Design question that must be settled in the plan audit
+## Closure decision after the Astra plan audit
 
-Choose and justify one closure for the shared multigroup state before coding:
+Retain the existing shared two-moment MaxEnt reconstruction for the first
+candidate. Do not replace it with fixed AGN coefficients or introduce a
+declared mixed spectrum before comparing the actual runtime reconstruction to
+the resolved source spectra at matched photon-number and energy moments. The
+measured PARSEC ranges above show that the prior matters; they are conditional
+on the stated source-builder reconstruction and do not establish the runtime
+error for the candidate AGN source.
 
-1. **Source-independent group kernel:** retain separate stellar and AGN
-   emitted photon/energy moments, but use one fixed, source-independent
-   within-group interaction kernel for transport/chemistry. This keeps the
-   current state layout, but the representative energy/kernel and its error
-   over both source spectra must be explicit and bounded.
-2. **Declared effective mixed spectrum:** derive a single group interaction
-   closure from a declared galaxy-scale stellar/AGN mixture and validity
-   domain. This is smaller, but its fixed mixture is an approximation and
-   cannot be described as an AGN-only SED closure.
-3. **Source-resolved radiation channels:** retain separate source-family
-   radiation groups through transport and chemistry. This can represent the
-   different spectra more faithfully but changes state, memory, checkpoint,
-   AMR, and coupling architecture; assess whether that scope is necessary for
-   the approved effective-model objective.
+Source-resolved mesh channels are a contingent follow-up only if the declared
+rate/transfer target is missed and controlled comparisons show that mixing
+source families causes the miss. A source split alone does not remove
+within-family spectral variation or attenuation hardening. The added primary
+state would cost at least 5,184 bytes per M5 slot for order 5 and nine groups,
+before transaction and checkpoint overhead, so do not incur that memory and
+AMR/restart scope without this evidence.
 
-The cost is not hypothetical: for order-5 moments, `nm=(5+1)^2=36`,
-nine primary groups, and the current 136-group live-IR contract, the compact
-M5 number/energy/IR state is 44,352 bytes per slot. The current HDF5 wire
-payload pads those fields to the default 80-direction stride and is 98,592
-bytes per cell; `snrt_hdf5_write` allocates one whole-level buffer of that
-width on every rank. Thus 100,000 local cells require about 9.2 GiB for this
-buffer alone. One additional source family adds at least 5,184 bytes per M5
-slot for its primary number/energy moments, before transaction copies and any
-checkpoint-format expansion. These figures make option 3 a materially larger
-memory/I/O project and strengthen the case for assessing option 1 first.
-
-The initial proposal of simply loading an AGN-derived contract into the
-existing shared state is withdrawn pending this decision. The plan audit must
-also decide whether a candidate-only runtime path is justified for the bounded
-coupled smoke or whether an offline source/contract closure is sufficient for
-the first bundle.
-
-**Driver recommendation:** evaluate option 1 first because it preserves the
-current transported state and avoids doubling the M5, AMR, and checkpoint
-payload. The active PARSEC reconstruction already spans 1.7--2.7x in the
-principal photoionizing groups, corresponding to a 27--46% best-case maximum
-relative error for any one fixed value over those sampled states. The audit
-must decide whether that conditional stellar-only range can meet the declared
-effective-model accuracy target once the selected AGN spectrum is included.
-If not, carry source-resolved channels as required work rather than
-presenting an unbounded single-kernel approximation as production-ready.
-Option 2 is a valid effective-model choice only with an explicit mixture and
-domain; it is not a shortcut to calling an AGN spectrum physically coupled.
+The bounded coupled smoke does require candidate-only, fail-closed admission
+in both the AGN and spectral-model loaders. It must not change the existing
+reference-control or production-admission paths.
 
 ## Literature comparison and proposed direction
 
@@ -336,45 +373,45 @@ domain; it is not a shortcut to calling an AGN spectrum physically coupled.
    comparison does not validate its LRD/high-z applicability; the relevant
    BH-mass/accretion-rate domain and spectral closure still need to be stated.
 
-**Candidate source family for the audit:** the intrinsic high-redshift
-disk-plus-corona spectrum remains the leading AGN emission model, but the
-source-emission moments must be kept distinct from whichever shared
-transport/chemistry closure the audit selects. Do not add an unresolved
-torus/IR component: absorbed energy is handled by the existing gas/dust/IR
-transaction. Per-sink mass/accretion-dependent opacity remains out of scope
-unless the audit finds it necessary for the declared validity domain.
+**Candidate source family for the first bundle:** the intrinsic high-redshift
+disk-plus-corona spectrum remains the leading AGN emission model. Preserve its
+emitted N/E receipts and compare material rates through the existing shared
+MaxEnt closure. Do not add an unresolved torus/IR component: absorbed energy is
+handled by the existing gas/dust/IR transaction. Per-sink
+mass/accretion-dependent opacity remains out of scope unless the matched-rate
+evidence shows it is needed for the declared validity domain.
 
-The primary-paper checks above do not resolve the plan's central closure
-choice. In particular, Obelisk's precomputed source-dependent group moments
-were paired with its own group interaction quantities; they do not establish
-that one source-independent interaction kernel is accurate for both our
-stellar and AGN spectra. The plan audit must decide whether a bounded
-shared-kernel error criterion can be justified from the selected spectra. If
-not, source-resolved channels remain required work rather than being waived
-on memory grounds. This literature check is driver evidence, not a substitute
-for the requested Fable plan verdict.
+The primary-paper checks do not establish that the runtime MaxEnt
+reconstruction is accurate for both the active stellar source and the selected
+AGN spectrum. The matched-moment comparison below is the bounded evidence for
+that question; it is not replaced by the Obelisk precedent or by the literature
+review alone. Astra's plan verdict and its conditions are recorded above.
 
 ## Proposed bounded implementation and evidence
 
 - Add a science-candidate AGN emission contract generated from the selected
   high-redshift disk-plus-corona model; leave `partition_reference_v1` and
-  current reference files unchanged for controls. Do not bind this contract
-  into shared interaction moments until the audit selects one of the three
-  closures above.
+  current reference files unchanged for controls. Load it only through the
+  candidate-only, fail-closed path.
 - Use the existing nine photon groups and exact interval convention. Derive
-  source photon/energy moments by one documented quadrature, including the
-  partly covered groups and the restored 2–10 keV group. Derive interaction
-  moments only for the selected shared or source-resolved closure.
-- Normalize to the accepted electromagnetic energy once. State explicitly
-  which bolometric energy lies outside the transported 0.01 eV–10 keV range;
-  do not move that remainder into thermal or mechanical feedback. Do not add
-  per-cell or cumulative runtime counters.
-- Extend the existing source-contract validation to check group-edge identity,
-  finite nonnegative moments, energy-fraction closure including the
-  unrepresented remainder, H/He threshold behavior, and quadrature
-  convergence. Use the current bounded M5+dust+CHIMES runner once to confirm
-  the candidate contract reaches source deposition and dust heating without
-  raw output.
+  source photon/energy moments by documented quadrature, including partially
+  covered groups and 2--10 keV. Inspect interpolation validity before the
+  upstream NaN-to-floor masking; never turn an invalid model point into a
+  plausible faint spectrum.
+- Normalize with the selected shape-only contract above. Record group edges,
+  nonnegative finite moments, H/He thresholds, quadrature convergence, and the
+  out-of-band remainder in the existing source-contract evidence. Do not add
+  per-cell counters or a parallel test framework.
+- Compare the resolved source spectrum to the actual runtime MaxEnt spectrum
+  at matched group N/E for the declared representative source cases. Report
+  only the agreed rate and transfer measures; use the proposed 10% engineering
+  target only after the operator adopts or revises it. Keep numerical
+  integration error below the adopted comparison target.
+- Run the existing M5+dust+CHIMES integration once with the in-domain BH
+  fixture and distinct stellar/AGN receipts. Verify accepted energy, gas and
+  dust/IR transfers, and the no-double-count ledger. Do not capture an
+  additional final HDF5 dump. After stage evaluation, delete only this run's
+  raw outputs and retain the exact cleanup manifest and compact evidence.
 - Keep the candidate marked nonproduction until its literature derivation,
   provenance, and applicable data-use terms are recorded in the active release
   manifest. This bundle cannot clear CHIMES, Draine, yield, PARSEC, or other
