@@ -36,11 +36,18 @@ and coupled execution/restart evidence. Existing evaluated evidence is reused;
 no per-exclusion audit or new monitoring framework. Domain limitations remain
 explicit, including unsupported radiation, temperature, age, mass and Z.
 
-Next native target remains mixed v5 + empirical DTD/N100, reconciling the
-population identity and chosen mass-accounting contract together. Do not
-merely delete v5 rejection checks or silently switch strict-WD/effective-SSP
-semantics. Same-author stellar libraries and resolved binary evolution are
-not prerequisites for a consistent effective population.
+The approved mixed-v5 + empirical DTD/N100 bundle is complete within its
+declared effective-SSP domain: Step 1 passed native event/mass accounting,
+Step 2 configured the selected profile, and Step 3 passed a bounded coupled
+run and restart. The authoritative scope and limits are in
+[`effective_population_execution_2026-09-11.md`](effective_population_execution_2026-09-11.md).
+Do not reopen that completed connection by deleting v5 rejection checks or
+silently switching strict-WD/effective-SSP semantics. Same-author stellar
+libraries and resolved binary evolution are not prerequisites for the
+consistent effective population already evaluated. Continue the remaining
+production-readiness work from the current closeout and active bundle plans;
+this result does not certify arbitrary physics combinations or release-data
+qualification.
 
 ## Historical proposed scope (superseded as mandatory work)
 
