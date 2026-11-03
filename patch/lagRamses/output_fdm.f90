@@ -107,7 +107,7 @@ subroutine output_fdm_outer_wave_provenance(output_char)
   !-----------------------------------------------------------------------
   use amr_commons
   use poisson_commons, only: psi_re, psi_im
-  use fdm_commons, only: hbar_code, fdm_ghost2
+  use fdm_commons, only: hbar_code
 #include "amr_index.h"
   implicit none
 #ifndef WITHOUTMPI
@@ -134,12 +134,12 @@ subroutine output_fdm_outer_wave_provenance(output_char)
      dx_loc=dx*boxlen/dble(icoarse_max-icoarse_min+1)
      volume=dx_loc**ndim
      inv2dx=0.5d0/dx_loc
-     if(fdm_ghost2)then
-        call make_virtual_fine_dp2(psi_re(1),psi_im(1),ilevel)
-     else
-        call make_virtual_fine_dp(psi_re(1),ilevel)
-        call make_virtual_fine_dp(psi_im(1),ilevel)
-     end if
+     ! Do not start a ghost-cell exchange from an output hook.  The
+     ! timestepper owns the MPI request lifecycle, and these exchanges may
+     ! require rank-wide calls at every level.  Use only neighbors already
+     ! available through the local Morton lookup; fdm_neighbor_cell returns
+     ! zero for unavailable neighbors, which lowers the reported stencil
+     ! coverage instead of silently filling it.
      do ind=1,twotondim
         do i=1,active(ilevel)%ngrid
            igrid=active(ilevel)%igrid(i)
