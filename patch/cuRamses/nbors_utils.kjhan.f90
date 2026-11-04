@@ -4,6 +4,33 @@
 !##############################################################
 subroutine get3cubefather(ind_cell_father,nbors_father_cells,&
      &                    nbors_father_grids,ncell,ilevel)
+  use amr_commons
+  implicit none
+  integer::ncell,ilevel,ierr
+  integer,dimension(1:nvector)::ind_cell_father
+  integer,dimension(1:nvector,1:threetondim)::nbors_father_cells
+  integer,dimension(1:nvector,1:twotondim)::nbors_father_grids
+
+  call get3cubefather_core(ind_cell_father,nbors_father_cells, &
+       & nbors_father_grids,ncell,ilevel,ierr)
+  if(ierr/=0)call clean_stop
+end subroutine get3cubefather
+
+subroutine get3cubefather_status(ind_cell_father,nbors_father_cells,&
+     &                           nbors_father_grids,ncell,ilevel,ierr)
+  use amr_commons
+  implicit none
+  integer::ncell,ilevel,ierr
+  integer,dimension(1:nvector)::ind_cell_father
+  integer,dimension(1:nvector,1:threetondim)::nbors_father_cells
+  integer,dimension(1:nvector,1:twotondim)::nbors_father_grids
+
+  call get3cubefather_core(ind_cell_father,nbors_father_cells, &
+       & nbors_father_grids,ncell,ilevel,ierr)
+end subroutine get3cubefather_status
+
+subroutine get3cubefather_core(ind_cell_father,nbors_father_cells,&
+     &                         nbors_father_grids,ncell,ilevel,ierr)
 ! Morton-based version: uses hash table lookup instead of nbor array
 ! for finding neighboring grids (when mort_table is allocated).
   use amr_commons
@@ -12,6 +39,7 @@ subroutine get3cubefather(ind_cell_father,nbors_father_cells,&
 #include "amr_index.h"
   implicit none
   integer::ncell,ilevel
+  integer,intent(out)::ierr
   integer,dimension(1:nvector)::ind_cell_father
   integer,dimension(1:nvector,1:threetondim)::nbors_father_cells
   integer,dimension(1:nvector,1:twotondim)::nbors_father_grids
@@ -20,20 +48,22 @@ subroutine get3cubefather(ind_cell_father,nbors_father_cells,&
   ! of the input father cell. According to the refinement rule,
   ! they should be present anytime.
   !------------------------------------------------------------------
-  integer::i,j,nxny,i1,j1,k1,ind,iok
+  integer::i,j,nxny,i1,j1,k1,ind,iok,ierr_pos,g,level_diag
   integer::i1min,i1max,j1min,j1max,k1min,k1max,ind_father
 #ifndef _OPENMP
   integer,dimension(1:nvector),save::ix,iy,iz,iix,iiy,iiz
-  integer,dimension(1:nvector),save::pos,ind_grid_father,ind_grid_ok
+  integer,dimension(1:nvector),save::pos,ind_grid_father,ind_grid_ok,idx_ok
   integer,dimension(1:nvector,1:threetondim),save::nbors_father_ok
   integer,dimension(1:nvector,1:twotondim),save::nbors_grids_ok
 #else
   integer,dimension(1:nvector)::ix,iy,iz,iix,iiy,iiz
-  integer,dimension(1:nvector)::pos,ind_grid_father,ind_grid_ok
+  integer,dimension(1:nvector)::pos,ind_grid_father,ind_grid_ok,idx_ok
   integer,dimension(1:nvector,1:threetondim)::nbors_father_ok
   integer,dimension(1:nvector,1:twotondim)::nbors_grids_ok
 #endif
   logical::oups
+
+  ierr=0
 
   nxny=nx*ny
 
@@ -46,7 +76,17 @@ subroutine get3cubefather(ind_cell_father,nbors_father_cells,&
      if(oups)then
         write(*,*)'get3cubefather'
         write(*,*)'oupsssss !'
-        call clean_stop
+        write(*,*)'FATAL: invalid level-1 father cell input', &
+             & ' rank=',myid,' ilevel=',ilevel,' ncell=',ncell
+        do i=1,ncell
+           if(ind_cell_father(i)>ncoarse) &
+                & write(*,*)'  input=',i,' cell=',ind_cell_father(i)
+        end do
+        flush(6)
+        ierr=1
+        nbors_father_cells=0
+        nbors_father_grids=0
+        return
      endif
 
      do i=1,ncell
@@ -171,11 +211,38 @@ subroutine get3cubefather(ind_cell_father,nbors_father_cells,&
            if(pos(i)==ind)then
               iok=iok+1
               ind_grid_ok(iok)=ind_grid_father(i)
+              idx_ok(iok)=i
            end if
         end do
 
-        if(iok>0)&
-        & call get3cubepos(ind_grid_ok,ind,nbors_father_ok,nbors_grids_ok,iok)
+        if(iok>0)then
+           ierr_pos=0
+           call get3cubepos(ind_grid_ok,ind,nbors_father_ok, &
+                & nbors_grids_ok,iok,ierr_pos)
+           if(ierr_pos/=0)then
+              !$omp critical(invalid_mg_neighbor_diagnostic)
+              write(*,*)'FATAL: invalid MG neighbor-grid input', &
+                   & ' rank=',myid,' ilevel=',ilevel,' ncell=',ncell, &
+                   & ' child_position=',ind,' selected=',iok
+              do j=1,iok
+                 i=idx_ok(j)
+                 g=ind_grid_ok(j)
+                 level_diag=-1
+                 if(g>0)then
+                    if(g<=ngridmax)level_diag=grid_level(g)
+                 end if
+                 write(*,*)'  selected=',j,' input=',i, &
+                      & ' cell=',ind_cell_father(i),' pos=',pos(i), &
+                      & ' grid=',g,' grid_level=',level_diag
+              end do
+              flush(6)
+              !$omp end critical(invalid_mg_neighbor_diagnostic)
+              ierr=ierr_pos
+              nbors_father_cells=0
+              nbors_father_grids=0
+              return
+           end if
+        end if
 
         ! Store neighboring father cells for selected cells
         do j=1,threetondim
@@ -203,12 +270,12 @@ subroutine get3cubefather(ind_cell_father,nbors_father_cells,&
 
   end if
 
-end subroutine get3cubefather
+end subroutine get3cubefather_core
 !##############################################################
 !##############################################################
 !##############################################################
 !##############################################################
-subroutine get3cubepos(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng)
+subroutine get3cubepos(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng,ierr)
 ! Chained morton_nbor_grid version: matches SRC's son(nbor()) chain
 ! but uses Morton hash for neighbor lookup (nbor array removed).
   use amr_commons
@@ -216,6 +283,7 @@ subroutine get3cubepos(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng)
 #include "amr_index.h"
   implicit none
   integer::ng,ind
+  integer,intent(out)::ierr
   integer,dimension(1:nvector)::ind_grid
   integer,dimension(1:nvector,1:threetondim)::nbors_father_cells
   integer,dimension(1:nvector,1:twotondim)::nbors_father_grids
@@ -245,6 +313,7 @@ subroutine get3cubepos(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng)
   integer :: l
 
   call getindices3cube(lll,mmm)
+  ierr=0
 
   iimin=0; iimax=0
   if(ndim>0)iimax=1
@@ -257,13 +326,19 @@ subroutine get3cubepos(ind_grid,ind,nbors_father_cells,nbors_father_grids,ng)
   l = 0
   do i = 1, ng
      if (ind_grid(i) > 0) then
-        l = grid_level(ind_grid(i))
+        if(ind_grid(i)<=ngridmax)then
+           l = grid_level(ind_grid(i))
+        else
+           l = -1
+        end if
         exit
      end if
   end do
   if (l <= 0) then
-     if(myid==1) write(*,*) 'FATAL: get3cubepos called with invalid grid'
-     call clean_stop
+     ierr=1
+     nbors_father_cells=0
+     nbors_father_grids=0
+     return
   end if
 
   ! Chained morton_nbor_grid approach (matches SRC's son(nbor()) chain)

@@ -1566,6 +1566,7 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    integer :: icoarselevel
    integer :: ngrids, cur_grid, cur_cpu, cur_cell, newgrids
    integer :: i, nbatch, ind, icpu, istart, info, ilock, islot
+   integer :: ierr_nbor, invalid_nbor
    integer, parameter :: nbuild_locks=256
    integer(omp_lock_kind), allocatable :: build_locks(:)
 
@@ -1629,7 +1630,9 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
 
    ! Loop over the AMR active communicator first
    ngrids = active_f_comm%ngrid
-!$omp parallel do private(istart,nbatch,i,ind,cur_grid,cur_cpu,ilock,islot) schedule(dynamic,128)
+   invalid_nbor=0
+!$omp parallel do private(istart,nbatch,i,ind,cur_grid,cur_cpu,ilock,islot,ierr_nbor) &
+!$omp& reduction(max:invalid_nbor) schedule(dynamic,128)
    do istart=1,ngrids,nvector
       nbatch=min(nvector,ngrids-istart+1)
       ! Gather grid indices and retrieve parent cells
@@ -1638,8 +1641,13 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
       end do
 
       ! Compute neighbouring father cells and grids
-      call get3cubefather(ind_cell_father,nbors_father_cells, &
-         & nbors_father_grids,nbatch,ifinelevel)
+      ierr_nbor=0
+      call get3cubefather_status(ind_cell_father,nbors_father_cells, &
+         & nbors_father_grids,nbatch,ifinelevel,ierr_nbor)
+      if(ierr_nbor/=0)then
+         invalid_nbor=1
+         cycle
+      end if
 
       ! Now process the twotondim father grids
       do ind=1,twotondim
@@ -1677,6 +1685,15 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
          end do
       end do
    end do
+   if(invalid_nbor/=0)then
+      write(*,*)'FATAL: invalid MG neighbor grid in build_parent_comms_mg', &
+           & ' stage=1 rank=',myid,' fine_level=',ifinelevel
+      flush(6)
+#ifndef WITHOUTMPI
+      call MPI_ABORT(MPI_COMM_WORLD,1,info)
+#endif
+      stop 1
+   end if
 
 
    ! ---------------------------------------------------------------------
@@ -1801,7 +1818,9 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    ngrids = active_mg(myid,icoarselevel)%ngrid
    nreq2 = 0
    nreq_tot2 = 0
-!$omp parallel do private(istart,nbatch,i,ind,cur_cell,cur_cpu,cur_grid,ilock,islot) schedule(dynamic,128)
+   invalid_nbor=0
+!$omp parallel do private(istart,nbatch,i,ind,cur_cell,cur_cpu,cur_grid,ilock,islot,ierr_nbor) &
+!$omp& reduction(max:invalid_nbor) schedule(dynamic,128)
    do istart=1,ngrids,nvector
       nbatch=min(nvector,ngrids-istart+1)
       ! Gather grid indices and retrieve parent cells
@@ -1810,7 +1829,13 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
       end do
 
       ! Compute neighbouring father cells
-      call get3cubefather(ind_cell_father,nbors_father_cells,nbors_father_grids,nbatch,icoarselevel)
+      ierr_nbor=0
+      call get3cubefather_status(ind_cell_father,nbors_father_cells, &
+           & nbors_father_grids,nbatch,icoarselevel,ierr_nbor)
+      if(ierr_nbor/=0)then
+         invalid_nbor=1
+         cycle
+      end if
 
       ! Now process the father grids
       do ind=1,threetondim
@@ -1840,6 +1865,15 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
          end do
       end do
    end do
+   if(invalid_nbor/=0)then
+      write(*,*)'FATAL: invalid MG neighbor grid in build_parent_comms_mg', &
+           & ' stage=4 rank=',myid,' fine_level=',ifinelevel
+      flush(6)
+#ifndef WITHOUTMPI
+      call MPI_ABORT(MPI_COMM_WORLD,1,info)
+#endif
+      stop 1
+   end if
 
    ! ---------------------------------------------------------------------
    ! STAGE 5 : Share new reception grid requests, build emission comms
