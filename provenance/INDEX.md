@@ -121,6 +121,15 @@ AGN/Fe physical blockers unchanged. This is a sequencing disposition, not
 project completion; resume the AGN SED bundle only after a target AGN-on run is
 designated and its source domain is justified.
 
+The already-authorized current-source CUDA build and four-step A40 integrated
+diagnostic, job 451597 on `syn05`, passed M5 + live-dust + hybrid-CHIMES source
+capture and combined-source attribution with zero raw outputs. Its radiation
+closure residual was `1.395e-15`; the AGN energy-partition residual was
+`1.269e-14`. It used commit `f18d15f` and kept the 25-group
+candidate `runtime_admissible=false`; see the appended job record in the
+[`M5 source attribution review`](m5_stellar_agn_source_attribution_2026-10-31.md).
+This remains a fixed-template diagnostic, not production SED qualification.
+
 Historical current-source A40 integration smoke (2026-10-21,
 Slurm job430823): a fresh binary built from source HEAD
 `f459f6dc1febdaf1eb5c9ae25c97924be553e188` plus the recorded dirty working

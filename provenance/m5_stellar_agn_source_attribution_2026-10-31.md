@@ -410,3 +410,39 @@ evidence under
 [`../.m5-source-receipt-build-1272009/`](../.m5-source-receipt-build-1272009/)
 and [`../.m5-source-receipt-20261106/`](../.m5-source-receipt-20261106/).
 No production AGN SED or runtime admission is inferred from this diagnostic.
+
+## Clean-commit A40 integration smoke — job 451597
+
+The first clean-checkout build attempt (451590) exposed that
+`snrt_group_profile.f90` was missing from commit `daae3df`; a second attempt
+(451593) found the similarly uncommitted sink geometry/statistics modules.
+Those sources and their existing regression fixtures were committed as
+`07f0d82` and `f18d15f`. The resulting clean source tree compiled both
+SNRT-group and sink modules directly with `mpiifx`; the Makefile no longer
+fell through to the unavailable `m2c` module rule.
+
+Build/run job `451597` completed on Syntax's typed A40 partition (`syn05`),
+with one A40, one MPI rank and four OpenMP threads. It built commit
+`f18d15fea446b58a8b41175f6a7974688ac3e947` with `CHIMES_CUDA=1`, then ran the
+four-step M5-order-5 effective-population + live-dust + hybrid-CHIMES fixture.
+The source profile was `PARSEC_stellar_plus_Su_M8_AGN` at the fixed diagnostic
+state `M_BH=1e8 Msun`, `lambda_edd=0.1`; the 25-group profile explicitly
+remained `runtime_admissible=false` and all contracts remained
+`reference_control`/`NONPRODUCTION`.
+
+The run reported `SNRT_AGN25_LIVE_CAPTURE_SMOKE_PASS`,
+`M5_COMBINED_SOURCE_ATTRIBUTION_PASS overlap_commits=1`, and
+`M5_AGN25_CANDIDATE_CAPTURE_PASS`. Gas/dust photon receipts were
+`2.10790527e59` / `1.64003369e56`; gas/dust energy receipts were
+`6.42674041e48` / `3.35873622e45 erg`. Radiation closure relative error was
+`1.395e-15`, and the AGN energy-partition maximum relative residual was
+`1.269e-14`. The runner verified zero raw output directories. This is a
+current-source compile and bounded diagnostic wiring result; it adds no
+production SED, target-run domain, restart, multi-rank, or performance claim.
+
+The binary SHA256 is
+`efaae81f856d2eb12bcfe960d1bc7955bff80f12a41227401e93b0f553bcfe8e`; the
+build receipt and artifact hashes are in
+`../.m5-ramses-momentum-build-451597/build-result.txt` and
+`../.m5-ramses-momentum-build-451597/build.sha256`. The Slurm log is
+`/gpfs/kjhan/.lagramses_f18d15f_a40/slurm-451597.out`.
