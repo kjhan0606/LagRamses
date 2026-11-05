@@ -333,12 +333,12 @@ contains
          'reference heat trigger uses deposited energy and gas mass')
     call check(.not.agn_heat_ready(1d0,1d0,2d0,5d0,10d0), &
          'reference heat trigger defers below threshold')
-    call check(agn_reference_receiver_ready(.true.,.true.,2d0,-1), &
-         'reference replay can use a thermal receiver without a donor owner')
-    call check(.not.agn_reference_receiver_ready(.true.,.true.,0d0,-1), &
-         'reference replay without a receiver remains pending')
-    call check(agn_reference_receiver_ready(.false.,.true.,0d0,7), &
-         'fresh reference event requires its donor owner')
+    call check(agn_reference_receiver_ready(.true.,2d0), &
+         'reference injection is allowed on a rank without the donor cell')
+    call check(.not.agn_reference_receiver_ready(.true.,0d0), &
+         'reference injection without global bubble volume remains pending')
+    call check(.not.agn_reference_receiver_ready(.false.,2d0), &
+         'unselected reference event is not injected')
     call check(agn_reference_jet_speed_ok(0.125d0*(2.99792458d10)**2d0,1d0,1d0,1d0), &
          'reference jet speed guard accepts sub-relativistic event')
     call check(.not.agn_reference_jet_speed_ok(0.5d0*(2.99792458d10)**2d0,1d0,1d0,1d0), &

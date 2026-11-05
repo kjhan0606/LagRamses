@@ -10,6 +10,7 @@ module snrt_thermochemistry
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use iso_c_binding, only: c_int,c_double,c_float
   use amr_parameters, only: dp
+  use snrt_group_profile, only: snrt_ngroups
   use snrt_agn_source, only: snrt_ev_to_erg
   implicit none
 
@@ -18,7 +19,7 @@ module snrt_thermochemistry
   integer, parameter, public :: snrt_secondary_nenergy = 258
   integer, parameter, public :: snrt_secondary_nxi = 14
   integer, parameter, public :: snrt_thermochemistry_nspecies = 3
-  integer, parameter, public :: snrt_thermochemistry_ngroups = 9
+  integer, parameter, public :: snrt_thermochemistry_ngroups = snrt_ngroups
 
   real(dp), parameter, public :: snrt_hydrogen_i_threshold_ev = 13.60d0
   real(dp), parameter, public :: snrt_helium_i_threshold_ev = 24.59d0

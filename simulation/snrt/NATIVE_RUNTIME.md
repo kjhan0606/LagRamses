@@ -45,9 +45,12 @@ yield/history/SED files.
   explicitly effective SSP accounting and exact birth Z=.01. It is not a
   disjoint microscopic binary population. [Contract and native/MPI restart evidence](../../provenance/snia_frozen_he_hybrid_plan_2026-09-11.md).
 
-- `dust_iron_model='fe_uv_cycle_v1'`: metallic-Fe UV stationary-charge
-  comparison through13.6eV, CHIMES electron/ion cycles and secondary-electron
-  partition; trace-charge/energy and relaxation-domain checks remain strict.
+- `dust_iron_model='fe_uv_cycle_v1'`: metallic-Fe stationary-charge
+  comparison for profile groups whose upper edge and representative mean are
+  at or below 13.6 eV (groups 1–4 in the 9/12-group profiles; 1–7 in the
+  25-group profile). Harder occupied groups fail closed; this is not a
+  validated X-ray photoelectron/Auger model. CHIMES electron/ion cycles,
+  secondary-electron partition, and trace/relaxation-domain checks remain strict.
 - `dust_iron_model='fe_thermal_limit_v1'`: full thermal-retention upper
   comparison through10000eV, NOT a photoelectric/Auger cascade model. Both
   Fe choices retain the300K grain-temperature domain and exclude PAH/drift.
@@ -273,9 +276,12 @@ Work/build in `/gpfs/kjhan/LRD_JWST`; repository identity is
 The live-dust build is `SNRT=1 DUST_LIVE=1 HDF5=1 USE_FFTW=0`, with NVAR=30.
 Select `USE_CUDA=1` for CUDA/hybrid support, or `USE_CUDA=0` (also the omitted
 option) for a toolkit-free CPU/OpenMP build. Always use separate build
-directories: make does not detect changes in preprocessing flags in existing
-objects. Use `-j1` for an initial clean build; do not rely on the legacy core
-module ordering being a complete parallel-build dependency graph.
+directories: make does not detect changes in most preprocessing flags in
+existing objects. The selected `SNRT_GROUP_SET` is tracked by a build stamp
+and changing it rebuilds the object set, but keep the nine- and twelve-group
+builds in separate build roots so modules and executables cannot be mixed.
+Use `-j1` for an initial clean build; do not rely on the legacy core module
+ordering being a complete parallel-build dependency graph.
 
 The CPU build uses the same host RT/dust kernels, feedback physics and HDF5
 identities. `auto` sends all batches to CPU workers; `openmp` remains the

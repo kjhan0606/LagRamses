@@ -1,5 +1,6 @@
 #include "snrt_chimes_spectrum.h"
 #include "snrt_chimes_spectrum_internal.h"
+#include "snrt_group_profile.h"
 #include <hdf5.h>
 #include <openssl/evp.h>
 #include <fstream>
@@ -10,8 +11,8 @@
 #include <cstdint>
 
 namespace {
-constexpr int ng=9,K=128,nr=311;
-constexpr double edges[10]={.01,1,5.6,11.2,13.6,24.59,54.42,500,2000,10000};
+constexpr int ng=SNRT_GROUP_COUNT,K=128,nr=311;
+const double *edges=snrt_profile_group_edges;
 using snrt_chimes_detail::Bank;
 struct H5Object {
   hid_t id; herr_t (*close)(hid_t);
@@ -66,10 +67,16 @@ extern "C" int snrt_chimes_band_load(const char *path,void **handle,int *reactio
   try {
     const auto before=digest(path);
     H5Object file{H5Fopen(path,H5F_ACC_RDONLY,H5P_DEFAULT),H5Fclose};require(file.id>=0);
-    require(attribute(file.id,"schema")=="snrt_chimes_atomic_shell_nodes_v1");
+    const auto schema=attribute(file.id,"schema");
+    if(schema=="snrt_chimes_atomic_shell_nodes_v1")require(ng==9);
+    else {
+      require(schema=="snrt_chimes_atomic_shell_nodes_v2");
+      require(attribute(file.id,"group_set_id")==SNRT_GROUP_SET_ID);
+      require(attribute(file.id,"group_edges_sha256")==SNRT_GROUP_EDGES_SHA256);
+    }
     require(attribute(file.id,"main_sha256")=="8bde78faacd59249fad5e810cae43311ed03ef09131c62b0a0a5c39e8407cb0a");
     auto b=std::make_unique<Bank>();
-    const auto e=read<double>(file.id,"edges_ev",H5T_NATIVE_DOUBLE,{10});
+    const auto e=read<double>(file.id,"edges_ev",H5T_NATIVE_DOUBLE,{hsize_t(ng+1)});
     require(std::equal(e.begin(),e.end(),edges));
     b->energy=read<double>(file.id,"node_ev",H5T_NATIVE_DOUBLE,{ng,K});
     b->reaction=read<int>(file.id,"reactions",H5T_NATIVE_INT,{nr,5});
@@ -116,9 +123,15 @@ extern "C" int snrt_chimes_molecular_load(const char *path,void **handle,double 
   try {
     const auto before=digest(path);
     H5Object file{H5Fopen(path,H5F_ACC_RDONLY,H5P_DEFAULT),H5Fclose};require(file.id>=0);
-    require(attribute(file.id,"schema")=="snrt_chimes_molecular_nodes_v1");
+    const auto schema=attribute(file.id,"schema");
+    if(schema=="snrt_chimes_molecular_nodes_v1")require(ng==9);
+    else {
+      require(schema=="snrt_chimes_molecular_nodes_v2");
+      require(attribute(file.id,"group_set_id")==SNRT_GROUP_SET_ID);
+      require(attribute(file.id,"group_edges_sha256")==SNRT_GROUP_EDGES_SHA256);
+    }
     require(attribute(file.id,"main_sha256")=="8bde78faacd59249fad5e810cae43311ed03ef09131c62b0a0a5c39e8407cb0a");
-    const auto e=read<double>(file.id,"edges_ev",H5T_NATIVE_DOUBLE,{10});
+    const auto e=read<double>(file.id,"edges_ev",H5T_NATIVE_DOUBLE,{hsize_t(ng+1)});
     require(std::equal(e.begin(),e.end(),edges));
     const auto nodes=read<double>(file.id,"node_ev",H5T_NATIVE_DOUBLE,{ng,K});
     for(int g=0;g<ng;++g){

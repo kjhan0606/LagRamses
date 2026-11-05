@@ -5,8 +5,16 @@ module dust_composition_optics
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
+#ifdef SNRT_GROUP_PROFILE_AGN12_G7LOG4_V1
+#include "snrt_agn12_g7log4_v1_dust_d03_optics_data.inc"
+#include "snrt_agn12_g7log4_v1_dust_d03_band_data.inc"
+#elif defined(SNRT_GROUP_PROFILE_AGN25_JOINT_DIAG_20261102_V1)
+#include "snrt_agn25_joint_diag_20261102_v1_dust_d03_optics_data.inc"
+#include "snrt_agn25_joint_diag_20261102_v1_dust_d03_band_data.inc"
+#else
   include 'dust_d03_optics_data.inc'
   include 'dust_d03_band_data.inc'
+#endif
   integer,parameter,public :: d03_ng=size(d03_primary_ev),d03_nir=size(d03_ir_ev)
   public :: d03_radius_cm,d03_solid_density,d03_edges,d03_primary_ev,d03_ir_ev
   public :: d03_optics_binding,d03_opacity_basis,d03_mix_opacity,d03_absorption_depth

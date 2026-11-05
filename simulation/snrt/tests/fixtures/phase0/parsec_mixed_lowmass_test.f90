@@ -21,7 +21,7 @@ program parsec_mixed_lowmass_test
   character(len=1024)::root,mode,path
   integer::status,u,i,c,k,r,checks=0
   real(stellar_dp)::total,rem,owner(5),fraction,t,stop,death,z,m
-  real(stellar_dp)::q(9),e(9),qa(9),ea(9),qb(9),eb(9),ql(9),el(9),qh(9),eh(9)
+  real(stellar_dp),allocatable::q(:),e(:),qa(:),ea(:),qb(:),eb(:),ql(:),el(:),qh(:),eh(:)
   real(stellar_dp),allocatable::wa(:),wb(:),identity(:),again(:)
   call get_command_argument(1,root);call get_command_argument(2,mode)
   call set_enrichment_defaults()
@@ -31,10 +31,17 @@ program parsec_mixed_lowmass_test
   call read_enrichment_namelist(u,status);close(u)
   call require(status==0,'native comparison config')
   call snrt_spectral_contract_load_from_environment(status)
+  if(status/=0)write(*,'(A,I0,2A)')'NATIVE_SPECTRAL_CONTRACT_ERROR status=',status,' message=', &
+       trim(snrt_spectral_contract_error_message)
   call require(status==0,'native spectral contract')
+  allocate(q(snrt_ngroups),e(snrt_ngroups),qa(snrt_ngroups),ea(snrt_ngroups), &
+       qb(snrt_ngroups),eb(snrt_ngroups),ql(snrt_ngroups),el(snrt_ngroups), &
+       qh(snrt_ngroups),eh(snrt_ngroups))
   if(mode=='wrong_version')then
      call parsec_sed_load(trim(root)//'/nodes.dat',status,expected_version=4)
-     call require(status/=0.and..not.parsec_sed_enabled,'v4 rejects actual mixed V2 nodes')
+     call require(status/=0.and..not.parsec_sed_enabled,'v4 rejects actual mixed source records')
+     call parsec_sed_load(trim(root)//'/nodes.dat',status,expected_version=5)
+     call require(status/=0.and..not.parsec_sed_enabled,'v5 rejects profile-bound mixed V3 records')
      call get_command_argument(3,path)
      if(len_trim(path)>0)then
         call parsec_sed_load(trim(path),status,expected_version=5)
@@ -42,9 +49,28 @@ program parsec_mixed_lowmass_test
      endif
   endif
   call stellar_sed_load(status)
-  call require(status==0.and.stellar_sed_has_energy,'v5 wrapper loads actual Q/E package')
+  call require(status==0.and.stellar_sed_has_energy,'native wrapper loads actual Q/E package')
+  if(snrt_ngroups==25)then
+     call require(stellar_sed_candidate_25g_diagnostic_loaded(), &
+          'profile-bound 25-group candidate stellar SED is diagnostic-load-only')
+  else
+     call require(.not.stellar_sed_candidate_25g_diagnostic_loaded(), &
+          'runtime/reference stellar package is not mislabeled as a candidate diagnostic')
+  endif
   call stellar_photon_interval(0d0,1d0,.02d0,1d0,q,status,e)
-  call require(status/=0.and.all(q==0).and.all(e==0),'unbound source cannot publish')
+  if(stellar_sed_candidate_25g_diagnostic_loaded())then
+     call require(status/=0.and.all(q==0).and.all(e==0), &
+          'candidate source cannot publish before the restricted diagnostic latch')
+     ! This isolated data-consumer fixture has already checked the exact
+     ! candidate contract and profile-bound source package. Opening this
+     ! latch here exercises its Q/E path; the production driver performs the
+     ! complete collective gas/sink/dust fixture validation before doing so.
+     call snrt_spectral_contract_set_diagnostic_fixture_validated(.true.)
+     call require(snrt_spectral_contract_diagnostic_allowed, &
+          'profile-bound candidate data fixture opens only diagnostic permission')
+  else
+     call require(status/=0.and.all(q==0).and.all(e==0),'unbound source cannot publish')
+  endif
   call load_yield_table(trim(root)//'/yields.dat',table,status)
   call require(status==0,'actual material load')
   do k=1,3
@@ -168,7 +194,8 @@ program parsec_mixed_lowmass_test
   call require(maxval(abs(early%dust_species+late%dust_species-whole%dust_species))<1d-12,'dust telescopes')
   call stellar_photon_interval(0d0,t*1000,.02d0,1d0,q,status,e)
   call require(status==0.and.all(q>0).and.all(e>0),'actual full preterminal Q/E')
-  call require(all(e>=q*snrt_group_edges_ev(:9)).and.all(e<=q*snrt_group_edges_ev(2:)), 'Q/E band support')
+  call require(all(e>=q*snrt_group_edges_ev(:snrt_ngroups)).and. &
+       all(e<=q*snrt_group_edges_ev(2:)), 'Q/E band support')
   call stellar_photon_interval(0d0,20d0,.02d0,1d0,qa,status,ea)
   call require(status==0,'early radiation interval')
   call stellar_photon_interval(20d0,t*1000,.02d0,1d0,qb,status,eb)
@@ -231,9 +258,16 @@ program parsec_mixed_lowmass_test
   call require(status==0.and.abs(ledger%returned_mass+ledger%remnant_mass-fraction)<1d-10, &
        'planned live Z=.001 lifetime material mixture and ledger')
   call stellar_photon_interval(0d0,5.148513184858701d0,.001d0,1d0,q,status,e)
-  call require(status==0.and.all(q>0).and.all(e>0),'planned live Z=.001 native Q/E mixture')
+  if(snrt_ngroups==25)then
+     call require(status==0.and.any(q>0).and.any(e>0).and. &
+          all(e>=q*snrt_group_edges_ev(:snrt_ngroups)*(1d0-1d-12)).and. &
+          all(e<=q*snrt_group_edges_ev(2:)*(1d0+1d-12)), &
+          'planned live Z=.001 native Q/E mixture respects populated 25-group bands')
+  else
+     call require(status==0.and.all(q>0).and.all(e>0),'planned live Z=.001 native Q/E mixture')
+  endif
   print '(A,2ES23.14)','Z001_YOUNG_Q_EEV_PER_INITIAL_MSUN ',sum(q),sum(e)
-  print '(A,I0)','PARSEC_MIXED_ACTUAL_NATIVE_PASS checks=',checks
+  print '(A,I0,A,I0)','PARSEC_MIXED_ACTUAL_NATIVE_PASS checks=',checks,' groups=',snrt_ngroups
 contains
   subroutine require(ok,label)
     logical,intent(in)::ok

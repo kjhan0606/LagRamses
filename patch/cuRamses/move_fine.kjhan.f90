@@ -1,6 +1,7 @@
 subroutine move_fine(ilevel)
   use amr_commons
   use pm_commons
+  use sink_cloud_statistics, only: sink_cloud_statistics_reduce
 #ifdef HYDRO_CUDA
   use poisson_commons, only: f, phi
   use pm_gpu_commons
@@ -20,12 +21,18 @@ subroutine move_fine(ilevel)
   ! for CIC interpolation. Otherwise, use coarse grid (ilevel-1) force.
   !----------------------------------------------------------------------
   integer::igrid,jgrid,ipart,jpart,next_part,ig,ip,npart1,info,isink
-  integer::npack,ip_buf,idim
+  integer::npack,ip_buf,idim,sink_record_capacity,sink_record_count
+  integer::sink_record_overflow,sink_record_error
+  integer,target::sink_record_sink_empty(1)
+  real(dp),target::sink_record_values_empty(2*ndim,1)
+  integer,pointer::sink_record_sink(:)
+  real(dp),pointer::sink_record_values(:,:)
+  integer(i8b)::sink_record_ksink
   real(dp),allocatable,dimension(:)::sink_sbuf,sink_rbuf
 
 #ifdef HYDRO_CUDA
   ! Strategy-A hybrid: threads that acquire a CUDA stream run the CIC
-  ! math on the GPU, the others call the unchanged move1. Batches are
+  ! math on the GPU, the others use the CPU move1 path. Batches are
   ! independent so schedule(dynamic) balances the split at run time.
   logical::pm_gpu
   integer::nvec,gi,slot,with_phi,pm_hw
@@ -66,6 +73,33 @@ subroutine move_fine(ilevel)
 
   if(numbtot(1,ilevel)==0)return
   if(verbose)write(*,111)ilevel
+
+  ! Count sink-cloud records before the threaded particle walk.  move1 writes
+  ! exactly one tuple for each particle satisfying the same predicate below.
+  sink_record_capacity=0
+  sink_record_count=0
+  sink_record_overflow=0
+  if(sink)then
+     igrid=headl(myid,ilevel)
+     do jgrid=1,numbl(myid,ilevel)
+        ipart=headp(igrid)
+        do jpart=1,numbp(igrid)
+           next_part=nextp(ipart)
+           sink_record_ksink=-idp(ipart)
+           if(sink_record_ksink.gt.0 .and. sink_record_ksink.le.nsinkmax .and. &
+                & ptypep(ipart)==PTYPE_SINK) sink_record_capacity=sink_record_capacity+1
+           ipart=next_part
+        enddo
+        igrid=next(igrid)
+     enddo
+  endif
+  if(sink)then
+     allocate(sink_record_sink(max(sink_record_capacity,1)))
+     allocate(sink_record_values(2*ndim,max(sink_record_capacity,1)))
+  else
+     sink_record_sink=>sink_record_sink_empty
+     sink_record_values=>sink_record_values_empty
+  endif
 
   ! Set new sink variables to old ones
   if(sink)then
@@ -145,7 +179,9 @@ subroutine move_fine(ilevel)
               call pm_gpu_append(slot,PM_MODE_MOVE,Lind_grid,Lind_part, &
                    & Lind_grid_part,ig,ip,ilevel)
            else
-              call move1(Lind_grid,Lind_part,Lind_grid_part,ig,ip,ilevel)
+              call move1(Lind_grid,Lind_part,Lind_grid_part,ig,ip,ilevel, &
+                   & sink_record_count,sink_record_capacity,sink_record_overflow, &
+                   & sink_record_sink,sink_record_values)
            end if
            ip=0
            ig=0
@@ -159,7 +195,9 @@ subroutine move_fine(ilevel)
         call pm_gpu_append(slot,PM_MODE_MOVE,Lind_grid,Lind_part, &
              & Lind_grid_part,ig,ip,ilevel)
      else
-        call move1(Lind_grid,Lind_part,Lind_grid_part,ig,ip,ilevel)
+        call move1(Lind_grid,Lind_part,Lind_grid_part,ig,ip,ilevel, &
+             & sink_record_count,sink_record_capacity,sink_record_overflow, &
+             & sink_record_sink,sink_record_values)
      end if
   end if
   if(slot>=0)then
@@ -202,7 +240,9 @@ subroutine move_fine(ilevel)
            ind_part(ip)=ipart
            ind_grid_part(ip)=ig
            if(ip==nvector)then
-              call move1(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
+              call move1(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel, &
+                   & sink_record_count,sink_record_capacity,sink_record_overflow, &
+                   & sink_record_sink,sink_record_values)
               ip=0
               ig=0
            end if
@@ -213,13 +253,34 @@ subroutine move_fine(ilevel)
      igrid=next(igrid)   ! Go to next grid
   end do
   ! End loop over grids
-  if(ip>0)call move1(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
+  if(ip>0)call move1(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel, &
+       & sink_record_count,sink_record_capacity,sink_record_overflow, &
+       & sink_record_sink,sink_record_values)
 #ifdef _OPENMP
 !$omp end parallel
   deallocate(nparticles, ptrhead)
   deallocate(Pind_part, Pind_grid,Pind_grid_part)
 #endif
 #endif
+
+  if(sink)then
+     sink_record_error=0
+     if(sink_record_overflow/=0 .or. sink_record_count/=sink_record_capacity)then
+        sink_record_error=1
+     else
+        call sink_cloud_statistics_reduce(sink_record_count,nsinkmax,ndim, &
+             & sink_record_sink,sink_record_values,sink_stat(:,ilevel,:),sink_record_error)
+     endif
+     if(sink_record_error/=0)then
+        write(*,'(A,4(1X,I0))') 'ERROR: sink-cloud deterministic reduction failed', &
+             & ilevel,sink_record_count,sink_record_capacity,sink_record_overflow
+#ifndef WITHOUTMPI
+        call MPI_ABORT(MPI_COMM_WORLD,1,info)
+#endif
+        stop 1
+     endif
+  endif
+  if(sink)deallocate(sink_record_sink,sink_record_values)
 
   if(sink)then
      if(nsink>0)then
@@ -260,9 +321,12 @@ end subroutine move_fine
 !#########################################################################
 !#########################################################################
 !#########################################################################
-subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
+subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
+     & sink_record_count,sink_record_capacity,sink_record_overflow, &
+     & sink_record_sink,sink_record_values)
   use amr_commons
   use pm_commons
+  use sink_periodic_geometry, only: sink_periodic_minimum_image
   use poisson_commons
   use hydro_commons, ONLY: uold,smallr,gamma
   use cooling_module, ONLY: XH=>X, rhoc, mH
@@ -270,6 +334,9 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
 #include "amr_index.h"
   implicit none
   integer::ng,np,ilevel
+  integer::sink_record_count,sink_record_capacity,sink_record_overflow
+  integer::sink_record_sink(*)
+  real(dp)::sink_record_values(2*ndim,*)
   integer,dimension(1:nvector)::ind_grid
   integer,dimension(1:nvector)::ind_grid_part,ind_part
   !------------------------------------------------------------
@@ -280,7 +347,7 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   ! This routine is called by move_fine.
   !------------------------------------------------------------
   logical::error
-  integer::i,j,ind,idim,nx_loc,isink
+  integer::i,j,ind,idim,nx_loc,isink,sink_record_slot
   integer(i8b):: ksink
   real(dp)::dx,length,dx_loc,scale,vol_loc,r2
   real(dp)::fric_cde2
@@ -643,21 +710,22 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
               oksink_new(ksink)=1.0
               !$omp end critical(sink_vel_update)
            end if
-           !$omp atomic update
-           sink_stat(ksink,ilevel,ndim*2+1)=sink_stat(ksink,ilevel,ndim*2+1)+1d0
-           do idim=1,ndim
-              xx=xp(ind_part(j),idim)+vp(ind_part(j),idim)*dtnew(ilevel)-xsink(ksink,idim)
-              if(xx>scale*xbound(idim)/2.0)then
-                 xx=xx-scale*xbound(idim)
-              endif
-              if(xx<-scale*xbound(idim)/2.0)then
-                 xx=xx+scale*xbound(idim)
-              endif
-              !$omp atomic update
-              sink_stat(ksink,ilevel,idim     )=sink_stat(ksink,ilevel,idim     )+xsink(ksink,idim)+xx
-              !$omp atomic update
-              sink_stat(ksink,ilevel,idim+ndim)=sink_stat(ksink,ilevel,idim+ndim)+vp(ind_part(j),idim)
-           enddo
+           !$omp atomic capture
+           sink_record_count=sink_record_count+1
+           sink_record_slot=sink_record_count
+           !$omp end atomic
+           if(sink_record_slot<=sink_record_capacity)then
+              sink_record_sink(sink_record_slot)=int(ksink)
+              do idim=1,ndim
+                 xx=xp(ind_part(j),idim)+vp(ind_part(j),idim)*dtnew(ilevel)-xsink(ksink,idim)
+                 xx=sink_periodic_minimum_image(xx,scale*xbound(idim))
+                 sink_record_values(idim,sink_record_slot)=xsink(ksink,idim)+xx
+                 sink_record_values(idim+ndim,sink_record_slot)=vp(ind_part(j),idim)
+              enddo
+           else
+              !$omp atomic write
+              sink_record_overflow=1
+           endif
        endif
      end do
   end if

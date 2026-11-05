@@ -1,6 +1,7 @@
 // The existing spectral material law, without S_N's FP32 number encoding
 // or spatial transport. All angular arrays are one-cell transaction scratch.
 #include "snrt_band_spectrum.h"
+#include "snrt_group_profile.h"
 
 template<int K> static int material(int nd,int ng,double *number,double *energy,
     const double *edges,const double *columns,double *budget,double *an,double *ae,
@@ -27,7 +28,7 @@ extern "C" int snrt_mn_band_material_c(int nd,int ng,int nb,int scatter,double *
     const double *edges,const double *columns,double *budget,double *an,double *ae,double *returned,
     snrt_band::Secondary secondary,double xi,double *deposition,const double *direction,double *first,const double *grains,
     const double *abs,const double *transport,const double *nodes,const double *weights) {
-  if(nd<1||ng!=9||(nb!=0&&nb!=4&&nb!=6))return 1;
+  if(nd<1||ng!=SNRT_GROUP_COUNT||(nb!=0&&nb!=4&&nb!=6))return 1;
   if(!direction||!first)return 1;
   if(nb==0)return material<64>(nd,ng,number,energy,edges,columns,budget,an,ae,returned,secondary,xi,deposition,
       direction,first,nullptr,false);

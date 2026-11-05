@@ -13,12 +13,15 @@ module dust_mass_runtime
   use snrt_dust_ir, only: snrt_dust_material_temperature
   use stellar_native_units, only: solar_mass_cgs
   use snrt_dust_contract
+#ifdef SNRT
+  use snrt_spectral_contract, only: snrt_chimes_candidate_d03_absorption_selected
+#endif
   use snrt_state, only: snrt_state_get_slot,snrt_hydrogen_ii,snrt_helium_ii,snrt_helium_iii
   use snrt_thermochemistry, only: snrt_mean_molecular_weight
   use snrt_atomic_cooling, only: atomic_temperature
 #ifdef SNRT_CHIMES
   use snrt_chimes_runtime
-  use snrt_chimes, only: chimes_ns
+  use snrt_chimes, only: chimes_ns,chimes_locked,chimes_nuclear_sums
 #endif
 #include "amr_index.h"
   implicit none
@@ -67,10 +70,17 @@ contains
     integer::k,n
     real(dp)::w,t
     real(dp)::composition(2),specific(1)
+    logical::candidate_absorption_only
     value=0;ierr=1;n=snrt_dust_contract_number_temperature;t=dust_injection_temperature
     if(.not.snrt_dust_contract_loaded.or.snrt_dust_contract_version/=4.or.n<2)return
+    candidate_absorption_only=.false.
+#ifdef SNRT
+    candidate_absorption_only=snrt_dust_contract_runtime_allowed.and.snrt_dust_contract_reference_control.and. &
+         .not.snrt_dust_contract_exchange_enabled.and..not.snrt_dust_contract_scattering_enabled.and. &
+         snrt_chimes_candidate_d03_absorption_selected()
+#endif
     if(dust_optics_enabled())then
-       if(.not.snrt_dust_contract_scattering_enabled)return
+       if(.not.snrt_dust_contract_scattering_enabled.and..not.candidate_absorption_only)return
        if(.not.d03_optics_binding( &
             snrt_dust_contract_group_edges_ev(1:snrt_dust_contract_number_groups+1), &
             snrt_dust_contract_absorption_mean_energy_ev(1:snrt_dust_contract_number_groups), &
@@ -287,6 +297,15 @@ contains
                 status=1 ! Fe requires the explicit CHIMES depletion path.
 #endif
              endif
+#ifdef SNRT_CHIMES
+             ! An identity bin transaction must preserve the independently
+             ! transported aggregate exactly. Replacing it with sum(bins)
+             ! would turn a tolerated representation mismatch into apparent
+             ! solid growth/destruction and can erase sub-ULP gas inventory.
+             if(dust_two_size_enabled())then
+                if(all(next_bins==bins).and.all(next_iron==iron_bins))next_grains=grains
+             endif
+#endif
              next=sum(next_grains)+sum(next_iron)
           else
              call dust_mass_rates(rho*sd,metal*sd,temp,a,b,status)

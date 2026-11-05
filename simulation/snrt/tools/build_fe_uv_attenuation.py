@@ -28,7 +28,7 @@ def main():
         body = text.split(':: '+name+'(', 1)[1].split('[', 1)[1].split(']', 1)[0]
         return np.array([float(x.replace('d', 'e')) for x in re.findall(r'[+-]?\d+\.\d+d[+-]\d+', body)])
     ev, radii = array('fe_primary_ev'), array('fe_radius_cm')
-    if ev.shape != (9,) or radii.shape != (2,):
+    if ev.ndim != 1 or ev.size < 4 or radii.shape != (2,):
         raise ValueError('unexpected base bank layout')
     model = FeDielectric(a.source_directory/'werner_2009_metals.pdf', a.source_directory/'henke_fe.nff')
     lengths = np.stack([1.2398419843320026e-4/ev/(4*np.pi*np.sqrt(model.epsilon(ev,r)).imag)
@@ -48,11 +48,11 @@ def main():
     print('! H,H+,C,C+ ground-state formation enthalpies, kJ/mol.')
     print('real(real64),parameter :: fe_photon_atct_formation(4)=['+
           ','.join(format(atoms[s],'.3f')+'d0' for s in ('H','H+','C','C+'))+']')
-    print('real(real64),parameter :: fe_photon_attenuation_cm(9,2)=reshape([ &')
+    print(f'real(real64),parameter :: fe_photon_attenuation_cm({len(ev)},2)=reshape([ &')
     values = lengths.ravel(order='F')
     for i in range(0,len(values),3):
         row = ','.join(format(v,'.17e').replace('e','d') for v in values[i:i+3])
-        print('  '+row+(', &' if i+3<len(values) else '],[9,2])'))
+        print('  '+row+(', &' if i+3<len(values) else f'],[{len(ev)},2])'))
 
 
 if __name__ == '__main__':

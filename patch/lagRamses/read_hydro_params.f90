@@ -14,7 +14,8 @@ subroutine read_hydro_params(nml_ok)
 #endif
 #ifdef SNRT
   use snrt_agn_efficiency, only: snrt_transport_selected,snrt_agn_model,snrt_agn_model_reference
-  use snrt_spectral_contract, only: snrt_chimes_transition_enabled
+  use snrt_spectral_contract, only: snrt_chimes_transition_enabled, &
+       snrt_chimes_d03_absorption_enabled,snrt_spectral_candidate_25g_diagnostic_requested
 #endif
   use eunha_cooling_mod, only: eunha_load_multi_z
 #ifdef PHASE0_STELLAR_ENRICHMENT
@@ -40,7 +41,9 @@ subroutine read_hydro_params(nml_ok)
   integer::stellar_nml_iostat
 #endif
   integer ,dimension(1:MAXBOUND)::bound_type
-  real(dp)::scale,ek_bound
+  real(dp)::scale,ek_bound,grav_code
+  ! This hydro build's source precedence does not compile amr/constants.f90.
+  real(dp),parameter::gravity_constant_cgs=6.6740800d-08
   character(LEN=1)::a1
 
   !--------------------------------------------------
@@ -229,6 +232,20 @@ subroutine read_hydro_params(nml_ok)
   rewind(1)
   read(1,NML=physics_params,END=105)
 105 continue
+  ! Bondi accretion below uses the RAMSES code-unit convention factG=1 for
+  ! non-cosmological runs. Reject a silently inconsistent physical unit set
+  ! before the sink source can be evaluated.
+  if(.not.cosmo.and.sink.and.sink_AGN.and.bondi)then
+     grav_code=gravity_constant_cgs*units_density*units_time**2
+     if(.not.ieee_is_finite(grav_code).or.abs(grav_code-1d0)>1d-6)then
+        if(myid==1)write(*,'(A,ES24.16,A)') &
+             'ERROR: non-cosmological Bondi AGN requires G_code=G_cgs*units_density*units_time**2=1; got ', &
+             grav_code,'.'
+        nml_ok=.false.
+     else if(myid==1)then
+        write(*,'(A,ES24.16)')' Bondi AGN gravity-unit contract: G_code=',grav_code
+     endif
+  endif
   if(delayed_cooling_model_id(delayed_cooling_model)<0)then
      if(myid==1)write(*,*)'ERROR: delayed_cooling_model must be first_event_fixed or legacy_accumulating'
      call clean_stop
@@ -491,7 +508,9 @@ subroutine read_hydro_params(nml_ok)
      ! formation and other energy/phase layouts are not covered by that map.
      dust_sink_ok=.false.
 #if defined(SNRT_CHIMES) && !defined(SOLVERmhd)
-     dust_sink_ok=snrt_chimes_transition_enabled().and.snrt_transport_selected().and. &
+     dust_sink_ok=(snrt_chimes_transition_enabled().or. &
+          (snrt_chimes_d03_absorption_enabled().and.snrt_spectral_candidate_25g_diagnostic_requested())).and. &
+          snrt_transport_selected().and. &
           snrt_agn_model()==snrt_agn_model_reference.and.nener==0.and. &
           sink.and.sink_AGN.and.agn.and..not.mad_jet.and. &
           dust_chimes_enabled().and.dust_two_size_enabled().and.dust_optics_enabled().and. &

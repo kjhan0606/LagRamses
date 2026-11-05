@@ -42,6 +42,11 @@ subroutine dump_all_hdf5(filedir, nchar)
 
   call hdf5_close_file()
 
+#ifdef SNRT
+  call snrt_agn_restart_hydro_fingerprint('continuous_checkpoint')
+  call snrt_agn_restart_donor_snapshot('continuous_checkpoint')
+#endif
+
 #ifndef WITHOUTMPI
   call MPI_BARRIER(MPI_COMM_WORLD, info)
 #endif
@@ -116,7 +121,7 @@ subroutine dust_mass_hdf5_identity(grp,writing)
   return
 #else
 #ifdef SNRT_CHIMES
-  use snrt_chimes_runtime, only: chimes_live_identity
+  use snrt_chimes_runtime, only: chimes_live_identity,chimes_live_identity_n
 #endif
   use amr_commons
   use hydro_parameters, only: idust_species,idust_bins,idust_shock,idust_fresh,idust_iron, &
@@ -159,7 +164,7 @@ subroutine dust_mass_hdf5_identity(grp,writing)
   integer::status,bad,all_bad,info,pah_first,pah_last
   logical::exists,extended,uses_cie,uses_atomic,uses_chimes,pah_dataset,pah_attribute
 #ifdef SNRT_CHIMES
-  real(dp)::chemical(324),saved_chemical(324)
+  real(dp)::chemical(chimes_live_identity_n),saved_chemical(chimes_live_identity_n)
 #endif
   include 'mpif.h'
   values=dust_mass_identity();bad=0

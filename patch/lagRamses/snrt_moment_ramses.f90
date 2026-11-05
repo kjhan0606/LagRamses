@@ -16,7 +16,9 @@ module snrt_moment_ramses
   use snrt_spectral_contract, only: snrt_band_enabled,snrt_group_energy_fraction,snrt_group_mean_energy_ev, &
        snrt_group_cross_section_cm2,snrt_group_cross_section_hei_cm2,snrt_group_cross_section_heii_cm2, &
        snrt_group_edges_ev,snrt_d03_band_enabled,snrt_fe_band_enabled,snrt_node_secondaries_enabled, &
-       snrt_chimes_band_enabled,snrt_chimes_cold_enabled
+       snrt_chimes_band_enabled,snrt_chimes_cold_enabled,snrt_group_unrepresented_energy_fraction, &
+       snrt_chimes_d03_absorption_enabled, &
+       snrt_spectral_contract_diagnostic_allowed
   use snrt_agn_source, only: snrt_c_cgs,snrt_ev_to_erg,snrt_agn_photon_budget_energy,snrt_agn_source_commit
   use snrt_agn_locator, only: snrt_agn_find_local_leaf
   use snrt_stellar_source, only: stellar_sed_enabled,stellar_photon_interval,stellar_sed_has_energy
@@ -30,7 +32,7 @@ module snrt_moment_ramses
   use snrt_dust_contract
 #ifdef DUST_LIVE
   use snrt_dust_live, only: snrt_dust_live_moment_cell,snrt_dust_live_moment_tile,snrt_dust_live_prepare
-  use snrt_dust_ir, only: dust_ir_diagnostics,snrt_dust_material_temperature
+  use snrt_dust_ir, only: dust_ir_diagnostics,snrt_dust_material_temperature,dust_err_range
   use dust_composition_material, only: dust_material_composition_enabled,dust_composition_curve,dust_composition_area
   use dust_composition_optics, only: d03_cell_weights,d03_opacity_basis,d03_ng,d03_nir, &
        d03_band_abs,d03_band_transport,d03_band_ev
@@ -43,7 +45,7 @@ module snrt_moment_ramses
 #endif
 #ifdef SNRT_CHIMES
   use snrt_chimes_runtime, only: chimes_cell_state,chimes_live_capacity,chimes_live_stage,chimes_live_band_stage, &
-       chimes_live_cold_stage,chimes_live_grain_scatter,chimes_live_fe_uv_stage
+       chimes_live_cold_stage,chimes_live_band_dust_stage,chimes_live_grain_scatter,chimes_live_fe_uv_stage
   use snrt_chimes, only: chimes_ns,chimes_boltzmann,chimes_group_binding,chimes_last_split_wall, &
        chimes_last_photo_solver
 #endif
@@ -123,9 +125,12 @@ contains
     real(dp),allocatable :: rows(:,:),fraction(:,:),source_n(:,:),source_e(:,:)
     real(dp) :: sl,st,sd,sv,snh,st2,dt,subdt,chat,energy_unit,volume,clock0
     real(dp) :: photons(snrt_ngroups),source_energy(snrt_ngroups),lum,age_scale
-    real(dp) :: agn_source_photons,agn_source_energy_erg,stellar_source_photons,stellar_source_energy_erg
-    real(dp) :: escape(36),projection(36),receipt(18),global_receipt(18),initial_n,final_n,initial_e,final_e
+    real(dp) :: agn_source_photons,agn_source_energy_erg,agn_source_input_energy_erg
+    real(dp) :: agn_source_unrepresented_energy_erg,stellar_source_photons,stellar_source_energy_erg
+    real(dp) :: escape(36),projection(36),receipt(20),global_receipt(20),initial_n,final_n,initial_e,final_e
+    real(dp) :: candidate_capture(5),global_candidate_capture(5)
     real(dp) :: pair_escape,pair_projection,lo,hi,source_total_n,source_total_e
+    real(dp) :: source_unit_factor,source_receipt_n,source_receipt_e,source_check_scale
     real(dp) :: state_range(4),global_range(4),balance_scale(2),global_scale(2)
     integer :: nm,ng,ni,i,j,g,s,k,nsub,cell,found,grid,part,ip,ig,status,info
     integer :: n_agn_sources,n_stellar_sources
@@ -149,9 +154,10 @@ contains
     logical :: perf_diagnostic,perf_all
     logical,save :: host_reported=.false.
 
-    ierr=0;clock0=omp_get_wtime();receipt=0
+    ierr=0;clock0=omp_get_wtime();receipt=0;candidate_capture=0
     n_agn_sources=0;n_stellar_sources=0
     agn_source_photons=0d0;agn_source_energy_erg=0d0
+    agn_source_input_energy_erg=0d0;agn_source_unrepresented_energy_erg=0d0
     stellar_source_photons=0d0;stellar_source_energy_erg=0d0
     call mn_dispatch_initialize(ierr)
     if(.not.host_reported)then
@@ -268,6 +274,9 @@ contains
        source_n(:,i)=source_n(:,i)+photons/volume
        source_e(:,i)=source_e(:,i)+photons*snrt_group_mean_energy_ev/volume
        accepted(j)=1
+       agn_source_input_energy_erg=agn_source_input_energy_erg+agn_pending_erg(j)
+       agn_source_unrepresented_energy_erg=agn_source_unrepresented_energy_erg+ &
+            agn_pending_erg(j)*snrt_group_unrepresented_energy_fraction
        if(sum(photons)>0d0)then
           n_agn_sources=n_agn_sources+1
           agn_source_photons=agn_source_photons+sum(photons)
@@ -284,6 +293,8 @@ contains
     receipt(13)=agn_source_photons
     receipt(14)=agn_source_energy_erg
     receipt(15)=real(n_agn_sources,dp)
+    receipt(19)=agn_source_input_energy_erg
+    receipt(20)=agn_source_unrepresented_energy_erg
     if(stellar_sed_enabled)then
        if(.not.present(step_start))then
           ierr=1
@@ -323,8 +334,28 @@ contains
        endif
     endif
     call mn_collective_status(ierr)
-    if(ierr/=0)return
+    if(ierr/=0)then
+       if(myid==1)write(*,*)'M_N source staging rejected rank/code=',myid,ierr
+       return
+    endif
     source_total_n=sum(source_n)*mesh%dx**3;source_total_e=sum(source_e)*mesh%dx**3
+    ! Tie the source-class physical receipts to the aggregate injection arrays
+    ! before optional band-moment conversion changes their representation.
+    source_unit_factor=sl**3*snh
+    source_receipt_n=(agn_source_photons+stellar_source_photons)/source_unit_factor
+    source_receipt_e=(agn_source_energy_erg+stellar_source_energy_erg)/ &
+         (snrt_ev_to_erg*source_unit_factor)
+    source_check_scale=max(abs(source_total_n),abs(source_receipt_n),tiny(1d0))
+    if(any(.not.ieee_is_finite([source_total_n,source_total_e,source_unit_factor, &
+         source_receipt_n,source_receipt_e])).or.source_unit_factor<=0d0.or. &
+         abs(source_total_n-source_receipt_n)>1d-10*source_check_scale) ierr=1
+    source_check_scale=max(abs(source_total_e),abs(source_receipt_e),tiny(1d0))
+    if(abs(source_total_e-source_receipt_e)>1d-10*source_check_scale)ierr=1
+    call mn_collective_status(ierr)
+    if(ierr/=0)then
+       if(myid==1)write(*,*)'M_N source-class/aggregate injection closure rejected rank/code=',myid,ierr
+       return
+    endif
     if(band_on)then
        do i=1,mesh%nleaf
           do g=1,ng
@@ -334,10 +365,16 @@ contains
              source_n(g,i)=photons(g)
           enddo
        enddo
-       if(any(source_n<0).or.any(source_e<0))ierr=1
+       if(any(source_n<0).or.any(source_e<0))then
+          write(*,*)'M_N band source interpolation rejected rank/minN/minE=',myid,minval(source_n),minval(source_e)
+          ierr=1
+       endif
     endif
     call mn_collective_status(ierr)
-    if(ierr/=0)return
+    if(ierr/=0)then
+       if(myid==1)write(*,*)'M_N source validation rejected rank/code=',myid,ierr
+       return
+    endif
     initial_n=0;initial_e=0
     do i=1,mesh%nowned
        call inventory(number(:,:,i),energy(:,:,i),lum,volume)
@@ -381,7 +418,12 @@ contains
        do g=1,ni
           call mn_amr_advance(mn_live_basis,mesh,infrared(:,g,:),chat*subdt/sl, &
                escape(1:nm),projection(1:nm),ierr)
-          if(ierr/=0)return
+          if(ierr/=0)then
+             write(*,*)'M_N infrared transport rejected rank/level/group/substep/code=',myid,lev,g,k,ierr, &
+                  ' M0_min/max/higher_max=',minval(infrared(1,g,:)),maxval(infrared(1,g,:)), &
+                  maxval(abs(infrared(2:nm,g,:)))
+             return
+          endif
        enddo
 #ifdef DUST_LIVE
        if(snrt_dust_contract_exchange_enabled)then
@@ -431,46 +473,66 @@ contains
     receipt(16)=stellar_source_photons
     receipt(17)=stellar_source_energy_erg
     receipt(18)=real(n_stellar_sources,dp)
-    if(any(receipt(13:18)<0d0))ierr=1
+    if(any(receipt(13:20)<0d0))ierr=1
     global_receipt=receipt
     balance_scale=[initial_n+receipt(1)+final_n,initial_e+source_total_e+final_e]
     global_scale=balance_scale
+    global_candidate_capture=candidate_capture
 #ifndef WITHOUTMPI
-    call MPI_ALLREDUCE(receipt,global_receipt,18,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+    call MPI_ALLREDUCE(receipt,global_receipt,20,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
     if(info/=0)ierr=1
     call MPI_ALLREDUCE(balance_scale,global_scale,2,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+    if(info/=0)ierr=1
+    call MPI_ALLREDUCE(candidate_capture,global_candidate_capture,5,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
     if(info/=0)ierr=1
 #endif
     if(any(.not.ieee_is_finite(global_receipt)).or. &
          abs(global_receipt(5))>1d-9*max(global_scale(1),tiny(1d0)).or. &
-         abs(global_receipt(12))>1d-9*max(global_scale(2),tiny(1d0)))then
+         abs(global_receipt(12))>1d-9*max(global_scale(2),tiny(1d0)).or. &
+         abs(global_receipt(19)-global_receipt(14)-global_receipt(20))> &
+         1d-10*max(global_receipt(19),tiny(1d0)))then
        if(myid==1)write(*,'(A,4ES22.13)')'M_N accounting rejected N/E residual/scales=', &
             global_receipt(5),global_receipt(12),global_scale
+       if(myid==1.and.abs(global_receipt(19)-global_receipt(14)-global_receipt(20))> &
+            1d-10*max(global_receipt(19),tiny(1d0)))write(*,'(A,3ES22.13)') &
+            'M_N AGN input/injected/unrepresented energy closure rejected=', &
+            global_receipt(19),global_receipt(14),global_receipt(20)
        ierr=1
     endif
     call mn_collective_status(ierr)
-    if(ierr/=0)return
+    if(ierr/=0)then
+       if(myid==1)write(*,*)'M_N accounting transaction rejected rank/code=',myid,ierr
+       return
+    endif
     ! Allocation/realizability is checked collectively BEFORE publication.
     do i=1,mesh%nowned
        call mn_live_write(mesh%slots(i),number(:,:,i),energy(:,:,i),status,reserve_only=.true.)
+       if(status/=0)write(*,*)'M_N photon reservation failed rank/slot/code=',myid,mesh%slots(i),status
        ierr=max(ierr,status)
        if(ni>0)then
           call mn_live_ir_write(mesh%slots(i),infrared(:,:,i),status,reserve_only=.true.)
-          ierr=max(ierr,status)
-       endif
-    enddo
-    call mn_collective_status(ierr)
-    if(ierr/=0)return
-    do i=1,mesh%nowned
-       call mn_live_write(mesh%slots(i),number(:,:,i),energy(:,:,i),status)
-       ierr=max(ierr,status)
-       if(ni>0)then
-          call mn_live_ir_write(mesh%slots(i),infrared(:,:,i),status)
+          if(status/=0)write(*,*)'M_N IR reservation failed rank/slot/code=',myid,mesh%slots(i),status
           ierr=max(ierr,status)
        endif
     enddo
     call mn_collective_status(ierr)
     if(ierr/=0)then
+       if(myid==1)write(*,*)'M_N collective state reservation rejected code=',ierr
+       return
+    endif
+    do i=1,mesh%nowned
+       call mn_live_write(mesh%slots(i),number(:,:,i),energy(:,:,i),status)
+       if(status/=0)write(*,*)'M_N photon publication failed rank/slot/code=',myid,mesh%slots(i),status
+       ierr=max(ierr,status)
+       if(ni>0)then
+          call mn_live_ir_write(mesh%slots(i),infrared(:,:,i),status)
+          if(status/=0)write(*,*)'M_N IR publication failed rank/slot/code=',myid,mesh%slots(i),status
+          ierr=max(ierr,status)
+       endif
+    enddo
+    call mn_collective_status(ierr)
+    if(ierr/=0)then
+       if(myid==1)write(*,*)'M_N collective state publication rejected code=',ierr
        do i=1,mesh%nowned
           call mn_live_write(mesh%slots(i),oldn(:,:,1+(i-1)*oldn_stride), &
                olde(:,:,1+(i-1)*olde_stride),status)
@@ -508,10 +570,16 @@ contains
             global_receipt(1:8)
        write(*,'(A,I0,A,2ES22.13)')' SNRT_MN_AGN_SOURCE accepted_packets=',nint(global_receipt(15)), &
             ' photons/energy_erg=',global_receipt(13:14)
+       write(*,'(A,3ES22.13)')' SNRT_MN_AGN_ENERGY input/injected/unrepresented_erg=', &
+            global_receipt(19),global_receipt(14),global_receipt(20)
        write(*,'(A,I0,A,2ES22.13)')' SNRT_MN_STELLAR_SOURCE accepted_stars=',nint(global_receipt(18)), &
             ' photons/energy_erg=',global_receipt(16:17)
-       write(*,'(A,4ES22.13)')' SNRT_MN_ENERGY absorbed/escaped/projection/residual=',global_receipt(9:12)
+       write(*,'(A,5ES22.13)')' SNRT_MN_ENERGY absorbed/escaped/projection/residual/scale=', &
+            global_receipt(9:12),global_scale(2)
        write(*,'(A,4ES22.13)')' SNRT_MN_STATE max_xHII/gasE_code/dustE_code/IR_erg_cm3=',global_range
+       if(snrt_spectral_contract_diagnostic_allowed)write(*,'(A,5ES22.13)') &
+            ' SNRT_MN_CANDIDATE_CAPTURE gas_N/dust_N/gas_E_erg/dust_E_erg/chem_state_change_code_integral=', &
+            global_candidate_capture
        write(*,'(A,4I12)')' SNRT_MN_DISPATCH rank1 closureCPU/GPU faceCPU/GPU=', &
             mn_cpu_closures,mn_gpu_closures,mn_cpu_faces,mn_gpu_faces
     endif
@@ -573,19 +641,26 @@ contains
       real(dp) :: electron_cv,kick(3),velocity(3),impulse(3,ng),phase_gain,phase_fraction(ng,ndust_phase)
       real(dp) :: phase_sigma(ng,ndust_phase),phase_tau(ndust_phase,ng),work(ndust_phase),channel_heat(ng)
       real(dp) :: pa(d03_ng,6),ps(d03_ng,6),pg(d03_ng,6),ia(d03_nir,6),isc(d03_nir,6),isg(d03_nir,6)
-      real(dp) :: grain_columns(6),dummy(1),ph_e(9,4),ph_p(3,4),events(2)
+      real(dp) :: grain_columns(6),dummy(1),ph_e(snrt_ngroups,4),ph_p(3,4),events(2)
       type(dust_ir_diagnostics) :: ir_diag
 #endif
 #ifdef SNRT_CHIMES
-      real(dp)::chemical(chimes_ns),elements(11),next_photons(9),old_photons(9),photo_ledger(11),gn(9),ge(9),fe_ledger(8)
+      real(dp)::chemical(chimes_ns),elements(11),next_photons(snrt_ngroups),old_photons(snrt_ngroups), &
+           photo_ledger(11),gn(snrt_ngroups),ge(snrt_ngroups),fe_ledger(8)
 #endif
       type(snrt_thermochemistry_result) :: chemistry
       integer :: iteration,q,a,b,nb,jj,picard_ierr,anderson_accepts
-      logical :: converged,restoring,picard_have_previous,picard_accelerated
+      logical :: converged,restoring,save_packet,picard_have_previous,picard_accelerated
 #ifdef DUST_LIVE
-      restoring=.false.
+      restoring=.false.;save_packet=.false.
       gasx=0
-      if(present(packet).and.present(defer_ir).and..not.defer_ir)then
+      if(present(packet))then
+         if(present(defer_ir))then
+            restoring=.not.defer_ir
+            save_packet=defer_ir
+         endif
+      endif
+      if(restoring)then
          if(.not.packet%valid.or.packet%index/=index)then
             status=1;return
          endif
@@ -724,11 +799,17 @@ contains
             else if(allocated(curve))then
                call snrt_dust_material_temperature(snrt_dust_contract_temperature_k(1:size(curve,1)), &
                     curve(:,1),material/density,old_temperature,status)
+               if(status==dust_err_range)write(*,*)'SNRT_MN_DUST_U_RANGE stage=pre cell/density/material/u/Umin/Umax=', &
+                    mesh%cells(index),density,material,material/density,curve(1,1),curve(size(curve,1),1)
             else
                call snrt_dust_material_temperature( &
                     snrt_dust_contract_temperature_k(1:snrt_dust_contract_number_temperature), &
                     snrt_dust_contract_internal_energy_per_h_erg(1:snrt_dust_contract_number_temperature), &
                     material/density,old_temperature,status)
+               if(status==dust_err_range)write(*,*)'SNRT_MN_DUST_U_RANGE stage=pre cell/density/material/u/Umin/Umax=', &
+                    mesh%cells(index),density,material,material/density, &
+                    snrt_dust_contract_internal_energy_per_h_erg(1), &
+                    snrt_dust_contract_internal_energy_per_h_erg(snrt_dust_contract_number_temperature)
             endif
             if(status/=0)return
          endif
@@ -892,7 +973,14 @@ contains
             call angular_read(nn,ee,rn,re,status)
             if(status/=0)return
             rn=rn*snh;re=re*snh;pn=rn;pe=re;photo_ledger=0;gn=0;ge=0;ph_e=0;ph_p=0
-            if(snrt_chimes_cold_enabled())then
+            if(snrt_chimes_d03_absorption_enabled().and.snrt_spectral_contract_diagnostic_allowed.and. &
+                 .not.snrt_chimes_cold_enabled())then
+               call chimes_live_band_dust_stage(mesh%cells(index),sd,sv,cell_dt,mesh%dx*sl,old_temperature,chat_factor, &
+                    mn_live_basis%nq,rn,re,chemical,total_chemical_energy,pn,pe,photo_ledger(1:9),gn,ge,status, &
+                    staged_row=rows(:,index))
+               an(4,:)=gn/snh;ae(4,:)=ge/snh
+               primary_spectrum(:,1)=ge*snrt_ev_to_erg;primary=sum(primary_spectrum)
+            else if(snrt_chimes_cold_enabled())then
                if(dust_relative_motion)then
                   call chimes_live_cold_stage(mesh%cells(index),sd,sv,cell_dt,mesh%dx*sl,old_temperature,chat_factor, &
                        mn_live_basis%nq,rn,re,chemical,total_chemical_energy,pn,pe,photo_ledger,gn,ge,status,events, &
@@ -1076,7 +1164,7 @@ contains
       if(dust_pah_enabled())pah_spectrum=primary_spectrum
 820   continue
 #ifdef DUST_LIVE
-      if(present(packet).and.present(defer_ir).and.defer_ir)then
+      if(save_packet)then
          packet%valid=.false.;packet%has_exchange=snrt_dust_contract_exchange_enabled
          packet%has_curve=allocated(curve);packet%has_weights=allocated(weights)
          packet%has_sublimation=allocated(sub_bins);packet%has_pah=allocated(pah_number)
@@ -1283,12 +1371,38 @@ contains
       endif
       number(:,:,index)=nn;energy(:,:,index)=ee;fraction(:,index)=next_fraction
       rows(5,index)=nonthermal+gas_next/energy_unit
+      ! Protect shared conservation receipts in dynamic OpenMP cell loops;
+      ! ordered tile transactions reach this point serially.
+!$omp atomic update
       receipt(2)=receipt(2)+sum(an)*mesh%volume(index)
+!$omp atomic update
       receipt(6)=receipt(6)+heat*mesh%volume(index)*sl**3
+!$omp atomic update
       receipt(7)=receipt(7)+primary*mesh%volume(index)*sl**3
+!$omp atomic update
       receipt(9)=receipt(9)+(sum(ae)+primary_work/(snh*snrt_ev_to_erg))*mesh%volume(index)
+!$omp atomic update
       receipt(4)=receipt(4)+projection_n*mesh%volume(index)
+!$omp atomic update
       receipt(11)=receipt(11)+projection_e*mesh%volume(index)
+      if(snrt_spectral_contract_diagnostic_allowed)then
+!$omp atomic update
+         candidate_capture(1)=candidate_capture(1)+sum(an(1,:))*mesh%volume(index)*snh*sl**3
+!$omp atomic update
+         candidate_capture(2)=candidate_capture(2)+sum(an(4,:))*mesh%volume(index)*snh*sl**3
+!$omp atomic update
+         candidate_capture(3)=candidate_capture(3)+sum(ae(1,:))*mesh%volume(index)* &
+              snh*sl**3*snrt_ev_to_erg
+!$omp atomic update
+         candidate_capture(4)=candidate_capture(4)+sum(ae(4,:))*mesh%volume(index)* &
+              snh*sl**3*snrt_ev_to_erg
+#ifdef SNRT_CHIMES
+!$omp atomic update
+         candidate_capture(5)=candidate_capture(5)+ &
+              sum(abs(rows(ichimes:ichimes+chimes_ns-1,index)-old_row(ichimes:ichimes+chimes_ns-1)))* &
+              mesh%volume(index)
+#endif
+      endif
       status=0
     end subroutine
 
@@ -1459,8 +1573,6 @@ contains
             (packet(j)%has_pah.neqv.has_pah).or.(packet(j)%has_phase.neqv.has_phase).or. &
             (packet(j)%has_chimes.neqv.has_chimes))return
       enddo
-      if(.not.has_exchange)return
-
       allocate(tile_ir(nm,ni,nc),tile_projection(nm,ni,nc),tile_density(nc),tile_primary(nc), &
            tile_old(nc),tile_capacity(nc),tile_material(nc),tile_temperature(nc))
       allocate(tile_transfer(nc),tile_gas_energy(nc),tile_gas_capacity(nc),tile_hydrogen(nc))

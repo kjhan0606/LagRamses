@@ -60,7 +60,7 @@ contains
     real(mn_dp),intent(inout)::warm(:,:)
     integer,intent(out)::ierr
     real(mn_dp),optional,intent(out)::angular_out(:,:)
-    integer::first,last,i,q,status,slot,cpu,gpu,local_error,nc,next_column,batch_size
+    integer::first,last,i,q,status,slot,cpu,gpu,local_error,nc,next_column,batch_size,diagnostic(2)
     logical::gpu_supported
     real(mn_dp)::angular(b%nq)
     real(mn_dp)::eta,target(b%nm-1)
@@ -82,7 +82,8 @@ contains
     endif
     next_column=1
 !$omp parallel num_threads(threads) &
-!$omp private(first,last,i,q,status,slot,angular,eta,target,local_error,batch_size) reduction(max:ierr) reduction(+:cpu,gpu)
+!$omp private(first,last,i,q,status,slot,angular,eta,target,local_error,batch_size,diagnostic) &
+!$omp reduction(max:ierr) reduction(+:cpu,gpu)
     do
        slot=-1;local_error=0;batch_size=256
 #ifdef HYDRO_CUDA
@@ -130,6 +131,8 @@ contains
                projected(:,first:last),cache(:,first:last))
           call release(slot)
           gpu=gpu+last-first+1;local_error=status
+          if(status/=0)write(*,*)'M_N GPU closure rejected first/last/status/M0minmax=', &
+               first,last,status,minval(input(1,first:last)),maxval(input(1,first:last))
           if(status==0)then
              warm(:,first:last)=cache(1:b%nm-1,first:last)
              if(present(angular_out))then
@@ -173,8 +176,28 @@ contains
                       if(present(angular_out))angular_out(:,i)=0d0
                       cycle
                    endif
-                   call mn_reconstruct(b,input(:,i),angular,status,dual_hint=warm(:,i),stream_cache=cache(:,i))
-                   if(status/=0)call mn_reconstruct(b,input(:,i),angular,status,stream_cache=cache(:,i))
+                   call mn_reconstruct(b,input(:,i),angular,status,dual_hint=warm(:,i), &
+                        stream_cache=cache(:,i),diagnostic=diagnostic)
+                   if(status/=0)call mn_reconstruct(b,input(:,i),angular,status,stream_cache=cache(:,i), &
+                        diagnostic=diagnostic)
+                   if(status/=0)then
+!$omp critical(snrt_mn_closure_diag)
+                      write(*,'(A,I0,A,I0,A,ES24.16E3,A,ES24.16E3,A,I0,A,I0)') &
+                           'M_N_CPU_CLOSURE_FAIL column=',i,' status=',status,' M0=',input(1,i), &
+                           ' maxhigher=',maxval(abs(input(2:,i))),' iterations=',diagnostic(1), &
+                           ' reason=',diagnostic(2)
+!$omp end critical(snrt_mn_closure_diag)
+                   endif
+                   if(status/=0.and.diagnostic(2)==11.and.input(1,i)>0d0)then
+                      target=input(2:,i)/input(1,i)
+                      q=maxloc(abs(target)-maxval(abs(b%harmonic(2:,:)),dim=2),dim=1)
+!$omp critical(snrt_mn_closure_diag)
+                      write(*,'(A,I0,A,I0,A,ES24.16E3,A,ES24.16E3,A,ES24.16E3)') &
+                           'M_N_BOUND_FAIL column=',i,' component=',q,' target=',target(q), &
+                           ' bound=',maxval(abs(b%harmonic(q+1,:))),' excess=', &
+                           abs(target(q))-maxval(abs(b%harmonic(q+1,:)))
+!$omp end critical(snrt_mn_closure_diag)
+                   endif
                    if(status==0)call mn_project(b,angular,projected(:,i),status)
                    if(status==0.and.present(angular_out))angular_out(:,i)=angular
                    local_error=max(local_error,status)
@@ -255,9 +278,9 @@ contains
     real(mn_dp),intent(in)::y(:,:),w(:),dir(:,:),left(:,:,:),right(:,:,:),geometry(:,:)
     real(mn_dp),intent(out)::flux(:,:)
     integer,intent(out)::ierr
-    integer::slot,f,j,q,a,nf,nm,nq
+    integer::slot,f,j,q,a,nf,nm,nq,bad_face,bad_moment,bad_q
     logical::gpu_supported
-    real(mn_dp)::sign,mu,il,ir,flow
+    real(mn_dp)::sign,mu,il,ir,flow,term,partial
     nf=size(left,3);nm=size(y,1);nq=size(w);slot=-1;ierr=0;gpu_supported=.false.
     if(nf==0)return
 #ifdef HYDRO_CUDA
@@ -293,6 +316,43 @@ contains
     enddo
 !$omp end parallel do
     mn_cpu_faces=mn_cpu_faces+nf
-    if(any(.not.ieee_is_finite(flux)))ierr=3
+    if(any(.not.ieee_is_finite(flux)))then
+       ierr=3;bad_face=0;bad_moment=0;bad_q=0
+       do f=1,nf
+          do j=1,nm
+             if(.not.ieee_is_finite(flux(j,f)))then
+                bad_face=f;bad_moment=j;exit
+             endif
+          enddo
+          if(bad_face/=0)exit
+       enddo
+       if(bad_face/=0)then
+          a=nint(geometry(1,bad_face));sign=geometry(2,bad_face);partial=0d0
+          write(*,*)'M_N_CPU_FLUX_FAIL face/moment/axis/sign/geometry=', &
+               bad_face,bad_moment,a,sign,geometry(:,bad_face)
+          write(*,*)'M_N_CPU_FLUX_FINITE y/w/dir/left/right/geometry=', &
+               all(ieee_is_finite(y)),all(ieee_is_finite(w)),all(ieee_is_finite(dir)), &
+               all(ieee_is_finite(left(:,:,bad_face))),all(ieee_is_finite(right(:,:,bad_face))), &
+               all(ieee_is_finite(geometry(:,bad_face)))
+          do q=1,nq
+             mu=sign*dir(a,q)
+             il=left(1,q,bad_face)+sign*.5d0*geometry(3,bad_face)*left(a+1,q,bad_face)
+             ir=right(1,q,bad_face)-sign*.5d0*geometry(4,bad_face)*right(a+1,q,bad_face)
+             flow=geometry(5,bad_face)*(max(mu,0d0)*il+min(mu,0d0)*ir)
+             term=y(bad_moment,q)*(w(q)*flow);partial=partial+term
+             if(.not.ieee_is_finite(mu).or..not.ieee_is_finite(il).or. &
+                  .not.ieee_is_finite(ir).or..not.ieee_is_finite(flow).or. &
+                  .not.ieee_is_finite(term).or..not.ieee_is_finite(partial))then
+                bad_q=q
+                write(*,*)'M_N_CPU_FLUX_BAD_Q q/mu/il/ir/flow/y/w/term/partial=', &
+                     q,mu,il,ir,flow,y(bad_moment,q),w(q),term,partial
+                exit
+             endif
+          enddo
+          if(bad_q==0)write(*,*)'M_N_CPU_FLUX_INPUT_MAXABS y/w/dir/left/right=', &
+               maxval(abs(y)),maxval(abs(w)),maxval(abs(dir)), &
+               maxval(abs(left(:,:,bad_face))),maxval(abs(right(:,:,bad_face)))
+       endif
+    endif
   end subroutine
 end module

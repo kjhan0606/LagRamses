@@ -2,15 +2,17 @@
 ! density units; their sum is never added to rho, metals or the gas energy.
 module snrt_chimes_runtime
   use iso_c_binding, only: c_null_char,c_ptr,c_null_ptr
+  use omp_lib, only: omp_get_thread_num
   use amr_commons
   use hydro_commons
   use snrt_chimes
   use dust_iron_photons, only: fe_uv_step
   use snrt_spectral_contract, only: snrt_chimes_band_enabled,snrt_chimes_bank_sha256, &
-       snrt_chimes_cold_enabled,snrt_chimes_molecular_sha256,snrt_chimes_transition_enabled
+       snrt_chimes_cold_enabled,snrt_chimes_molecular_sha256,snrt_chimes_transition_enabled, &
+       snrt_chimes_d03_absorption_enabled,snrt_spectral_contract_diagnostic_allowed
   use snrt_thermochemistry, only: snrt_secondary_tables_loaded,snrt_secondary_tables_load_from_environment
   use snrt_atomic_cooling, only: atomic_mh
-  use dust_composition_optics, only: d03_band_abs,d03_band_transport,d03_radius_cm,d03_solid_density
+  use dust_composition_optics, only: d03_ng,d03_band_abs,d03_band_transport,d03_radius_cm,d03_solid_density
   use snrt_moving_scatter, only: snrt_moving_scatter_cell,snrt_scatter_c
   use dust_phase_state, only: dust_dynamics_enabled,dust_phase_kinetic
   use dust_mass_physics, only: dust_chimes_enabled,dust_gas_elements,olivine_fraction,dust_iron_enabled, &
@@ -22,10 +24,12 @@ module snrt_chimes_runtime
   implicit none
   private
   public::chimes_live_initialize,chimes_live_identity,chimes_prepare_level
+  integer,parameter,public::chimes_live_identity_n=32*(chimes_ng+1)+4
   public::chimes_initialize_hierarchy
   public::chimes_consistent_carriers
   public::chimes_cell_state,chimes_grain_budget,chimes_live_capacity,chimes_live_stage
   public::chimes_live_band_stage
+  public::chimes_live_band_dust_stage
   public::chimes_live_molecular_stage
   public::chimes_live_cold_stage
   public::chimes_live_grain_scatter
@@ -96,7 +100,7 @@ contains
 
   subroutine chimes_live_initialize(ierr)
     integer,intent(out)::ierr
-    character(len=500)::main,dir,paths(9)
+    character(len=500)::main,dir,paths(chimes_ng)
     character(len=16)::capture_env
     character(len=2)::number
     integer::i,n,status,nreaction,nshell
@@ -116,11 +120,11 @@ contains
     if(status/=0.or.n<1.or.n>=len(main))return
     call get_environment_variable('SNRT_CHIMES_GROUP_DIR',dir,length=n,status=status)
     if(status/=0.or.n<1.or.n+15>=len(dir))return
-    do i=1,9
+    do i=1,chimes_ng
        write(number,'(I2.2)')i
        paths(i)=trim(dir)//'/group_'//number//'.hdf5'//c_null_char
     enddo
-    ierr=chimes_initialize(trim(main)//c_null_char,9,paths,500)
+    ierr=chimes_initialize(trim(main)//c_null_char,chimes_ng,paths,500)
     if(ierr==0.and.dust_pah_charged())then
        if(chimes_charge_supported()/=1)ierr=1
     endif
@@ -183,34 +187,40 @@ contains
   end subroutine
 
   subroutine chimes_live_identity(values,ierr)
-    real(dp),intent(out)::values(324)
+    real(dp),intent(out)::values(chimes_live_identity_n)
     integer,intent(out)::ierr
     values=0
     call chimes_live_initialize(ierr)
     if(ierr/=0)return
-    ierr=chimes_identity(values(1:320))
+    ierr=chimes_identity(values(1:chimes_live_identity_n-4))
     ! Version fixes local shielding, first-order transport/chemistry split,
     ! translational EOS, zero additional CR ionization, optically thin
     ! unresolved fluorescent/cascade cooling (not injected into dust IR).
     ! Version 4 adds up to two tighter-tolerance retries of nucleus/charge
     ! failures, always from the original cell input and with unchanged gates.
-    values(321:324)=[4d0,real(ichimes,dp),atomic_mh,chimes_boltzmann()]
-    if(snrt_chimes_band_enabled())values(321)=5d0
-    if(snrt_chimes_cold_enabled())values(321)=6d0
-    if(snrt_chimes_transition_enabled())values(321)=7d0
+    values(chimes_live_identity_n-3:chimes_live_identity_n)= &
+         [4d0,real(ichimes,dp),atomic_mh,chimes_boltzmann()]
+    if(snrt_chimes_band_enabled())values(chimes_live_identity_n-3)=5d0
+    if(snrt_chimes_cold_enabled())values(chimes_live_identity_n-3)=6d0
+    if(snrt_chimes_transition_enabled())values(chimes_live_identity_n-3)=7d0
   end subroutine
 
-  subroutine chimes_cell_state(cell,grains,state,elements,ierr,previous_state,metallic_iron,pah_hc,staged_row)
+  subroutine chimes_cell_state(cell,grains,state,elements,ierr,previous_state,metallic_iron,pah_hc, &
+       staged_row,transported_state)
     integer,intent(in)::cell
     real(dp),intent(in)::grains(2)
     real(dp),intent(out)::state(chimes_ns),elements(11)
     integer,intent(out)::ierr
-    real(dp)::gas(11),solid_fe,solid_pah(2)
+    real(dp)::gas(11),solid_fe,solid_pah(2),total_elements(11),roundoff_scale(11),solid_elements(11)
     real(dp),optional,intent(in)::previous_state(chimes_ns)
     real(dp),optional,intent(in)::metallic_iron
     real(dp),optional,intent(in)::pah_hc(2)
     real(dp),optional,intent(in)::staged_row(:)
-    real(dp)::row(nvar_all)
+    logical,optional,intent(in)::transported_state
+    real(dp)::row(nvar_all),solid_mass(11),chemistry_elements(11),chemistry_mass(11)
+    real(dp)::residual_mass(11),carrier_scale(11),closure_bound(11)
+    integer::chemistry_status,e
+    logical::allow_transport_residual
     state=0;elements=0;ierr=1
     if(.not.ready.or.ichimes<1.or.ichimes+chimes_ns-1>nvar)return
     row=uold(cell,1:nvar_all)
@@ -233,7 +243,48 @@ contains
     if(present(pah_hc))solid_pah=pah_hc
     call dust_gas_elements(row(ichem:ichem+10),grains,gas,ierr,solid_fe,solid_pah)
     if(ierr/=0)return
+    allow_transport_residual=.false.
+    if(present(transported_state))allow_transport_residual=transported_state.and..not.present(staged_row)
+    if(allow_transport_residual)then
+       ! ichem stores gas+dust in one double. If a gas element is far below
+       ! one ULP of the independently transported solid carrier, total-solid
+       ! subtraction cannot recover it. Use the co-transported CHIMES species
+       ! inventory only when the chemical reservoir is sub-ULP, the raw
+       ! residual is unresolved (or a negative subtraction residue), and the
+       ! discrepancy fits a four-ULP operation bound. Neither mass carrier nor
+       ! species state is modified, and the CHIMES acceptance gates stay strict.
+       solid_mass=olivine_fraction*grains(2)
+       solid_mass(3)=solid_mass(3)+grains(1)
+       if(dust_iron_enabled())solid_mass(11)=solid_mass(11)+solid_fe
+       if(dust_pah_enabled())then
+          solid_mass(1)=solid_mass(1)+solid_pah(1)
+          solid_mass(3)=solid_mass(3)+solid_pah(2)
+       endif
+       residual_mass=row(ichem:ichem+10)-solid_mass
+       chemistry_elements=0d0
+       chemistry_status=1
+       if(all(row(ichimes:ichimes+chimes_ns-1)>=0d0)) &
+            chemistry_status=chimes_nuclear_sums(row(ichimes:ichimes+chimes_ns-1),chemistry_elements)
+       if(chemistry_status==0)then
+          chemistry_mass=chemistry_elements*mass_number
+          carrier_scale=max(abs(row(ichem:ichem+10)),abs(solid_mass))
+          do e=1,11
+             if(carrier_scale(e)<=0d0)cycle
+             closure_bound(e)=min(64d0*epsilon(1d0)* &
+                  max(carrier_scale(e),abs(chemistry_mass(e)),tiny(1d0)), &
+                  4d0*spacing(carrier_scale(e)))
+             if((residual_mass(e)<=0d0.or.abs(residual_mass(e))<spacing(carrier_scale(e))).and. &
+                  abs(chemistry_mass(e))<spacing(carrier_scale(e)).and. &
+                  abs(residual_mass(e)-chemistry_mass(e))<=closure_bound(e))then
+                  gas(e)=chemistry_mass(e)
+             endif
+          enddo
+       endif
+    endif
     elements=gas/mass_number
+    total_elements=row(ichem:ichem+10)/mass_number
+    solid_elements=max(0d0,total_elements-elements)
+    roundoff_scale=max(total_elements,solid_elements,elements)
     if(elements(1)<=0)then
        ierr=1;return
     endif
@@ -242,10 +293,16 @@ contains
     endif
     ! Feedback adds neutral atoms; dust destruction returns neutral atoms.
     ! For an evolved cell, preserve the transported ion/molecular state.
+    ! Hydro transport can leave sub-ulp negative atomic residues in depleted
+    ! gas-phase Si/Fe while the element remains in dust. Permit only a summed
+    ! 512-epsilon atomic debit relative to the full gas+solid inventory here;
+    ! direct CHIMES reconciliation and negative-electron/molecular checks stay strict.
     if(present(previous_state))then
-       ierr=chimes_reconcile_charged(elements,previous_state,cell_solid_charge(cell,row),state)
+       ierr=chimes_reconcile_transported(elements,roundoff_scale,previous_state, &
+            cell_solid_charge(cell,row),state)
     else
-       ierr=chimes_reconcile_charged(elements,row(ichimes:ichimes+chimes_ns-1),cell_solid_charge(cell,row),state)
+       ierr=chimes_reconcile_transported(elements,roundoff_scale, &
+            row(ichimes:ichimes+chimes_ns-1),cell_solid_charge(cell,row),state)
     endif
   end subroutine
 
@@ -300,7 +357,8 @@ contains
 !$omp parallel do schedule(static) private(cell,status,elements) reduction(max:bad)
        do i=1,k
           cell=cells(i)
-          call chimes_cell_state(cell,uold(cell,idust_species:idust_species+1),stage(:,i),elements,status)
+          call chimes_cell_state(cell,uold(cell,idust_species:idust_species+1),stage(:,i),elements,status, &
+               transported_state=.true.)
           if(status/=0)then
              bad=1
 !$omp critical(chimes_prepare_first_failure)
@@ -350,8 +408,8 @@ contains
   end subroutine
 
   subroutine chimes_initialize_hierarchy()
-    integer::ilevel,i,ind,cell,status,bad,all_bad,info
-    real(dp)::elements(11),measured(11),state(chimes_ns),q
+    integer::ilevel,i,ind,cell,status,bad,all_bad,info,state_status,budget_status,first_bad_cell,s,bad_element
+    real(dp)::elements(11),measured(11),state(chimes_ns),q,charge_residual,relative_error(11),absolute_error(11),ledger_abs_floor
     include 'mpif.h'
     if(.not.dust_chimes_enabled())return
     if(nrestart>0)then
@@ -359,18 +417,46 @@ contains
        ! update phase. Validate it without an extra reconciliation or hydro
        ! restriction: either can change the restart trajectory.
        call chimes_live_initialize(status)
-       bad=merge(0,1,status==0)
+       bad=merge(0,1,status==0);first_bad_cell=0
        if(bad==0)then
           do ilevel=levelmin,nlevelmax
              do ind=1,twotondim
                 do i=1,active(ilevel)%ngrid
                    cell=ICELL_OF(active(ilevel)%igrid(i),ind)
                    if(son(cell)/=0)cycle
-                   call chimes_cell_state(cell,uold(cell,idust_species:idust_species+1),state,elements,status)
-                   if(status/=0)bad=1
-                   status=chimes_budget(uold(cell,ichimes:ichimes+chimes_ns-1),measured,q)
-                   if(status/=0.or.any(abs(measured-elements)>1d-8*max(elements,1d-30)).or. &
-                        abs(q+cell_solid_charge(cell))>1d-10*max(elements(1),1d-30))bad=1
+                   call chimes_cell_state(cell,uold(cell,idust_species:idust_species+1),state,elements,state_status)
+                   budget_status=chimes_budget(uold(cell,ichimes:ichimes+chimes_ns-1),measured,q)
+                   absolute_error=abs(measured-elements)
+                   relative_error=absolute_error/max(abs(elements),1d-30)
+                   ! For trace elements, total-minus-solid subtraction can leave
+                   ! a sub-ulp target while the species budget is exactly zero.
+                   ! Anchor only this restart identity check's absolute floor to
+                   ! the H number density; this neither repairs nor changes state.
+                   ledger_abs_floor=64d0*epsilon(1d0)*max(elements(1),1d-30)
+                   charge_residual=q+cell_solid_charge(cell)
+                   if(state_status/=0.or.budget_status/=0.or. &
+                        any(absolute_error>max(1d-8*max(abs(elements),1d-30),ledger_abs_floor)).or. &
+                        abs(charge_residual)>1d-10*max(elements(1),1d-30))then
+                      bad=1
+                      if(first_bad_cell==0)then
+                         first_bad_cell=cell;bad_element=maxloc(relative_error,dim=1)
+                         write(*,*)'CHIMES_RESTART_LEDGER_DETAIL cell/level/state_status/budget_status=', &
+                              cell,ilevel,state_status,budget_status
+                         write(*,*)'CHIMES_RESTART_LEDGER_ERROR max_relative/element/max_absolute/floor/charge/solid=', &
+                              maxval(relative_error),bad_element,maxval(absolute_error),ledger_abs_floor, &
+                              charge_residual,cell_solid_charge(cell)
+                         write(*,*)'CHIMES_RESTART_LEDGER_ELEMENT target=',elements
+                         write(*,*)'CHIMES_RESTART_LEDGER_ELEMENT measured=',measured
+                         write(*,*)'CHIMES_RESTART_LEDGER_STATE stored_minmax=', &
+                              minval(uold(cell,ichimes:ichimes+chimes_ns-1)), &
+                              maxval(uold(cell,ichimes:ichimes+chimes_ns-1))
+                         do s=1,chimes_ns
+                            if(uold(cell,ichimes+s-1)<0d0)write(*,*) &
+                                 'CHIMES_RESTART_LEDGER_NEGATIVE_SPECIES index/value=',s, &
+                                 uold(cell,ichimes+s-1)
+                         enddo
+                      endif
+                   endif
                 enddo
              enddo
           enddo
@@ -394,8 +480,8 @@ contains
   subroutine chimes_live_band_stage(cell,sd,sv,dt,length,td,chat,nd,number,radiation_energy, &
        state,energy,next_number,next_energy,ledger,ierr,staged_row)
     integer,intent(in)::cell,nd
-    real(dp),intent(in)::sd,sv,dt,length,td,chat,number(nd,9),radiation_energy(nd,9)
-    real(dp),intent(out)::state(chimes_ns),energy,next_number(nd,9),next_energy(nd,9),ledger(9)
+    real(dp),intent(in)::sd,sv,dt,length,td,chat,number(nd,chimes_ng),radiation_energy(nd,chimes_ng)
+    real(dp),intent(out)::state(chimes_ns),energy,next_number(nd,chimes_ng),next_energy(nd,chimes_ng),ledger(9)
     integer,intent(out)::ierr
     real(dp),optional,intent(in)::staged_row(:)
     real(dp)::row(nvar_all)
@@ -430,17 +516,83 @@ contains
     if(.not.ieee_is_finite(energy))ierr=1
   end subroutine
 
+  subroutine chimes_live_band_dust_stage(cell,sd,sv,dt,length,td,chat,nd,number,radiation_energy, &
+       state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr,staged_row)
+    ! Restricted 25-group diagnostic receiver: native atomic CHIMES opacity
+    ! competes in the same CVODE node solve with D03 absorption.  It reports
+    ! the two capture channels separately and leaves dust material commit to
+    ! the caller's absorption-only M5 material transaction.
+    integer,intent(in)::cell,nd
+    real(dp),intent(in)::sd,sv,dt,length,td,chat,number(nd,chimes_ng),radiation_energy(nd,chimes_ng)
+    real(dp),intent(out)::state(chimes_ns),energy,next_number(nd,chimes_ng),next_energy(nd,chimes_ng),ledger(9)
+    real(dp),intent(out)::grain_number(chimes_ng),grain_energy(chimes_ng)
+    integer,intent(out)::ierr
+    real(dp),optional,intent(in)::staged_row(:)
+    real(dp)::row(nvar_all),old(chimes_ns),elements(11),abundance(chimes_ns),new(chimes_ns),controls(9)
+    real(dp)::alpha(128,chimes_ng),bins(4)
+    real(dp)::nonthermal,nh,thermal,t,cv,grain_n(chimes_ng),grain_e(chimes_ng)
+    integer::b
+
+    row=uold(cell,1:nvar_all)
+    if(present(staged_row))then
+       if(size(staged_row)/=nvar.and.size(staged_row)/=nvar_all)return
+       row(1:size(staged_row))=staged_row
+    endif
+    state=0;energy=row(ndim+2);next_number=number;next_energy=radiation_energy;ledger=0
+    grain_number=0;grain_energy=0;ierr=1
+    if(.not.ready.or..not.snrt_chimes_band_enabled().or..not.snrt_chimes_d03_absorption_enabled())return
+    if(.not.snrt_spectral_contract_diagnostic_allowed.or.nd<1.or.nd>720)return
+    if(dust_iron_enabled().or.dust_pah_enabled().or.dust_dynamics_enabled())return
+    if(.not.dust_two_size_enabled())return
+    if(idust<1.or.idust_bins<1.or.idust_bins+3>nvar.or.idust_species<1.or.idust_species+1>nvar)return
+    if(any(row(idust_bins:idust_bins+3)<0).or.any(row(idust_species:idust_species+1)<0))return
+    if(any(dust_condensation/=0).or.dust_growth.or.dust_sputtering.or.dust_sn_shocks.or. &
+         dust_coagulation.or.dust_shattering.or.trim(dust_sublimation)/='none')return
+
+    bins=row(idust_bins:idust_bins+3)*sd
+    alpha=0
+    do b=1,4
+       alpha=alpha+bins(b)*d03_band_abs(:,:,b)
+    enddo
+    ! Chemical and grain carriers here are RAMSES code-unit mass densities;
+    ! only opacity construction above converts the grain bins to cgs.
+    call chimes_cell_state(cell,row(idust_species:idust_species+1),old,elements,ierr,staged_row=row)
+    if(ierr/=0)return
+    ierr=1
+    if(elements(1)<=0.or.sd<=0.or.sv<=0)return
+    nonthermal=.5d0*sum(row(2:ndim+1)**2)/row(1)+magnetic_energy(row)
+#if NENER>0
+    nonthermal=nonthermal+sum(row(inener:inener+NENER-1))
+#endif
+    thermal=(row(ndim+2)-nonthermal)*sd*sv**2
+    cv=chimes_live_capacity(old,sd)
+    if(thermal<=0.or.cv<=0)return
+    t=thermal/cv
+    if(t<=1d5.or.t>1d9)return
+    nh=elements(1)*sd/atomic_mh;abundance=old/elements(1)
+    controls=[nh,t,td,dt,length,0d0,1d0,0d0,chat]
+    ierr=chimes_cell_band_hot_atomic(band_handle,nd,controls,elements/elements(1),abundance,0d0, &
+         number,radiation_energy,t,new,next_number,next_energy,ledger,alpha,grain_n,grain_e)
+    if(ierr/=0)return
+    state=new*elements(1)
+    energy=nonthermal+chimes_live_capacity(state,sd)*t/(sd*sv**2)
+    if(.not.ieee_is_finite(energy).or.any(.not.ieee_is_finite(state)))then
+       ierr=1;return
+    endif
+    grain_number=grain_n;grain_energy=grain_e;ierr=0
+  end subroutine chimes_live_band_dust_stage
+
   subroutine chimes_live_cold_stage(cell,sd,sv,dt,length,td,chat,nd,number,radiation_energy, &
        state,energy,next_number,next_energy,ledger,grain_number,grain_energy,ierr,event_info, &
        staged_row,directions,phase_energy,phase_moment)
     integer,intent(in)::cell,nd
-    real(dp),intent(in)::sd,sv,dt,length,td,chat,number(nd,9),radiation_energy(nd,9)
-    real(dp),intent(inout)::state(chimes_ns),energy,next_number(nd,9),next_energy(nd,9),ledger(11)
-    real(dp),intent(inout)::grain_number(9),grain_energy(9)
+    real(dp),intent(in)::sd,sv,dt,length,td,chat,number(nd,chimes_ng),radiation_energy(nd,chimes_ng)
+    real(dp),intent(inout)::state(chimes_ns),energy,next_number(nd,chimes_ng),next_energy(nd,chimes_ng),ledger(11)
+    real(dp),intent(inout)::grain_number(chimes_ng),grain_energy(chimes_ng)
     integer,intent(out)::ierr
     real(dp),optional,intent(inout)::event_info(2)
     real(dp),optional,intent(in)::staged_row(:),directions(3,nd)
-    real(dp),optional,intent(inout)::phase_energy(9,4),phase_moment(3,4)
+    real(dp),optional,intent(inout)::phase_energy(chimes_ng,4),phase_moment(3,4)
     ierr=1
     if(.not.snrt_chimes_cold_enabled())return
     call chimes_live_molecular_stage(cell,band_handle,molecular_handle,sd,sv,dt,length,td,chat,nd, &
@@ -456,20 +608,23 @@ contains
     ! driver must disable transport absorption and stage IR before commit.
     integer,intent(in)::cell,nd
     type(c_ptr),intent(in)::atomic_bank,molecular_bank
-    real(dp),intent(in)::sd,sv,dt,length,td,chat,number(nd,9),radiation_energy(nd,9)
-    real(dp),intent(inout)::state(chimes_ns),energy,next_number(nd,9),next_energy(nd,9),ledger(11)
-    real(dp),intent(inout)::grain_number(9),grain_energy(9)
+    real(dp),intent(in)::sd,sv,dt,length,td,chat,number(nd,chimes_ng),radiation_energy(nd,chimes_ng)
+    real(dp),intent(inout)::state(chimes_ns),energy,next_number(nd,chimes_ng),next_energy(nd,chimes_ng),ledger(11)
+    real(dp),intent(inout)::grain_number(chimes_ng),grain_energy(chimes_ng)
     integer,intent(out)::ierr
     real(dp),optional,intent(inout)::event_info(2)
     real(dp),optional,intent(in)::staged_row(:),directions(3,nd)
-    real(dp),optional,intent(inout)::phase_energy(9,4),phase_moment(3,4)
-    real(dp)::alpha_phase(128,9,4),phase_e(9,4),phase_p(3,4)
-    real(dp)::old(chimes_ns),elements(11),new(chimes_ns),controls(9),bins(4),grains(2),alpha(128,9)
-    real(dp)::pn(nd,9),pe(nd,9),budget(11),gn(9),ge(9),row(nvar_all),staged(chimes_ns)
-    real(dp)::nh,cv,t,nonthermal,thermal,area,ratio,surface,proposed_energy,events(2)
+    real(dp),optional,intent(inout)::phase_energy(chimes_ng,4),phase_moment(3,4)
+    real(dp)::alpha_phase(128,chimes_ng,4),phase_e(chimes_ng,4),phase_p(3,4)
+    real(dp)::old(chimes_ns),elements(11),new(chimes_ns),controls(9),bins(4),grains(2),alpha(128,chimes_ng)
+    real(dp)::pn(nd,chimes_ng),pe(nd,chimes_ng),budget(11),gn(chimes_ng),ge(chimes_ng),row(nvar_all),staged(chimes_ns)
+    real(dp)::nh,cv,t,nonthermal,thermal,area,ratio,surface,proposed_energy,events(2),normalized_solid_charge
     real(dp)::measured(11),charge,locked(11),excess(11)
     integer::s,k,j,capture_seen,diag_status,diag_element,receiver_status
     ierr=1
+    ! The live Draine/CHIMES dust phase bank is tabulated only on d03_ng
+    ! groups. Keep this path unavailable until a matching bank is supplied.
+    if(chimes_ng/=d03_ng)return
     if(.not.ready.or..not.allocated(uold))return
     if(cell<lbound(uold,1).or.cell>ubound(uold,1).or.nd<1.or.nd>720)return
     if(any(.not.ieee_is_finite([sd,sv,dt,length,td,chat])).or.sd<=0.or.sv<=0)return
@@ -496,17 +651,17 @@ contains
     call chimes_cell_state(cell,grains,old,elements,ierr,staged_row=row)
     if(ierr/=0)then
        if(ierr==2)then
-          diag_status=chimes_locked(old,locked)
+          diag_status=chimes_locked(row(ichimes:ichimes+chimes_ns-1),locked)
           if(diag_status==0)then
              excess=max(0d0,locked-elements)
              diag_element=maxloc(excess,dim=1)
-             write(*,'(A,I0,A,I0,A,I0,A,ES13.5,A,ES13.5)') &
-                  'SNRT_CHIMES_STATE_RECONCILE_REJECT cell=',cell,' status=',ierr, &
-                  ' element=',diag_element,' locked_excess=',excess(diag_element), &
-                  ' target=',elements(diag_element)
+             write(*,'(A,I0,A,I0,A,I0,A,I0,A,I0,A,ES13.5,A,ES13.5)') &
+                  'SNRT_CHIMES_STATE_RECONCILE_REJECT rank=',myid,' thread=',omp_get_thread_num(), &
+                  ' cell=',cell,' status=',ierr,' max_excess_element=',diag_element, &
+                  ' locked_excess_nuclei=',excess(diag_element),' target_nuclei=',elements(diag_element)
           else
-             write(*,'(A,I0,A,I0,A,I0)')'SNRT_CHIMES_STATE_RECONCILE_REJECT cell=',cell, &
-                  ' status=',ierr,' budget_status=',diag_status
+             write(*,'(A,I0,A,I0,A,I0,A,I0,A,I0)')'SNRT_CHIMES_STATE_RECONCILE_REJECT rank=',myid, &
+                  ' thread=',omp_get_thread_num(),' cell=',cell,' status=',ierr,' budget_status=',diag_status
           endif
        endif
        return
@@ -525,7 +680,8 @@ contains
     do s=1,2
        do k=1,2
           j=2*(s-1)+k
-          alpha_phase(:,:,j)=bins(j)*sd*d03_band_abs(:,:,j)
+          alpha_phase(:,:,j)=0d0
+          alpha_phase(:,1:d03_ng,j)=bins(j)*sd*d03_band_abs(:,:,j)
           alpha=alpha+alpha_phase(:,:,j)
           area=area+bins(j)*sd*.75d0/(d03_solid_density(s)*d03_radius_cm(k))
        enddo
@@ -535,6 +691,7 @@ contains
     area=area/nh;ratio=sum(grains)/(elements(1)*.01d0);surface=1
     if(ratio>0)surface=area/(1d-21*ratio)
     controls=[nh,t,td,dt,length,ratio,surface,0d0,chat]
+    normalized_solid_charge=cell_solid_charge(cell,row)/elements(1)
     ! One real receiver input, only when explicitly requested for a bounded
     ! performance diagnosis. No simulation state or acceptance rule changes.
     if(capture_one_enabled.and.myid==1)then
@@ -545,6 +702,7 @@ contains
           if(capture_one_done==0)then
              write(*,'(A,3(I0,1X),2(ES24.16E3,1X))') &
                   'SNRT_CHIMES_CAPTURE_META ',myid,cell,nd,sum(number),sum(radiation_energy)
+             write(*,'(A,ES24.16E3)')'SNRT_CHIMES_CAPTURE_SOLID_CHARGE ',normalized_solid_charge
              write(*,'(A,*(ES24.16E3,1X))')'SNRT_CHIMES_CAPTURE_CONTROLS ',controls
              write(*,'(A,*(ES24.16E3,1X))')'SNRT_CHIMES_CAPTURE_ELEMENTS ',elements/elements(1)
              write(*,'(A,*(ES24.16E3,1X))')'SNRT_CHIMES_CAPTURE_SPECIES ',old/elements(1)
@@ -559,23 +717,26 @@ contains
     ierr=chimes_cell_band_cold_molecular(atomic_bank,molecular_bank,nd,controls,elements/elements(1), &
          old/elements(1),alpha,number,radiation_energy,t,new,pn,pe,budget,gn,ge, &
          transition=snrt_chimes_transition_enabled(),event_info=events,phase_alpha=alpha_phase, &
-         directions=directions,phase_energy=phase_e,phase_moment=phase_p)
+         directions=directions,phase_energy=phase_e,phase_moment=phase_p,debug_rank=myid,debug_cell=cell, &
+         solid_charge=normalized_solid_charge)
     else
     ierr=chimes_cell_band_cold_molecular(atomic_bank,molecular_bank,nd,controls,elements/elements(1), &
          old/elements(1),alpha,number,radiation_energy,t,new,pn,pe,budget,gn,ge, &
-         transition=snrt_chimes_transition_enabled(),event_info=events)
+         transition=snrt_chimes_transition_enabled(),event_info=events,debug_rank=myid,debug_cell=cell, &
+         solid_charge=normalized_solid_charge)
     endif
     if(ierr/=0)then
        receiver_status=ierr
        diag_status=chimes_budget(old/elements(1),measured,charge)
        if(diag_status==0)then
-          write(*,'(A,I0,A,I0,A,9(1X,ES13.5),A,ES13.5,A,ES13.5)') &
-               'SNRT_CHIMES_COLD_RECEIVER_REJECT cell=',cell,' status=',receiver_status, &
+          write(*,'(A,I0,A,I0,A,I0,A,I0,A,9(1X,ES13.5),A,ES13.5,A,ES13.5)') &
+               'SNRT_CHIMES_COLD_RECEIVER_REJECT rank=',myid,' thread=',omp_get_thread_num(), &
+               ' cell=',cell,' status=',receiver_status, &
                ' controls(nH,Tgas,Tdust,dt,dx,dust_ratio,surface,unused,chat)=',controls, &
                ' charge=',charge,' max_element_delta=',maxval(abs(measured-elements/elements(1)))
        else
-          write(*,'(A,I0,A,I0,A,I0)')'SNRT_CHIMES_COLD_RECEIVER_REJECT cell=',cell, &
-               ' status=',receiver_status,' budget_status=',diag_status
+          write(*,'(A,I0,A,I0,A,I0,A,I0,A,I0)')'SNRT_CHIMES_COLD_RECEIVER_REJECT rank=',myid, &
+               ' thread=',omp_get_thread_num(),' cell=',cell,' status=',receiver_status,' budget_status=',diag_status
        endif
        ierr=receiver_status
        return
@@ -593,11 +754,11 @@ contains
 
   subroutine chimes_live_grain_scatter(nd,number,energy,momentum,mass,directions,weights,dt,chat,work,ierr)
     integer,intent(in)::nd
-    real(dp),intent(inout)::number(nd,9),energy(nd,9),momentum(3,4),work(4)
+    real(dp),intent(inout)::number(nd,chimes_ng),energy(nd,chimes_ng),momentum(3,4),work(4)
     real(dp),intent(in)::mass(4),directions(3,nd),weights(nd),dt,chat
     integer,intent(out)::ierr
     real(dp),allocatable::nn(:,:),ee(:,:)
-    real(dp)::tau(4,9),p(3,4),w(4),gn(nd,9),ge(nd,9),group_n
+    real(dp)::tau(4,chimes_ng),p(3,4),w(4),gn(nd,chimes_ng),ge(nd,chimes_ng),group_n
     integer::b,g,k,j
     real(dp),parameter::ev_erg=1.602176634d-12
     ierr=1
@@ -613,10 +774,10 @@ contains
     ! preserve its transactional work/momentum contract. This is local
     ! scattering only, never permission to skip transport or dark chemistry.
     if(any(number/=0).or.any(energy/=0))then
-    allocate(nn(nd,128*9),ee(nd,128*9))
+    allocate(nn(nd,128*chimes_ng),ee(nd,128*chimes_ng))
     ierr=chimes_band_nodes(band_handle,nd,number,energy,nn,ee)
     if(ierr/=0)return
-    do g=1,9
+    do g=1,chimes_ng
        group_n=sum(number(:,g))
        if(group_n<=0)cycle
        do k=1,128
@@ -640,11 +801,11 @@ contains
     ! to chimes_live_stage's external CHIMES controls.
     integer,intent(in)::cell
     real(dp),intent(in)::sd,sv,dt,td,chat
-    real(dp),intent(inout)::photons(9),state(chimes_ns),energy,solid,ledger(8)
+    real(dp),intent(inout)::photons(chimes_ng),state(chimes_ns),energy,solid,ledger(8)
     integer,intent(out)::ierr
     real(dp),optional,intent(in)::staged_row(:)
     real(dp)::row(nvar_all)
-    real(dp)::elements(11),after(11),q0,q1,nh,nonthermal,e,u,n(9),s(chimes_ns),receipt(8),bins(6)
+    real(dp)::elements(11),after(11),q0,q1,nh,nonthermal,e,u,n(chimes_ng),s(chimes_ns),receipt(8),bins(6)
     ierr=1
     if(.not.ready.or.min(sd,sv)<=0)return
     row=uold(cell,1:nvar_all)
@@ -684,8 +845,8 @@ contains
 
   subroutine chimes_live_stage(cell,sd,sv,dt,length,td,area,chat,photons,state,energy,next_photons,ierr,staged_row)
     integer,intent(in)::cell
-    real(dp),intent(in)::sd,sv,dt,length,td,area,chat,photons(9)
-    real(dp),intent(out)::state(chimes_ns),energy,next_photons(9)
+    real(dp),intent(in)::sd,sv,dt,length,td,area,chat,photons(chimes_ng)
+    real(dp),intent(out)::state(chimes_ns),energy,next_photons(chimes_ng)
     integer,intent(out)::ierr
     ! Optional complete material state. Composition, grain charge, E and
     ! momenta must come from the SAME substep; never reset chemistry to uold.

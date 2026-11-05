@@ -49,7 +49,7 @@ static int snrt_host_species_dust_impl(
   if(grains){
     if(grains->bins!=4 && grains->bins!=6)return 1;
     if(!columns || !secondary || dust_moment || !grains->columns || !grains->abs ||
-        !grains->transport || !grains->energy || !grains->weights || ngroup!=9 || !edges)return 1;
+        !grains->transport || !grains->energy || !grains->weights || !edges)return 1;
     for(int b=0;b<grains->bins;++b)for(int c=0;c<nowned;++c)
       if(!std::isfinite(grains->columns[b*nowned+c]) || grains->columns[b*nowned+c]<0)return 2;
     double norm=0;
@@ -82,7 +82,7 @@ static int snrt_host_species_dust_impl(
     for(int c=0;c<nowned;++c)if(!std::isfinite(xi[c]) || xi[c]<0 || xi[c]>1)return 2;
   } else if(xi || deposition)return 1;
   if(columns) {
-    if(!shift || !edges || ngroup!=9)return 1;
+    if(!shift || !edges)return 1;
     for(int g=0;g<=ngroup;++g)
       if(!std::isfinite(edges[g]) || edges[g]<=0 || (g>0 && edges[g]<=edges[g-1]) || edges[g]>1e4)return 2;
     for(int s=0;s<3;++s)for(int c=0;c<nowned;++c)

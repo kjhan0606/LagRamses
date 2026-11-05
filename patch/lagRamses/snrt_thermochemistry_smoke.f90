@@ -512,13 +512,13 @@ contains
             'complete spectral split includes entry dissociation cost without inventing photons',failures)
     enddo
     ctl=[1d0,9d4,20d0,1d8,1d18,0d0,1d0,1d-6,.01d0]
-    status=chimes_cell_transition_dark(ctl,el,a,0,t,b,elapsed)
+    status=chimes_cell_transition_dark(ctl,el,a,0,2,n,e,0d0,t,b,elapsed)
     write(*,*)'TRANSITION_ROOT_STATUS_TIME_T=',status,elapsed,t
     call expect(status==51.and.elapsed>0.and.elapsed<ctl(4).and.abs(t-tmax)<1d-7*tmax, &
          'cold dark evolution returns an accepted CVODE thermal root before invalid molecular rates',failures)
     if(status==51)then
        root_time=elapsed;ctl(4)=root_time/2
-       status=chimes_cell_transition_dark(ctl,el,a,0,t,b,elapsed)
+       status=chimes_cell_transition_dark(ctl,el,a,0,2,n,e,0d0,t,b,elapsed)
        call expect(status==0.and.t<tmax.and.elapsed==ctl(4), &
             'root detection never uses an internal overshoot after the requested endpoint',failures)
        ctl(4)=1d8

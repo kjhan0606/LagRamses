@@ -368,3 +368,45 @@ identity, both comparison records, and the cleanup manifest remain available
 in `.m5-effective-restart-444355/`. The batch's recorded failure remains
 visible in Slurm accounting; the corrected offline comparison does not rewrite
 that scheduler state.
+
+## MPI2 source-receipt closure — job 1272009
+
+Following the operator's 2026-11-06 decision, this is a fixed-template
+diagnostic only; the 25-group profile stayed `runtime_admissible=false`.
+CPU-only Grammar `normal` job `1272009` completed with exit code 0 in 4:41 on
+`grammar019`, using two MPI ranks and four OpenMP threads per rank. The
+job-local CPU build used the explicit
+`snrt_agn25_joint_diag_20261102_v1` profile and a job-local CHIMES capacity-32
+rebuild; no shared CHIMES source was changed. The source HEAD was
+`8f356b9ba002570073a4667a06e9947181c7b152`, the dirty-worktree digest was
+`d1a534e394990929bd6767b2f0cdb021af9be6b0f957371456af90896f33d1d2`, and the
+executable SHA256 was
+`24d88b279f1b0465ab7e737756eddaf97abf308f6059bb42ca1e1cd98e22e569`.
+
+The bounded run reached two M5 commits: an initial source-free transaction
+and one transaction with simultaneous stellar and thermal-AGN injection.
+The source-bearing commit accepted one AGN contribution and 64 stellar
+contributions. Their receipts were `3.0606581915441e62` and
+`1.5830645317894e53` photons, respectively. The AGN energy receipt partitions
+`3.9408365521849e51 erg` input into `3.8353356168833e51 erg` represented in
+the injected groups and `1.0550093530165e50 erg` unrepresented; the runner's
+maximum relative partition residual was `1.269e-14`. The new pre-conversion
+source-class/aggregate M5 injection check passed at its `1e-10` relative
+threshold on this two-rank execution. The combined-source parser reported
+`M5_COMBINED_SOURCE_ATTRIBUTION_PASS overlap_commits=1`.
+
+The committed M5 transaction also had nonzero gas and dust energy exchange
+and a nonzero CHIMES state change. Its aggregate photon-ledger relative
+residual was `1.963e-15`; the combined-source and candidate-capture sentinels
+passed. This proves injection attribution and aggregate transaction closure
+for this bounded reference fixture. The M5 radiation field merges the source
+classes, so this does not establish source-specific absorption, escape, or
+capture. The effective namelist used `noutput=1`, future dummy clocks
+(`aout=2.0`, `tout=1.0d30`) and `foutput=fbackup=1000000`; the run created no
+`output_*` raw directories. Effective inputs, hashes, logs and compact result
+records are retained under
+[`../.m5-effective-dust-chimes-source-receipt-1272009/`](../.m5-effective-dust-chimes-source-receipt-1272009/), with build and scheduler
+evidence under
+[`../.m5-source-receipt-build-1272009/`](../.m5-source-receipt-build-1272009/)
+and [`../.m5-source-receipt-20261106/`](../.m5-source-receipt-20261106/).
+No production AGN SED or runtime admission is inferred from this diagnostic.

@@ -96,19 +96,15 @@ contains
     if(mass>0d0.and.energy>0d0)ready=(gamma-1d0)*(energy/mass)*scale_t2>threshold
   end function agn_heat_ready
 
-  pure logical function agn_reference_receiver_ready(is_replay,selected,vol_gas,ind_blast) result(ready)
-    logical,intent(in)::is_replay,selected
+  pure logical function agn_reference_receiver_ready(selected,vol_gas) result(ready)
+    logical,intent(in)::selected
     real(dp),intent(in)::vol_gas
-    integer,intent(in)::ind_blast
     ready=.false.
     if(.not.selected.or..not.ieee_is_finite(vol_gas))return
-    if(is_replay)then
-       ! Replay is deposited over the thermal bubble and does not require the
-       ! single-cell donor owner used by a fresh jet/heat event.
-       ready=vol_gas>0d0
-    else
-       ready=ind_blast>0
-    endif
+    ! Injection is distributed over the global bubble volume on every rank.
+    ! The donor cell is rank-local and is used only by its unique owner during
+    ! jet-mass withdrawal; it must not gate energy/momentum deposition here.
+    ready=vol_gas>0d0
   end function agn_reference_receiver_ready
 
   pure logical function agn_reference_jet_speed_ok(energy,mass,f_ek,scale_v) result(ok)

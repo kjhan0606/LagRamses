@@ -1,21 +1,26 @@
 # Audit cadence amendment
 
 Effective: 2026-09-05
-Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
+Project: `/gpfs/kjhan/chimes-cvode-gpu-20261001` (`kjhan0606/LagRamses`)
 
-## Current policy: selective Fable review (operator approval 2026-09-10)
+## Current policy: selective Astra review (operator update 2026-11-05)
 
 This section supersedes the historical per-bundle review/re-audit cadence,
 external end-auditor assignment and approval-wait wording below. Existing
 operator preapprovals remain effective; do not add an approval wait.
 
-Current operator-role and timeout update (2026-09-16): Fable is assigned the
-plan and bundle-end audits, while Claude Opus 5 is assigned code
-implementation/structure audits. The default wall-clock limit for a Fable
-plan audit is 600 seconds (10 minutes). A timeout is recorded as no verdict;
-it is never treated as approval or rejection.
+The 2026-11-05 operator update replaces Fable with the internal Astra Codex
+sub-agent (`gpt-6-astra`) for every pending or future Fable audit assignment,
+including plan/design review, scientific or technical consultation,
+bundle-end/closeout audit, and fallback review. This changes the auditor only;
+it does not increase review cadence or reopen prior approvals. Claude Opus 5
+retains its separately assigned code implementation/structure audits. Use the
+internal Astra agent, not an external CLI. Give a plan review up to 600 seconds
+(10 minutes); a timeout is recorded as no verdict, never as approval or
+rejection. Completed Fable reports remain historical records; do not rewrite
+or relabel their verdicts.
 
-- Call Fable for a new physical model, a substantive conservation-law or
+- Call Astra for a new physical model, a substantive conservation-law or
   module-coupling design change, or a scientific question the driver cannot
   confidently resolve. Explicit operator requests also take precedence.
 - Do not call routinely for continued implementation of an approved design,
@@ -55,10 +60,12 @@ as context. For each question require a short conclusion and concrete reasons;
 then proceed to the existing scientific/technical and feasibility review.
 Do not turn optional improvements into new mandatory completion conditions.
 These are priority questions WITHIN the existing single plan audit, not two
-new gates, audit calls or approval waits. Auditor roles and audit frequency
-are unchanged; do not reopen an already approved bundle solely for this update.
+new gates, audit calls or approval waits. The Astra role replacement above
+does not create extra audits; do not reopen an already approved bundle solely
+for this update. Any still-pending request that names Fable is reassigned to
+Astra under the same existing trigger, scope, and approval state.
 
-## Historical major-bundle rule (cadence superseded above)
+## Historical major-bundle rule (cadence superseded above; auditor assignment superseded 2026-11-05)
 
 Implementation work is organized into larger coherent bundles.  A bundle
 should contain the related algorithm, production wiring, boundary semantics,
@@ -66,12 +73,13 @@ tests, evidence, and documentation needed to make one meaningful engineering
 or physics decision.  A single helper edit, test correction, wording change,
 or bounded audit repair is not a new bundle.
 
-The plan auditor is called once before each substantial bundle and the
-implementation auditor once at its end, not after each micro-step or
-intermediate test. Fable is primary for the plan review and Claude Opus 5 is
-its backup; Claude Opus 5 is primary for the end review and Fable is its
-backup. During implementation, local tests and static checks are ordinary
-engineering evidence, not separate audit events.
+The old assignment called the plan auditor once before each substantial
+bundle and the implementation auditor once at its end, not after each
+micro-step or intermediate test. Fable/Claude Opus 5 were the historical
+plan-review pair, and Claude Opus 5/Fable were the historical end-review
+pair. Effective 2026-11-05, Astra replaces Fable at those assigned call points
+under the current policy above. During implementation, local tests and
+static checks are ordinary engineering evidence, not separate audit events.
 
 If a bundle-end audit returns bounded conditions, the driver records them and
 folds all related remediation into one larger repair/closure bundle.  A single

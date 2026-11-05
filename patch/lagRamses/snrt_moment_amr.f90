@@ -157,14 +157,23 @@ contains
     allocate(base(b%nm,mesh%nowned),stage(b%nm,mesh%nowned),candidate(b%nm,mesh%nowned),second_base(b%nm,mesh%nowned))
     allocate(warm(b%nm-1,mesh%nall));warm=0
     call euler(u,stage,base,e1,p1,ierr)
-    if(ierr/=0)return
+    if(ierr/=0)then
+       write(*,*)'M_N Euler stage 1 rejected level/code=',mesh%level,ierr
+       return
+    endif
     call euler(stage,candidate,second_base,e2,p2,ierr)
-    if(ierr/=0)return
+    if(ierr/=0)then
+       write(*,*)'M_N Euler stage 2 rejected level/code=',mesh%level,ierr
+       return
+    endif
     candidate=.5d0*(base+candidate)
     allocate(final_cache(b%nm+1,mesh%nowned))
     call mn_dispatch_closure(b,candidate,stage,final_cache,warm(:,1:mesh%nowned),ierr)
     call mn_collective_status(ierr)
-    if(ierr/=0)return
+    if(ierr/=0)then
+       write(*,*)'M_N final closure rejected level/code=',mesh%level,ierr
+       return
+    endif
     u=candidate;escape=.5d0*(e1+e2);projection=p1+.5d0*p2
   contains
     subroutine exchange(values,reverse,status)
@@ -193,6 +202,7 @@ contains
       integer,allocatable :: faces(:,:)
       real(dp) :: angular(b%nq),moments(b%nm),flux(b%nm),mu,il,ir,signface,flow,dl,dr
       integer :: first,last,col,j,i,q,f,a,r,k,nq,component,ncol,nface,ff,fl,fi,fs,opposite,reverse_tile
+      integer :: bad_component,bad_q,bad_right_cell,neighbor_left,neighbor_right
       allocate(field(mesh%nfield,field_tile),extended(b%nm,mesh%nall),cache(b%nm+1,mesh%nall))
       allocate(theta(mesh%nowned))
       allocate(donor(4,angle_tile,mesh%nall))
@@ -220,7 +230,10 @@ contains
             field(mesh%cells(i),1:ncol)=input(first:last,i)
          enddo
          call exchange(field(:,1:ncol),.false.,status)
-         if(status/=0)return
+         if(status/=0)then
+            write(*,*)'M_N Euler moment halo rejected level/first/status=',mesh%level,first,status
+            return
+         endif
          do i=1,mesh%nall
             extended(first:last,i)=field(mesh%cells(i),1:ncol)
          enddo
@@ -228,7 +241,11 @@ contains
       status=0;receipt=0;boundary=0;theta=1
       call mn_dispatch_closure(b,extended,all_projected,cache,warm,status)
       call mn_collective_status(status)
-      if(status/=0)return
+      if(status/=0)then
+         write(*,*)'M_N Euler moment closure rejected level/status/M0minmax=',mesh%level,status, &
+              minval(input(1,:)),maxval(input(1,:))
+         return
+      endif
       projected_base=all_projected(:,1:mesh%nowned)
       deallocate(all_projected)
       ! Integrate each shared face in quadrature order before combining
@@ -258,7 +275,10 @@ contains
             enddo
          enddo
          call exchange(field(:,1:4*nq),.false.,status)
-         if(status/=0)return
+         if(status/=0)then
+            write(*,*)'M_N Euler angular halo rejected level/first/status=',mesh%level,first,status
+            return
+         endif
          do i=mesh%nowned+1,mesh%nall
             do k=1,nq
                donor(:,k,i)=field(mesh%cells(i),4*(k-1)+1:4*k)
@@ -279,14 +299,59 @@ contains
             call mn_dispatch_flux(b%harmonic(:,first:first+nq-1),b%weight(first:first+nq-1), &
                  b%direction(:,first:first+nq-1),left(:,1:nq,1:fl-fs+1),right(:,1:nq,1:fl-fs+1), &
                  geometry(:,1:fl-fs+1),face_flux(:,1:fl-fs+1),status)
-            if(status/=0)exit
+            if(status/=0)then
+               face_trace: do fi=1,fl-fs+1
+                  do k=1,nq
+                     do component=1,4
+                        if(ieee_is_finite(left(component,k,fi)).and. &
+                             ieee_is_finite(right(component,k,fi)))cycle
+                        ff=fs+fi-1;i=faces(1,ff);r=faces(2,ff);f=faces(3,ff);a=(f+1)/2
+                        bad_component=component;bad_q=first+k-1
+                        bad_right_cell=0
+                        if(r>=1.and.r<=mesh%nall)bad_right_cell=mesh%cells(r)
+                        write(*,*)'M_N_BAD_DONOR_FACE rank/level/face/cells/slots/kind/owner=', &
+                             myid,mesh%level,ff,i,r,mesh%cells(i),bad_right_cell, &
+                             mesh%kind(f,i),mesh%owner(f,i)
+                        write(*,*)'M_N_BAD_DONOR_COMPONENT q/axis/component=',bad_q,a,bad_component
+                        write(*,*)'M_N_BAD_DONOR_LEFT=',donor(:,k,i)
+                        if(r>=1.and.r<=mesh%nall)then
+                           write(*,*)'M_N_BAD_DONOR_RIGHT=',donor(:,k,r)
+                           write(*,*)'M_N_BAD_DONOR_RIGHT_CACHE M0/top/norm=', &
+                                extended(1,r),cache(b%nm,r),cache(b%nm+1,r)
+                        else
+                           write(*,*)'M_N_BAD_DONOR_RIGHT=physical-boundary'
+                        endif
+                        if(r>=1.and.r<=mesh%nleaf)then
+                           do opposite=1,3
+                              neighbor_left=mesh%neighbor(2*opposite-1,r)
+                              neighbor_right=mesh%neighbor(2*opposite,r)
+                              write(*,*)'M_N_BAD_DONOR_STENCIL axis/indices/center-left-right=', &
+                                   opposite,neighbor_left,r,neighbor_right
+                              if(neighbor_left>0.and.neighbor_left<=mesh%nall) &
+                                   write(*,*)'M_N_BAD_DONOR_STENCIL_VALUES left/center=', &
+                                   donor(1,k,neighbor_left),donor(1,k,r)
+                              if(neighbor_right>0.and.neighbor_right<=mesh%nall) &
+                                   write(*,*)'M_N_BAD_DONOR_STENCIL_VALUES center/right=', &
+                                   donor(1,k,r),donor(1,k,neighbor_right)
+                           enddo
+                        endif
+                        exit face_trace
+                     enddo
+                  enddo
+               enddo face_trace
+               write(*,*)'M_N Euler face flux rejected level/angle/face/status=',mesh%level,first,fs,status
+               exit
+            endif
             do fi=1,fl-fs+1
                ff=fs+fi-1
                integrated_flux(:,ff)=integrated_flux(:,ff)+face_flux(:,fi)
             enddo
          enddo
          call mn_collective_status(status)
-         if(status/=0)return
+         if(status/=0)then
+            write(*,*)'M_N Euler collective flux rejected level/angle/status=',mesh%level,first,status
+            return
+         endif
       enddo
       deallocate(donor,left,right,geometry,face_flux)
       do ff=1,nface
@@ -316,7 +381,10 @@ contains
             enddo
          enddo
          call exchange(field(:,1:6*ncol),.true.,status)
-         if(status/=0)return
+         if(status/=0)then
+            write(*,*)'M_N Euler reverse halo rejected level/first/status=',mesh%level,first,status
+            return
+         endif
          do i=1,mesh%nowned
             flux(1:ncol)=0
             do f=1,6
@@ -349,7 +417,10 @@ contains
         do q=1,b%nq
 !$omp do schedule(static)
            do i=1,mesh%nall
-              if(extended(1,i)>0)then
+              ! Closure encodes a numerically unresolved all-subnormal
+              ! moment vector as vacuum with a zero cached partition.
+              ! Apply the same interpretation here before dividing by it.
+              if(extended(1,i)>0.and.cache(b%nm+1,i)>0d0)then
                  samples(i)=extended(1,i)* &
                       exp(dot_product(cache(1:b%nm-1,i),b%harmonic(2:,q)- &
                       extended(2:,i)/extended(1,i))-cache(b%nm,i))/cache(b%nm+1,i)
@@ -393,7 +464,7 @@ contains
            q=q_first+k-1
 !$omp do schedule(static)
            do i=1,mesh%nall
-              if(extended(1,i)>0)then
+              if(extended(1,i)>0.and.cache(b%nm+1,i)>0d0)then
                  donor(1,k,i)=extended(1,i)* &
                       exp(dot_product(cache(1:b%nm-1,i),b%harmonic(2:,q)- &
                       extended(2:,i)/extended(1,i))-cache(b%nm,i))/cache(b%nm+1,i)

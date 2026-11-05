@@ -790,8 +790,8 @@ contains
              ! The element budget above admits representational roundoff.
              ! At zero rate/time, min(bin,available) would turn that into a
              ! spurious mass loss with no directed process/donor. Preserve
-             ! exact identity here; retain the legacy no-momentum arithmetic.
-             if(coupled.and.(b==0.or.(a==0.and.bb(j,i)==0)))cycle
+             ! exact identity for both coupled and scalar paths.
+             if(b==0.or.(a==0.and.bb(j,i)==0))cycle
              if(coupled)then
                 call dust_mass_step(available,trial(first+j-1),b,a,bb(j,i),updated,status)
              else

@@ -1,5 +1,6 @@
 #include "snrt_chimes_spectrum.h"
 #include "snrt_chimes_spectrum_internal.h"
+#include "snrt_group_profile.h"
 #include <cvode/cvode.h>
 #include <cvode/cvode_ls.h>
 #include <nvector/nvector_serial.h>
@@ -14,7 +15,7 @@ extern "C" int snrt_chimes_fs_grid(int,double *,double *,double *);
 extern "C" int snrt_chimes_budget(const double *,double *,double *);
 
 namespace {
-constexpr int ns=157,ng=9,K=128,nledger=8+2*ng;
+constexpr int ns=157,ng=SNRT_GROUP_COUNT,K=128,nledger=8+2*ng;
 constexpr int nphase=4,nphase_energy=ng*nphase,nphase_moment=6*nphase;
 constexpr int ne=258;
 using snrt_chimes_detail::Bank;
@@ -72,6 +73,12 @@ struct Solver {
 };
 struct PhotoSolverStats { long long steps=0,rhs=0,linear_iterations=0; };
 thread_local PhotoSolverStats last_photo_solver_stats;
+thread_local int photo_debug_rank=-1;
+thread_local int photo_debug_cell=-1;
+thread_local int photo_debug_thread=-1;
+thread_local unsigned long long photo_debug_invocation=0;
+#define PHOTO_CONTEXT_FORMAT " rank=%d cell=%d omp_thread=%d invocation=%llu"
+#define PHOTO_CONTEXT_ARGS photo_debug_rank,photo_debug_cell,photo_debug_thread,photo_debug_invocation
 // Same raw FS2010 interpolation/target limiter as the existing grey adapter.
 // Samples retain six raw channels; averaging already-normalized fractions
 // at the xi endpoints would introduce a different interpolation law.
@@ -212,6 +219,13 @@ int prec_solve(realtype,N_Vector,N_Vector,N_Vector r,N_Vector z,realtype,realtyp
   for(size_t j=0;j<p.inverse_diagonal.size();++j)out[j]=in[j]*p.inverse_diagonal[j];
   return 0;
 }
+}
+
+extern "C" void snrt_chimes_photo_debug_context(int rank,int cell,int thread) {
+  photo_debug_rank=rank;
+  photo_debug_cell=cell;
+  photo_debug_thread=thread;
+  if(rank>=0 && cell>=0)++photo_debug_invocation;
 }
 
 extern "C" void snrt_chimes_photo_solver_stats(long long out[3]) {
@@ -400,8 +414,13 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
     for(int s=0;s<ns;++s)for(int e=0;e<11;++e)if(composition[s][e]>0)
       tol[s]=std::min(tol[s],std::max(1e-32,1e-12*nuclei[e]/composition[s][e]));
     const double scale=initial_energy/nh;
-    std::fill(tol+li,tol+size,std::max(1e-30,scale*1e-14));
-    tol[li+7]=std::max(1e-30,scale/b.grids.back().e.back()*1e-14);
+    // These ledgers are per-H quantities and can be far below 1e-30 in
+    // optically thin cells. A fixed 1e-30 absolute tolerance can exceed the
+    // entire absorbed signal, defeating both the requested relative tolerance
+    // and the independently enforced photon/energy closure below.
+    const double atol_floor=std::numeric_limits<double>::min();
+    std::fill(tol+li,tol+size,std::max(atol_floor,scale*1e-14));
+    tol[li+7]=std::max(atol_floor,scale/b.grids.back().e.back()*1e-14);
     std::fill(tol+li+8+ng,tol+li+nledger,tol[li+7]);
     N_VConst(1.,solver.constraints); // nonnegative accepted species/tau/counters
     solver.cv=CVodeCreate(CV_BDF);require(solver.cv);
@@ -501,14 +520,47 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
       // representative energy times N. Reject counter drift before publish.
       const double lo=b.grids[g].e.front(),hi=b.grids[g].e.back();
       if(dust_e[g]<lo*dust_n[g]-1e-8*std::max(initial_energy,1e-30) ||
-         dust_e[g]>hi*dust_n[g]+1e-8*std::max(initial_energy,1e-30))return 7;
+         dust_e[g]>hi*dust_n[g]+1e-8*std::max(initial_energy,1e-30)){
+        std::fprintf(stderr,"CHIMES PHOTO BUDGET REJECT reason=grain_band" PHOTO_CONTEXT_FORMAT
+            " group=%d energy=%.17g photons=%.17g support=[%.17g,%.17g] initial_energy=%.17g\n",
+            PHOTO_CONTEXT_ARGS,g,dust_e[g],dust_n[g],lo,hi,initial_energy);return 7;
+      }
     }
     const double e_scale=std::max(initial_energy,1e-30);
     double n_scale=0;for(int i=0;i<ng*nd;++i)n_scale+=number[i];
-    if(std::abs(absorbed_n-budget[7]-budget[9])>1e-7*std::max(n_scale,1e-30) ||
-       std::abs(absorbed_e-budget[6]-budget[8])>1e-7*e_scale)return 7;
+    const double photon_residual=absorbed_n-budget[7]-budget[9];
+    const double energy_residual=absorbed_e-budget[6]-budget[8];
+    if(std::abs(photon_residual)>1e-7*std::max(n_scale,1e-30) ||
+       std::abs(energy_residual)>1e-7*e_scale){
+      double node_absorbed_n=0,node_absorbed_e=0,tau_min=std::numeric_limits<double>::infinity(),tau_max=0;
+      for(int k=0;k<nn;++k){
+        const double tau=y[ns+k],captured=-std::expm1(-tau);
+        tau_min=std::min(tau_min,tau);tau_max=std::max(tau_max,tau);
+        node_absorbed_n+=p.initial[k]*captured;
+        node_absorbed_e+=p.initial[k]*b.energy[p.node[k]]*captured;
+      }
+      double reconstructed_n=0,reconstructed_e=0;
+      for(int i=0;i<ng*nd*K;++i){
+        reconstructed_n+=rays[i];
+        reconstructed_e+=rays[i]*b.energy[i%K+(i/(K*nd))*K];
+      }
+      double input_n=0,input_e=0;
+      for(int i=0;i<ng*nd;++i){input_n+=number[i];input_e+=energy[i];}
+      const double n_allowance=1e-7*std::max(n_scale,1e-30),e_allowance=1e-7*e_scale;
+      std::fprintf(stderr,"CHIMES PHOTO BUDGET REJECT reason=absorbed_vs_receivers" PHOTO_CONTEXT_FORMAT
+          " phases=%d active_nodes=%d nh=%.17g dt=%.17g chat=%.17g tau=[%.17g,%.17g] dN=%.17g Nallow=%.17g Nratio=%.17g dE=%.17g Eallow=%.17g Eratio=%.17g absorbedN=%.17g gasN=%.17g dustN=%.17g nodeRemovedN=%.17g absorbedE=%.17g gasE=%.17g dustE=%.17g nodeRemovedE=%.17g reconstructedN=%.17g inputN=%.17g reconstructedE=%.17g inputE=%.17g solver_steps=%lld solver_rhs=%lld solver_liniters=%lld\n",
+          PHOTO_CONTEXT_ARGS,int(phases),nn,nh,dt,chat,tau_min,tau_max,photon_residual,n_allowance,
+          photon_residual/n_allowance,energy_residual,e_allowance,energy_residual/e_allowance,
+          absorbed_n,budget[7],budget[9],node_absorbed_n,absorbed_e,budget[6],budget[8],node_absorbed_e,
+          reconstructed_n,input_n,reconstructed_e,input_e,last_photo_solver_stats.steps,
+          last_photo_solver_stats.rhs,last_photo_solver_stats.linear_iterations);return 7;
+    }
     double accounted=0;for(int j=0;j<6;++j)accounted+=budget[j];
-    if(std::abs(accounted-budget[6])>1e-8*e_scale)return 7;
+    if(std::abs(accounted-budget[6])>1e-8*e_scale){
+      std::fprintf(stderr,"CHIMES PHOTO BUDGET REJECT reason=gas_absorption_partition" PHOTO_CONTEXT_FORMAT
+          " channel_sum=%.17g absorbed_gas_total=%.17g residual=%.17g Escale=%.17g\n",
+          PHOTO_CONTEXT_ARGS,accounted,budget[6],accounted-budget[6],e_scale);return 7;
+    }
     std::array<double,nphase_energy> phase_e{};
     std::array<double,3*nphase> phase_p{};
     if(phases){
@@ -518,23 +570,42 @@ static int photo_step(void *handle,int nd,double nh,double dt,double chat,const 
         for(int s=0;s<nphase;++s){
           const int i=s*ng+g;
           phase_e[i]=y[li+nledger+i]*nh;
-          if(!std::isfinite(phase_e[i]) || phase_e[i]<0)return 7;
+          if(!std::isfinite(phase_e[i]) || phase_e[i]<0){
+            std::fprintf(stderr,"CHIMES PHOTO BUDGET REJECT reason=phase_energy_nonpositive" PHOTO_CONTEXT_FORMAT
+                " phase=%d group=%d value=%.17g\n",PHOTO_CONTEXT_ARGS,s,g,phase_e[i]);return 7;
+          }
           sum+=phase_e[i];
         }
-        if(!std::isfinite(sum) || std::abs(sum-dust_e[g])>1e-8*e_scale)return 7;
+        if(!std::isfinite(sum) || std::abs(sum-dust_e[g])>1e-8*e_scale){
+          std::fprintf(stderr,"CHIMES PHOTO BUDGET REJECT reason=phase_group_sum" PHOTO_CONTEXT_FORMAT
+              " group=%d phase_sum=%.17g dust_energy=%.17g residual=%.17g Escale=%.17g\n",
+              PHOTO_CONTEXT_ARGS,g,sum,dust_e[g],sum-dust_e[g],e_scale);return 7;
+        }
         total+=sum;
       }
-      if(!std::isfinite(total) || std::abs(total-budget[8])>1e-8*e_scale)return 7;
+      if(!std::isfinite(total) || std::abs(total-budget[8])>1e-8*e_scale){
+        std::fprintf(stderr,"CHIMES PHOTO BUDGET REJECT reason=phase_total" PHOTO_CONTEXT_FORMAT
+            " total=%.17g dust_total=%.17g residual=%.17g Escale=%.17g\n",
+            PHOTO_CONTEXT_ARGS,total,budget[8],total-budget[8],e_scale);return 7;
+      }
       for(int s=0;s<nphase;++s){
         double energy_sum=0,norm=0;
         for(int g=0;g<ng;++g)energy_sum+=phase_e[s*ng+g];
         for(int axis=0;axis<3;++axis){
           const int m=li+nledger+nphase_energy+s*6+2*axis;
           const double moment=(y[m]-y[m+1])*nh;
-          if(!std::isfinite(moment))return 7;
+          if(!std::isfinite(moment)){
+            std::fprintf(stderr,"CHIMES PHOTO BUDGET REJECT reason=phase_moment_nonfinite" PHOTO_CONTEXT_FORMAT
+                " phase=%d axis=%d plus=%.17g minus=%.17g\n",
+                PHOTO_CONTEXT_ARGS,s,axis,y[m]*nh,y[m+1]*nh);return 7;
+          }
           phase_p[s*3+axis]=moment;norm=std::hypot(norm,moment);
         }
-        if(!std::isfinite(energy_sum) || norm>energy_sum+1e-8*e_scale)return 7;
+        if(!std::isfinite(energy_sum) || norm>energy_sum+1e-8*e_scale){
+          std::fprintf(stderr,"CHIMES PHOTO BUDGET REJECT reason=phase_realizability" PHOTO_CONTEXT_FORMAT
+              " phase=%d energy=%.17g momentum_norm=%.17g residual=%.17g Escale=%.17g components=(%.17g,%.17g,%.17g)\n",
+              PHOTO_CONTEXT_ARGS,s,energy_sum,norm,norm-energy_sum,e_scale,phase_p[s*3],phase_p[s*3+1],phase_p[s*3+2]);return 7;
+        }
       }
     }
     std::copy(y,y+ns,next);std::copy(out_n.begin(),out_n.end(),next_number);
@@ -564,6 +635,14 @@ extern "C" int snrt_chimes_band_photo_dust_step(void *handle,int nd,double nh,do
     double *next_number,double *next_energy,double *ledger){
   if(!dust_alpha)return 1;
   return photo_step(handle,nd,nh,dt,chat,dust_alpha,nullptr,nullptr,0,old,number,energy,next,next_number,next_energy,ledger);
+}
+
+extern "C" int snrt_chimes_band_photo_dust_groups(void *handle,int nd,double nh,double dt,double chat,
+    const double *dust_alpha,const double *old,const double *number,const double *energy,double *next,
+    double *next_number,double *next_energy,double *ledger,double *grain_number,double *grain_energy){
+  if(!dust_alpha || !grain_number || !grain_energy)return 1;
+  return photo_step(handle,nd,nh,dt,chat,dust_alpha,nullptr,nullptr,0,old,number,energy,next,next_number,
+      next_energy,ledger,grain_number,grain_energy);
 }
 
 extern "C" int snrt_chimes_band_photo_molecular_step(void *handle,void *molecules,int nd,

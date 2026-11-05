@@ -22,6 +22,7 @@ import h5py
 import numpy as np
 from scipy.integrate import quad
 from scipy.optimize import brentq
+from generate_snrt_group_profile import read_profile
 
 EDGES = [.01, 1., 5.6, 11.2, 13.6, 24.59, 54.42, 500., 2000., 10000.]
 MEANS = [.1, 2.3664319132398464, 10.56942670578782, 12.2954112566775,
@@ -36,7 +37,70 @@ FIT_SHA = {
 }
 
 
-def build_shell_bank(tools, main_data, output, n):
+def resolve_group_profile(profile_id, manifest_path, means_ledger):
+    group_count, edges, edge_sha256 = read_profile(manifest_path, profile_id)
+    if means_ledger is None:
+        if profile_id != 'snrt_agn9_v1':
+            raise ValueError('nonlegacy profiles require an explicit resolved source ledger for group means')
+        means = list(MEANS)
+    else:
+        ledger_path = Path(means_ledger).resolve(strict=True)
+        ledger = json.loads(ledger_path.read_text())
+        if ledger.get('group_edges_ev') != edges:
+            raise ValueError('source ledger edges do not match the selected group profile')
+        provenance = ledger.get('provenance', {})
+        if not isinstance(provenance, dict):
+            raise ValueError('source ledger provenance must be an object')
+        ledger_digest = (ledger.get('group_edges_sha256')
+                         or provenance.get('group_edges_file_sha256')
+                         or provenance.get('group_edges_sha256'))
+        if ledger_digest != edge_sha256:
+            raise ValueError('source ledger edge digest does not match the selected profile')
+        ledger_profile = ledger.get('group_set_id', ledger.get('profile_id'))
+        if ledger_profile is None:
+            if profile_id != 'snrt_agn9_v1':
+                raise ValueError('nonlegacy source ledger must identify its group profile')
+        elif ledger_profile != profile_id:
+            raise ValueError('source ledger group profile ID does not match the selected profile')
+        groups = ledger.get('groups')
+        if not isinstance(groups, list) or len(groups) != group_count:
+            raise ValueError('source ledger does not contain one record per group')
+        means = []
+        first_index = groups[0].get('index') if isinstance(groups[0], dict) else None
+        if first_index not in (0, 1):
+            raise ValueError('source ledger group indices must start at zero or one')
+        for i, group in enumerate(groups):
+            if not isinstance(group, dict) or group.get('index') != i + first_index:
+                raise ValueError('source ledger group indices are not contiguous')
+            expected_interval = [edges[i], edges[i + 1]]
+            if group.get('energy_interval_ev') != expected_interval:
+                raise ValueError(f'source ledger energy interval does not match group {i + 1}')
+            means.append(float(group['photon_weighted_mean_energy_ev']))
+        if (not np.isfinite(means).all()
+                or any(x < lo or x > hi for x, lo, hi in zip(means, edges[:-1], edges[1:]))):
+            raise ValueError('source ledger contains a group mean outside its band')
+    if len(edges) != group_count+1 or len(means) != group_count:
+        raise ValueError('group profile dimensions are inconsistent')
+    return edges, means, edge_sha256
+
+
+def bind_profile_metadata(h5file, profile_id, edge_sha256):
+    h5file.attrs['group_set_id'] = profile_id
+    h5file.attrs['group_edges_sha256'] = edge_sha256
+
+
+def bind_classic_chimes_group_metadata(h5file, profile_id, edge_sha256):
+    """Bind classic CHIMES tables using the native loader's attribute names.
+
+    Keep the unprefixed metadata too; atomic and molecular node-bank schemas
+    use it independently of the classic per-group CHIMES tables.
+    """
+    bind_profile_metadata(h5file, profile_id, edge_sha256)
+    h5file.attrs['snrt_group_set_id'] = profile_id
+    h5file.attrs['snrt_group_edges_sha256'] = edge_sha256
+
+
+def build_shell_bank(tools, main_data, output, n, edges, profile_id, edge_sha256):
     """Native atomic/H-/H2-ionization bank, NOT a molecular dissociation bank.
 
     Keep each partial shell separate: FS2010 evaluated at a shell-averaged
@@ -55,7 +119,7 @@ def build_shell_bank(tools, main_data, output, n):
     v96 = fits.read_in_V96_cross_sections(raw/'cross_section_fits_verner96.dat')
     v95, shells = fits.read_in_V95_cross_sections(raw/'cross_section_fits_verner95.dat')
     auger = fits.read_in_KM93_tables(raw/'auger_ionisation_probabilities_kaastra93.dat')
-    edges = np.asarray(EDGES)
+    edges = np.asarray(edges)
     ev = np.array([lo*np.exp(np.log(hi/lo)*np.arange(n)/(n-1))
                    for lo, hi in zip(edges[:-1], edges[1:])])
     ev[:, 0] = edges[:-1]; ev[:, -1] = edges[1:]
@@ -111,7 +175,8 @@ def build_shell_bank(tools, main_data, output, n):
     output.mkdir(parents=True, exist_ok=False)
     path = output/'atomic_shells.h5'
     with h5py.File(path, 'x') as f:
-        f.attrs['schema'] = 'snrt_chimes_atomic_shell_nodes_v1'
+        f.attrs['schema'] = 'snrt_chimes_atomic_shell_nodes_v2'
+        bind_profile_metadata(f, profile_id, edge_sha256)
         f.attrs['main_sha256'] = MAIN_SHA
         f.attrs['molecular_dissociation_supported'] = 0
         f.attrs['units'] = 'energies eV; probability-weighted sigma cm2; zero-based reaction/species indices'
@@ -120,10 +185,11 @@ def build_shell_bank(tools, main_data, output, n):
         f['shell_reaction'] = np.asarray(shell_reaction, dtype=np.int32)
         f['binding_ev'] = np.asarray(binding)
         f.create_dataset('sigma_cm2', data=np.asarray(sigma), compression='gzip', shuffle=True)
-    manifest = dict(schema='snrt_chimes_atomic_shell_nodes_v1', main_sha256=MAIN_SHA,
+    manifest = dict(schema='snrt_chimes_atomic_shell_nodes_v2', group_set_id=profile_id,
+                    group_edges_sha256=edge_sha256, main_sha256=MAIN_SHA,
                     fit_sha256=FIT_SHA, tools_generator_sha256=sha(generator), wrapper_sha256=sha(Path(__file__)),
                     table_sha256=sha(path), nodes=n, reactions=len(reactions), partial_shells=len(binding),
-                    edges_ev=EDGES, group_order=PHOTO_GROUPS,
+                    edges_ev=edges.tolist(), group_order=PHOTO_GROUPS,
                     limitations=['Atomic/H-/H2 ionization only; NOT the 30 empirical molecular dissociation channels or Leiden lines.',
                                  'Same Verner95/96 and KM93 branching as existing grey model; no new cascade/fluorescence energy.',
                                  'Finite node quadrature; upper endpoint uses left-limit opacity except final group.',
@@ -266,7 +332,7 @@ def molecular_moments(directory, table, lo, hi, slope):
             dest['snrt_molecule_source_sha256/'+molecule] = np.bytes_(sha(path))
 
 
-def molecular_node_bank(directory, main_data, output, n):
+def molecular_node_bank(directory, main_data, output, n, edges, profile_id, edge_sha256):
     """Explicit coarse-cell projection, NOT point sampling of narrow lines.
 
     Node supports are midpoint/Voronoi energy intervals, whose widths equal
@@ -274,7 +340,7 @@ def molecular_node_bank(directory, main_data, output, n):
     cross section exactly over each support. This preserves its band integral
     for a flat photon spectrum, but is not line-resolved attenuation.
     """
-    edges = np.asarray(EDGES)
+    edges = np.asarray(edges)
     nodes = np.array([lo*np.exp(np.log(hi/lo)*np.arange(n)/(n-1))
                       for lo, hi in zip(edges[:-1], edges[1:])])
     nodes[:, 0] = edges[:-1]; nodes[:, -1] = edges[1:]
@@ -333,7 +399,8 @@ def molecular_node_bank(directory, main_data, output, n):
             absorption.append(ab); dissociation.append(di)
     target = output/'molecular_nodes.h5'
     with h5py.File(target,'x') as f:
-        f.attrs['schema']='snrt_chimes_molecular_nodes_v1'
+        f.attrs['schema']='snrt_chimes_molecular_nodes_v2'
+        bind_profile_metadata(f, profile_id, edge_sha256)
         f.attrs['main_sha256']=MAIN_SHA
         f.attrs['closure']='30 Habing-shape channels; H2/CO midpoint-support integral projection; no shielding applied'
         f['node_ev']=nodes; f['edges_ev']=edges; f['support_edges_ev']=bounds
@@ -341,7 +408,8 @@ def molecular_node_bank(directory, main_data, output, n):
         f['absorption_cm2']=np.asarray(absorption)
         f['dissociation_cm2']=np.asarray(dissociation)
         for species,digest in source_hash.items(): f.attrs[species+'_sha256']=digest
-    manifest={'schema':'snrt_chimes_molecular_nodes_v1','main_sha256':MAIN_SHA,
+    manifest={'schema':'snrt_chimes_molecular_nodes_v2','group_set_id':profile_id,
+              'group_edges_sha256':edge_sha256,'main_sha256':MAIN_SHA,
               'table_sha256':sha(target),'source_sha256':source_hash,'nodes':n,'channels':len(mappings),
               'limitations':['Line-integral-preserving coarse projection, NOT line-resolved transport.',
                              'Thirty empirical channels retain Habing-shape approximation.',
@@ -370,17 +438,26 @@ def main():
     parser.add_argument('--main-data', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--leiden-data', type=Path)
+    parser.add_argument('--profile', default='snrt_agn9_v1',
+                        help='compiled SNRT group profile ID')
+    parser.add_argument('--profile-manifest', type=Path,
+                        default=Path(__file__).resolve().parents[1]/'config/snrt_group_profiles_v1.json')
+    parser.add_argument('--means-ledger', type=Path,
+                        help='resolved source photon ledger supplying the profile group means')
     parser.add_argument('--band-nodes', type=int, choices=(0, 64, 128, 256), default=0,
                         help='prepare a separate shell-resolved native atomic bank; do not replace grey tables')
     args = parser.parse_args()
     tools = args.chimes_tools.resolve()
     main_data = args.main_data.resolve()
+    edges, means, edge_sha256 = resolve_group_profile(args.profile,args.profile_manifest,args.means_ledger)
     if sha(main_data) != MAIN_SHA:
         raise ValueError('unadmitted main reaction table')
     if args.band_nodes:
-        build_shell_bank(tools, main_data, args.output.resolve(), args.band_nodes)
+        build_shell_bank(tools, main_data, args.output.resolve(), args.band_nodes,
+                         edges,args.profile,edge_sha256)
         if args.leiden_data is not None:
-            molecular_node_bank(args.leiden_data.resolve(),main_data,args.output.resolve(),args.band_nodes)
+            molecular_node_bank(args.leiden_data.resolve(),main_data,args.output.resolve(),args.band_nodes,
+                                edges,args.profile,edge_sha256)
         return
     if args.leiden_data is None:
         parser.error('--leiden-data is required for the original grey tables')
@@ -388,12 +465,15 @@ def main():
     output = args.output.resolve()
     generator = tools/'generate_cross_sections/generate_cross_sections.py'
     manifest = {'closure': 'photon_mean_matched_powerlaw_v1',
-                'edges_ev': EDGES, 'means_ev': MEANS, 'main_sha256': MAIN_SHA,
+                'group_set_id':args.profile,'group_edges_sha256':edge_sha256,
+                'edges_ev': edges, 'means_ev': means, 'main_sha256': MAIN_SHA,
                 'generator_sha256': sha(generator), 'wrapper_sha256': sha(Path(__file__)),
                 'photoelectron_closure': 'primary_shell_electron_v1',
                 'molecule_source_sha256': {name: sha(args.leiden_data/f'{name}.h5') for name in ['H2','CO']},
                 'groups': []}
-    for index, (lo, hi, energy) in enumerate(zip(EDGES, EDGES[1:], MEANS), 1):
+    if args.means_ledger is not None:
+        manifest['means_source_sha256']=sha(args.means_ledger.resolve())
+    for index, (lo, hi, energy) in enumerate(zip(edges, edges[1:], means), 1):
         slope = slope_for_mean(lo, hi, energy)
         spectrum = output/f'group_{index:02d}.spectrum'
         x = np.linspace(-6., 12., 181)
@@ -417,6 +497,7 @@ def main():
         primary_electron_moments(tools, main_data, table, lo, hi, slope)
         molecular_moments(args.leiden_data.resolve(), table, lo, hi, slope)
         with h5py.File(table, 'r+') as data:
+            bind_classic_chimes_group_metadata(data,args.profile,edge_sha256)
             data['Header/snrt_group_edges_ev'] = [lo, hi]
             data['Header/snrt_mean_energy_ev'] = energy
             data['Header/snrt_powerlaw_slope'] = slope

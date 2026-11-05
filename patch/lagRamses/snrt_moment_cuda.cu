@@ -239,9 +239,20 @@ template<class Real,bool Global> __global__ void reconstruct(Basis b,int n,const
       s.eta=storage;s.nexteta=storage+b.nq;s.inc=storage+2*b.nq;s.p=storage+3*b.nq;s.np=storage+4*b.nq;
     }
     s.norm=u[cell*b.nm];s.status=0;s.radius=1;
-    for(int j=0;j<b.nm;++j)if(!isfinite(u[cell*b.nm+j]))s.status=1;
+    bool all_subnormal=true;
+    for(int j=0;j<b.nm;++j){
+      double value=u[cell*b.nm+j];
+      if(!isfinite(value))s.status=1;
+      if(fabs(value)>=DBL_MIN)all_subnormal=false;
+    }
     if(s.norm<0)s.status=1;
-    if(s.norm==0)for(int j=1;j<b.nm;++j)if(u[cell*b.nm+j]!=0)s.status=1;
+    // A state whose entire moment vector is subnormal carries no resolvable
+    // relative angular information. Treat it as vacuum before forming ratios;
+    // this avoids an ill-conditioned closure for round-off residue while
+    // leaving every normal-range photon state unchanged.
+    if(!s.status&&all_subnormal)s.norm=0;
+    if(s.norm==0&&!all_subnormal)
+      for(int j=1;j<b.nm;++j)if(u[cell*b.nm+j]!=0)s.status=1;
     if(s.status&&atomicCAS(failure,0,cell+1)==0)
       printf("GPU_INPUT_FAIL cell=%d norm=%.17g moment1=%.17g\n",cell+1,s.norm,u[cell*b.nm+1]);
   }

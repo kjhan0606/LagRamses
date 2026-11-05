@@ -1,12 +1,14 @@
 ! Immutable per-star radiation histories; no spectral reconstruction in RAMSES.
-! Version 1 is high-mass only; version 2 is the explicit mixed comparison.
+! Versions 1/2 are legacy nine-group layouts. Version 3 binds the active
+! generated group profile and carries 2*NGROUPS+3 values per interval.
 module snrt_parsec_source
   use stellar_enrichment_config
   use stellar_enrichment_contract, only: stellar_population_t
   use stellar_yield_tables, only: stellar_yield_table_t
   use stellar_ssp_sources, only: build_source_mass_edges,calculate_imf_mass_fraction,mixed_source_weights
   use stellar_yield_interpolation, only: source_metallicity_bracket,interpolation_ok
-  use snrt_spectral_contract, only: snrt_group_edges_ev
+  use snrt_spectral_contract, only: snrt_ngroups,snrt_group_edges_ev, &
+       snrt_group_set_id,snrt_group_edges_sha256
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
@@ -28,7 +30,8 @@ contains
     integer,intent(in),optional::expected_version
     integer::u,ios,i,j,k
     character(len=64)::magic
-    real(dp)::delta(21)
+    character(len=64)::file_group_set_id,file_edges_sha256
+    real(dp)::delta(2*snrt_ngroups+3)
     ierr=1
     if(allocated(mass))return ! Load once, not a mutable runtime source.
     open(newunit=u,file=trim(path),status='old',action='read',iostat=ios)
@@ -40,6 +43,8 @@ contains
        format_version=1
     case('SNRT_POPULATION_QE_INTERVAL_V2')
        format_version=2
+    case('SNRT_POPULATION_QE_INTERVAL_V3')
+       format_version=3
     case default
        goto 900
     end select
@@ -49,25 +54,36 @@ contains
           if(format_version/=1)goto 900
        case(5)
           if(format_version/=2)goto 900
+       case(6)
+          if(format_version/=3)goto 900
        case default
           goto 900
        end select
     endif
     read(u,*,iostat=ios)nn,nr
-    if(ios/=0.or.nn<2.or.nn>merge(1024,512,format_version==2).or.nr<2*nn.or.nr>500000)goto 900
+    if(ios/=0.or.nn<2.or.nn>merge(1024,512,format_version>=2).or.nr<2*nn.or.nr>500000)goto 900
     read(u,'(A)',iostat=ios)model
     if(ios/=0)goto 900
+    file_group_set_id='';file_edges_sha256=''
+    if(format_version==3)then
+       read(u,*,iostat=ios)file_group_set_id,file_edges_sha256
+       if(ios/=0.or.trim(file_group_set_id)/=trim(snrt_group_set_id).or. &
+            trim(file_edges_sha256)/=trim(snrt_group_edges_sha256))goto 900
+    else if(snrt_ngroups/=9)then
+       goto 900
+    endif
     select case(model)
     case('parsec2025_w17_hw02_composite_v1','parsec2025_w17_hw02_phase_escape_f22_v1', &
          'parsec2025_w17_hw02_phase_escape_f22_bistability_v1', &
          'parsec2025_w17_hw02_precision_rate_v1')
-       if(format_version/=1)goto 900
+       if(format_version/=1.and.format_version/=3)goto 900
     case('parsec_mixed_lowmass_truncated_v1')
-       if(format_version/=2)goto 900
+       if(format_version/=2.and.format_version/=3)goto 900
     case default
        goto 900
     end select
-    allocate(mass(nn),metal(nn),death(nn),weight(nn),first(nn),count(nn),fate(nn),age(nr),release(21,nr))
+    allocate(mass(nn),metal(nn),death(nn),weight(nn),first(nn),count(nn),fate(nn),age(nr), &
+         release(2*snrt_ngroups+3,nr))
     allocate(radiation_stop(nn),terminal_channel(nn),remnant_kind(nn))
     weight=0;k=0
     do i=1,nn
@@ -80,7 +96,7 @@ contains
        endif
        if(ios/=0)goto 900
        if(any(.not.ieee_is_finite([mass(i),metal(i),death(i)])))goto 900
-       if(mass(i)<merge(2d0,14d0,format_version==2).or.mass(i)>600.or.death(i)<=0)goto 900
+       if(mass(i)<merge(2d0,14d0,format_version>=2).or.mass(i)>600.or.death(i)<=0)goto 900
        if(.not.ieee_is_finite(radiation_stop(i)).or.radiation_stop(i)<=0.or.radiation_stop(i)>death(i))goto 900
        if(format_version==1)then
           if(fate(i)<1.or.fate(i)>5)goto 900
@@ -114,11 +130,15 @@ contains
              ! interval. Never subtract two rounded release endpoints.
              delta=release(:,k)
              if(any(delta<0))goto 900
-             if(any(delta(10:18)<delta(1:9)*snrt_group_edges_ev(:9)*(1d0-1d-10)).or. &
-                  any(delta(10:18)>delta(1:9)*snrt_group_edges_ev(2:)*(1d0+1d-10)))goto 900
+             if(any(delta(snrt_ngroups+1:2*snrt_ngroups)<delta(:snrt_ngroups)* &
+                  snrt_group_edges_ev(:snrt_ngroups)*(1d0-1d-10)).or. &
+                  any(delta(snrt_ngroups+1:2*snrt_ngroups)>delta(:snrt_ngroups)* &
+                  snrt_group_edges_ev(2:)*(1d0+1d-10)))goto 900
           endif
-          if(abs(sum(release(10:18,k))+sum(release(20:21,k))-release(19,k))> &
-               1d-10*max(tiny(1d0),release(19,k)))goto 900
+          if(abs(sum(release(snrt_ngroups+1:2*snrt_ngroups,k))+ &
+               sum(release(2*snrt_ngroups+2:2*snrt_ngroups+3,k))- &
+               release(2*snrt_ngroups+1,k))> &
+               1d-10*max(tiny(1d0),release(2*snrt_ngroups+1,k)))goto 900
        enddo
        if(age(k)/=radiation_stop(i))goto 900
     enddo
@@ -151,7 +171,7 @@ contains
     ierr=0
     if(.not.parsec_sed_enabled)return
     ierr=1;bound=.false.
-    if(format_version==2)then
+    if(format_version==2.or.(format_version==3.and.model=='parsec_mixed_lowmass_truncated_v1'))then
        if(.not.table%high_mass_ready.or.table%high_mass_version/=5)return
        if(.not.allocated(table%hm_terminal_channel))return
        if(size(table%hm_mass)/=nn)return
@@ -222,7 +242,7 @@ contains
   subroutine node_interval(node,t0,t1,result)
     integer,intent(in)::node
     real(dp),intent(in)::t0,t1
-    real(dp),intent(out)::result(18)
+    real(dp),intent(out)::result(2*snrt_ngroups)
     integer::l,r,m,k,last
     real(dp)::w,lo,hi
     result=0
@@ -241,7 +261,7 @@ contains
        lo=max(0d0,t0,age(k-1));hi=min(t1,age(k))
        if(hi>lo)then
           w=(hi-lo)/(age(k)-age(k-1))
-          result=result+w*release(:18,k)
+          result=result+w*release(:2*snrt_ngroups,k)
        endif
        if(age(k)>=t1)exit
     enddo
@@ -249,9 +269,9 @@ contains
 
   subroutine parsec_photon_interval(t0,t1,z,initial_mass,photons,energy,ierr)
     real(dp),intent(in)::t0,t1,z,initial_mass ! Myr, absolute metal fraction, INITIAL Msun.
-    real(dp),intent(out)::photons(9),energy(9)
+    real(dp),intent(out)::photons(snrt_ngroups),energy(snrt_ngroups)
     integer,intent(out)::ierr
-    real(dp)::a(18),result(18),wz,w,zl,zh
+    real(dp)::a(2*snrt_ngroups),result(2*snrt_ngroups),wz,w,zl,zh
     integer::i,status
     ierr=1;photons=0;energy=0
     if(.not.parsec_sed_enabled.or..not.bound)return
@@ -274,15 +294,23 @@ contains
     enddo
     result=result*initial_mass
     if(any(.not.ieee_is_finite(result)).or.any(result<0))return
-    photons=result(:9);energy=result(10:18);ierr=0
+    photons=result(:snrt_ngroups);energy=result(snrt_ngroups+1:2*snrt_ngroups);ierr=0
   end subroutine
 
   subroutine parsec_sed_identity(values)
     real(dp),allocatable,intent(out)::values(:)
     integer::i
-    values=[4d0,real(nn,dp),real(nr,dp),(real(iachar(model(i:i)),dp),i=1,len(model))]
+    if(format_version==3)then
+       values=[5d0,real(nn,dp),real(nr,dp), &
+            (real(iachar(snrt_group_set_id(i:i)),dp),i=1,len_trim(snrt_group_set_id)), &
+            (real(iachar(snrt_group_edges_sha256(i:i)),dp),i=1,len_trim(snrt_group_edges_sha256)), &
+            (real(iachar(model(i:i)),dp),i=1,len(model))]
+    else
+       values=[4d0,real(nn,dp),real(nr,dp),(real(iachar(model(i:i)),dp),i=1,len(model))]
+    endif
     if(.not.parsec_sed_enabled)return
-    values=[values,mass,metal,death,real(fate,dp),real(count,dp),age,reshape(release,[21*nr]),weight]
-    if(format_version==2)values=[values,5d0,radiation_stop,real(terminal_channel,dp),real(remnant_kind,dp)]
+    values=[values,mass,metal,death,real(fate,dp),real(count,dp),age, &
+         reshape(release,[(2*snrt_ngroups+3)*nr]),weight]
+    if(format_version>=2)values=[values,5d0,radiation_stop,real(terminal_channel,dp),real(remnant_kind,dp)]
   end subroutine
 end module

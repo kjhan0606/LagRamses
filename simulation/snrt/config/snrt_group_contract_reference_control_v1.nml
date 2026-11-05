@@ -10,6 +10,7 @@
  source_sha256='d2326e4ec0320e9e0b34a58460b08bddafa4b4433322691a9dd346a49762909d',
  source_commit_binding='bd0411bf9c2aaff6165724a146be00180bd8d127',
  approval_id='reference_control_not_science_approved',
+ group_set_id='snrt_agn9_v1',
  edges_sha256='d28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1',
  interval_convention='left_closed_right_open_except_final_closed',
  fraction_semantics='escaped',

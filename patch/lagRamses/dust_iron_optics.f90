@@ -7,8 +7,16 @@ module dust_iron_optics
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
+#ifdef SNRT_GROUP_PROFILE_AGN12_G7LOG4_V1
+#include "snrt_agn12_g7log4_v1_dust_fe_electric_base_data.inc"
+#include "snrt_agn12_g7log4_v1_dust_fe_band_data.inc"
+#elif defined(SNRT_GROUP_PROFILE_AGN25_JOINT_DIAG_20261102_V1)
+#include "snrt_agn25_joint_diag_20261102_v1_dust_fe_electric_base_data.inc"
+#include "snrt_agn25_joint_diag_20261102_v1_dust_fe_band_data.inc"
+#else
   include 'dust_fe_electric_base_data.inc'
   include 'dust_fe_band_data.inc'
+#endif
   public :: fe_band_ev,fe_band_abs,fe_band_transport,fe_band_sha256,fe_band_nodes
   real(real64),parameter,public :: fe_six_band_abs(d03_band_nodes,d03_ng,6)=reshape( &
        [reshape(d03_band_abs,[d03_band_nodes*d03_ng*4]),reshape(fe_band_abs,[fe_band_nodes*d03_ng*2])], &

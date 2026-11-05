@@ -17,6 +17,11 @@ else
   openmp_flags=(-fopenmp)
 fi
 flags+=(-I"$repo_root/patch/lagRamses")
+profile_dir="$build_dir/group_profile"
+python3 "$repo_root/simulation/snrt/tools/generate_snrt_group_profile.py" \
+  --manifest "$repo_root/simulation/snrt/config/snrt_group_profiles_v1.json" \
+  --profile snrt_agn9_v1 --output-dir "$profile_dir"
+flags+=(-I"$profile_dir")
 if [[ "${SNRT_SPECTRAL_MODEL:-fixed}" == hhe_d03*_maxent128_fs2010_v1 ]]; then
   flags+=(-DDUST_LIVE)
 fi
@@ -28,6 +33,8 @@ fi
 
 "$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/amr_parameters.jaehyun.f90" \
   -o "$build_dir/amr_parameters.o"
+"$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/snrt_group_profile.f90" \
+  -o "$build_dir/snrt_group_profile.o"
 "$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/snrt_agn_source.f90" \
   -o "$build_dir/snrt_agn_source.o"
 "$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/snrt_thermochemistry.f90" \
@@ -38,7 +45,7 @@ fi
   -o "$build_dir/snrt_spectral_contract_smoke.o"
 "$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/snrt_spectral_contract_loader_smoke.f90" \
   -o "$build_dir/snrt_spectral_contract_loader_smoke.o"
-"$fc" "$build_dir/amr_parameters.o" "$build_dir/snrt_agn_source.o" \
+"$fc" "$build_dir/amr_parameters.o" "$build_dir/snrt_group_profile.o" "$build_dir/snrt_agn_source.o" \
   "$build_dir/snrt_spectral_contract.o" "$build_dir/snrt_spectral_contract_smoke.o" \
   -o "$build_dir/snrt_spectral_contract_smoke"
 
@@ -56,7 +63,7 @@ fi
   -o "$build_dir/snrt_moment_spectrum.o"
 "$fc" "${flags[@]}" -c "$repo_root/patch/lagRamses/snrt_moment_spectrum_smoke.f90" \
   -o "$build_dir/snrt_moment_spectrum_smoke.o"
-"$fc" "$build_dir/snrt_moment_transport.o" "$build_dir/snrt_moment_spectrum.o" \
+"$fc" "${openmp_flags[@]}" "$build_dir/snrt_moment_transport.o" "$build_dir/snrt_moment_spectrum.o" \
   "$build_dir/snrt_moment_spectrum_smoke.o" -o "$build_dir/snrt_moment_spectrum_smoke"
 "$build_dir/snrt_moment_spectrum_smoke"
 "$fc" "${flags[@]}" "${openmp_flags[@]}" -c \
@@ -69,12 +76,12 @@ fi
   "$repo_root/patch/lagRamses/snrt_checkpoint_smoke.f90" \
   -o "$build_dir/snrt_checkpoint_smoke.o"
 "$fc" "${openmp_flags[@]}" "$build_dir/amr_parameters.o" \
-  "$build_dir/amr_commons.o" "$build_dir/snrt_agn_source.o" \
+  "$build_dir/amr_commons.o" "$build_dir/snrt_group_profile.o" "$build_dir/snrt_agn_source.o" \
   "$build_dir/snrt_thermochemistry.o" "$build_dir/snrt_spectral_contract.o" \
   "$build_dir/snrt_moment_transport.o" "$build_dir/snrt_moment_live.o" \
   "$build_dir/snrt_state.o" "$build_dir/snrt_checkpoint_smoke.o" \
   -o "$build_dir/snrt_checkpoint_smoke"
-"$fc" "$build_dir/amr_parameters.o" "$build_dir/snrt_spectral_contract.o" \
+"$fc" "$build_dir/amr_parameters.o" "$build_dir/snrt_group_profile.o" "$build_dir/snrt_spectral_contract.o" \
   "$build_dir/snrt_spectral_contract_loader_smoke.o" \
   -o "$build_dir/snrt_spectral_contract_loader_smoke"
 
@@ -121,8 +128,50 @@ SNRT_GROUP_CONTRACT="$reference" SNRT_ALLOW_REFERENCE_CONTROL=1 \
 SNRT_SECONDARY_TABLE_CONTRACT="$repo_root/simulation/snrt/config/snrt_secondary_table_contract_v1.nml" \
   "$build_dir/snrt_checkpoint_smoke" "$build_dir/snrt-checkpoint.bin" "$candidate"
 
+# Build only the compact source-identity path against the restricted 25-group
+# profile. Its runtime-admissible bit must remain false throughout this check.
+profile25_dir="$build_dir/group_profile_25"
+module25_dir="$build_dir/module_25"
+mkdir -p "$module25_dir"
+python3 "$repo_root/simulation/snrt/tools/generate_snrt_group_profile.py" \
+  --manifest "$repo_root/simulation/snrt/config/snrt_group_profiles_v1.json" \
+  --profile snrt_agn25_joint_diag_20261102_v1 --output-dir "$profile25_dir"
+if [[ "$fc_name" == "ifx" || "$fc_name" == "mpiifx" ]]; then
+  flags25=(-fpp -no-ftz -DNDIM=3 -DNPRE=8 -DNVAR=18 -module "$module25_dir" -I"$module25_dir")
+else
+  flags25=(-cpp -ffree-line-length-none -DNDIM=3 -DNPRE=8 -DNVAR=18 -J"$module25_dir" -I"$module25_dir")
+fi
+flags25+=(-I"$repo_root/patch/lagRamses" -I"$profile25_dir")
+flags25+=(-DDUST_LIVE -DSNRT_CHIMES)
+"$fc" "${flags25[@]}" -c "$repo_root/patch/lagRamses/amr_parameters.jaehyun.f90" \
+  -o "$module25_dir/amr_parameters.o"
+"$fc" "${flags25[@]}" -c "$repo_root/patch/lagRamses/snrt_group_profile.f90" \
+  -o "$module25_dir/snrt_group_profile.o"
+"$fc" "${flags25[@]}" -c "$repo_root/patch/lagRamses/snrt_spectral_contract.f90" \
+  -o "$module25_dir/snrt_spectral_contract.o"
+"$fc" "${flags25[@]}" -c "$repo_root/patch/lagRamses/snrt_source_contract_binding_smoke.f90" \
+  -o "$module25_dir/snrt_source_contract_binding_smoke.o"
+"$fc" "${flags25[@]}" -c "$repo_root/patch/lagRamses/snrt_spectral_contract_loader_smoke.f90" \
+  -o "$module25_dir/snrt_spectral_contract_loader_smoke.o"
+"$fc" "$module25_dir/amr_parameters.o" "$module25_dir/snrt_group_profile.o" \
+  "$module25_dir/snrt_spectral_contract.o" "$module25_dir/snrt_source_contract_binding_smoke.o" \
+  -o "$module25_dir/snrt_source_contract_binding_smoke"
+"$fc" "$module25_dir/amr_parameters.o" "$module25_dir/snrt_group_profile.o" \
+  "$module25_dir/snrt_spectral_contract.o" "$module25_dir/snrt_spectral_contract_loader_smoke.o" \
+  -o "$module25_dir/snrt_spectral_contract_loader_smoke"
+"$module25_dir/snrt_source_contract_binding_smoke" "$module25_dir/snrt-candidate"
+candidate_group_contract="$repo_root/simulation/snrt/config/snrt_group_contract_agn25_candidate_diagnostic_v1.nml"
+bad_candidate_group_contract="$module25_dir/candidate-nonzero-grey.nml"
+sed -E 's/^ (hi_input=)[^,]+/\1 1.0d-20/' "$candidate_group_contract" > "$bad_candidate_group_contract"
+SNRT_ALLOW_25G_AGN_DIAGNOSTIC=1 \
+SNRT_SPECTRAL_MODEL=chimes_hot_atomic_d03_absorption_diag_v1 \
+  "$module25_dir/snrt_spectral_contract_loader_smoke" candidate_chimes_d03_diagnostic "$candidate_group_contract"
+SNRT_ALLOW_25G_AGN_DIAGNOSTIC=1 \
+SNRT_SPECTRAL_MODEL=chimes_hot_atomic_d03_absorption_diag_v1 \
+  "$module25_dir/snrt_spectral_contract_loader_smoke" candidate_chimes_d03_nonzero_legacy "$bad_candidate_group_contract"
+
 cxx="${CXX:-g++}"
-"$cxx" -std=c++17 -Wall -Wextra -Werror -I"$repo_root/patch/lagRamses" \
+"$cxx" -std=c++17 -Wall -Wextra -Werror -I"$repo_root/patch/lagRamses" -I"$profile_dir" \
   "$repo_root/patch/lagRamses/snrt_moment_band.cpp" \
   "$repo_root/simulation/snrt/tests/snrt_moment_band_momentum_smoke.cpp" \
   -o "$build_dir/snrt_moment_band_momentum_smoke"

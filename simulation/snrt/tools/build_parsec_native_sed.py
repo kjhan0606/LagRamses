@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 import zipfile
 import numpy as np
+from generate_snrt_group_profile import read_profile
 from build_parsec_pair_feedback import (PINNED, EXTRA_TRACKS, LOW_TRACKS, Z_GRIDS,
                                       PARSEC_LSUN, PRECISION_MODEL, source_name, compress)
 
@@ -75,13 +76,14 @@ class Spectrum:
         kt = KB*10**logt
         lum = 10**logl*LSUN/EV
         scale = lum/(np.pi**4*kt**4/15)
-        result = np.zeros((len(kt), 21))
+        ng = len(edges)-1
+        result = np.zeros((len(kt), 2*ng+3))
         for g,(lo,hi) in enumerate(zip(edges[:-1],edges[1:])):
             n,e = self.moment(kt,lo,hi)
-            result[:,g] = scale*n;result[:,g+9] = scale*e
-        result[:,18] = lum
-        result[:,19] = scale*self.moment(kt,0.,edges[0])[1]
-        result[:,20] = scale*self.moment(kt,edges[-1],np.inf)[1]
+            result[:,g] = scale*n;result[:,g+ng] = scale*e
+        result[:,2*ng] = lum
+        result[:,2*ng+1] = scale*self.moment(kt,0.,edges[0])[1]
+        result[:,2*ng+2] = scale*self.moment(kt,edges[-1],np.inf)[1]
         return result
 
     def constrained(self, data, edges):
@@ -91,7 +93,8 @@ class Spectrum:
         disjoint = np.column_stack((q[:,:-1]-q[:,1:],q[:,-1]))
         if not np.isfinite(disjoint).all() or np.any(disjoint<0):
             raise ValueError('nonmonotone/nonfinite measured Q; no clipping or inferred sentinel')
-        result = np.zeros((len(kt),21))
+        ng = len(edges)-1
+        result = np.zeros((len(kt),2*ng+3))
         high_energy = np.zeros(len(kt))
         for j,(lo,hi) in enumerate(zip(Q_EDGES[:-1],Q_EDGES[1:])):
             den,energy = self.moment(kt,lo,hi,lo)
@@ -101,9 +104,9 @@ class Spectrum:
             high_energy += scale*energy
             for g,(a,b) in enumerate(zip(edges[:-1],edges[1:])):
                 n,e = self.moment(kt,max(a,lo),min(b,hi),lo)
-                result[:,g] += scale*n;result[:,g+9] += scale*e
+                result[:,g] += scale*n;result[:,g+ng] += scale*e
             if np.isinf(hi):
-                result[:,20] = scale*self.moment(kt,edges[-1],np.inf,lo)[1]
+                result[:,2*ng+2] = scale*self.moment(kt,edges[-1],np.inf,lo)[1]
         residual = lum-high_energy
         if np.any(residual<0):
             raise ValueError('Q-constrained Planck spectrum exceeds actual Lbol; no fallback')
@@ -111,27 +114,38 @@ class Spectrum:
         scale = residual/den
         for g,(lo,hi) in enumerate(zip(edges[:-1],edges[1:])):
             n,e = self.moment(kt,lo,min(hi,Q_EDGES[0]))
-            result[:,g] += scale*n;result[:,g+9] += scale*e
-        result[:,18] = lum
-        result[:,19] = scale*self.moment(kt,0.,edges[0])[1]
+            result[:,g] += scale*n;result[:,g+ng] += scale*e
+        result[:,2*ng] = lum
+        result[:,2*ng+1] = scale*self.moment(kt,0.,edges[0])[1]
         return result, high_energy/lum
 
 
 def check_rates(values, edges):
     if not np.isfinite(values).all() or np.any(values<0):
         raise ValueError('nonfinite/negative reconstructed moments')
-    if (np.any(values[:,9:18] < values[:,:9]*edges[:-1]*(1-1e-10)) or
-            np.any(values[:,9:18] > values[:,:9]*edges[1:]*(1+1e-10))):
+    ng = len(edges)-1
+    if (np.any(values[:,ng:2*ng] < values[:,:ng]*edges[:-1]*(1-1e-10)) or
+            np.any(values[:,ng:2*ng] > values[:,:ng]*edges[1:]*(1+1e-10))):
         raise ValueError('photon energy outside native group')
-    residual = abs(values[:,9:18].sum(axis=1)+values[:,19:].sum(axis=1)-values[:,18])
-    error = float(np.max(residual/values[:,18]))
+    residual = abs(values[:,ng:2*ng].sum(axis=1)+values[:,2*ng+1:].sum(axis=1)-values[:,2*ng])
+    error = float(np.max(residual/values[:,2*ng]))
     if error > 1e-10:
         raise ValueError(f'bolometric quadrature error {error}')
     return error
 
 
+def format_node_header(node, age, profile_bound):
+    """Encode the V1 high-mass or V3 profile-bound node layout."""
+    end = float(age[-1])
+    if profile_bound:
+        terminal_channel = 5 if node['fate'] in (3, 4) else 3
+        return (f"{node['mass']:.17e} {node['z']:.17e} {end:.17e} {end:.17e} "
+                f"{terminal_channel} 4 {node['fate']} {len(age)}")
+    return f"{node['mass']:.17e} {node['z']:.17e} {end:.17e} {node['fate']} {len(age)}"
+
+
 def intervals(age, rates):
-    return np.vstack((np.zeros(21),np.diff(age)[:,None]*(rates[1:]+rates[:-1])*.5*MYR))
+    return np.vstack((np.zeros(rates.shape[1]),np.diff(age)[:,None]*(rates[1:]+rates[:-1])*.5*MYR))
 
 
 def build(args):
@@ -162,11 +176,15 @@ def build(args):
         raise ValueError('incomplete matched feedback grid')
     if not 0<=args.escape_fraction<=1 or not np.isfinite(args.escape_fraction):
         raise ValueError('invalid escaped fraction')
+    ng, profile_edges, profile_sha = read_profile(args.profile_manifest,args.group_profile)
     edges = np.loadtxt(args.group_edges)
     ledger = json.loads(args.transport_ledger.read_text())
-    if (edges.shape!=(10,) or not np.array_equal(edges,ledger['group_edges_ev']) or
+    if (edges.shape!=(ng+1,) or not np.array_equal(edges,profile_edges) or
+            digest(args.group_edges)!=profile_sha or
+            not np.array_equal(edges,ledger['group_edges_ev']) or
             digest(args.group_edges)!=ledger['group_edges_sha256']):
-        raise ValueError('native/ledger edge mismatch')
+        raise ValueError('compiled profile, native edge file and transport ledger mismatch')
+    nrecord=2*ng+3
     spectrum = Spectrum(args.order)
     nodes=[];stats=[];nr=0;bolerr=0.;highmax=0.
     for zs,ys in coordinates:
@@ -221,7 +239,7 @@ def build(args):
                 # not the difference of large rounded cumulative endpoints.
                 # This preserves tiny late hard-band photons after a bright
                 # earlier phase, without clipping a physical spectral tail.
-                compact=np.vstack((np.zeros(21),[release[a+1:b+1].sum(axis=0)
+                compact=np.vstack((np.zeros(nrecord),[release[a+1:b+1].sum(axis=0)
                                                  for a,b in zip(index[:-1],index[1:])]))
                 age=age[index]
                 nodes.append((node,age,compact*args.escape_fraction));nr+=len(age)
@@ -229,22 +247,32 @@ def build(args):
                               'first_photon_age_yr':float(data[0,0]*1e6),
                               'tail_duration_yr':float(max(0.,death-measured_end)*1e6),
                               'tail_lifetime_fraction':float(max(0.,1-measured_end/death)),
-                              'tail_bolometric_fraction':float(tail[-1,18]/values[-1,18]),
+                              'tail_bolometric_fraction':float(tail[-1,2*ng]/values[-1,2*ng]),
                               'compression_relative_final_component_error':error,
                               **({'measured_overlap_discarded_yr':float(max(0.,measured_end-death)*1e6),
                                   'overlap_policy':'positive_QE_rate_interpolation_at_material_death'} if precision else {})})
     if nr > 500000:
         raise ValueError('matched source exceeds existing native knot capacity')
-    lines=['SNRT_PARSEC_QE_INTERVAL_V1',f'{len(nodes)} {nr}',feedback['model']]
+    profile_id=args.group_profile
+    if profile_id=='snrt_agn9_v1':
+        record_magic='SNRT_PARSEC_QE_INTERVAL_V1'
+        nml_version=4
+    else:
+        record_magic='SNRT_POPULATION_QE_INTERVAL_V3'
+        nml_version=6
+    lines=[record_magic,f'{len(nodes)} {nr}',feedback['model']]
+    if nml_version==6:
+        lines.append(f'{profile_id} {profile_sha}')
     for node,age,values in nodes:
-        lines.append(f"{node['mass']:.17e} {node['z']:.17e} {age[-1]:.17e} {node['fate']} {len(age)}")
+        lines.append(format_node_header(node,age,nml_version==6))
         lines.extend(' '.join(f'{x:.17e}' for x in (t,*row)) for t,row in zip(age,values))
     payload='\n'.join(lines)+'\n';source_sha=hashlib.sha256(payload.encode()).hexdigest()
     output=args.output.resolve()
     if "'" in str(output):raise ValueError('unsupported quote in NML path')
     nml=f"""! HIGH-MASS ONLY; no <14Msun SED and no full/NLTE SSP claim.
 &snrt_stellar_sed
- version=4, na=0, nz=0,
+ version={nml_version}, na=0, nz=0,
+ group_set_id='{profile_id}',
  population_binding='match_feedback_high_mass_only',
  radiation_population='PARSEC_v2_nonrot_high_mass_only',
  source_sha256='{source_sha}',
@@ -265,7 +293,8 @@ def build(args):
               'full_ssp':False,'exact_atmosphere_spectrum':False,'imf':feedback['imf_id'],
               'imf_denominator':[.08,600],'source_mass':[14,600],'source_z':z_nodes,
               'sources_sha256':inputs,'feedback_outputs_sha256':feedback['output_sha256'],
-              'source_sha256':source_sha,'group_edges_ev':edges.tolist(),
+              'source_sha256':source_sha,'group_set_id':profile_id,
+              'group_edges_sha256':profile_sha,'group_edges_ev':edges.tolist(),
               'nominal_Q_edges_ev':Q_EDGES[:-1].tolist(),'quadrature_order':args.order,
               'PARSEC_Lsun_erg_s':LSUN,
               'max_relative_bolometric_error':bolerr,'max_Q_constrained_energy_over_Lbol':highmax,
@@ -292,4 +321,6 @@ if __name__=='__main__':
     p.add_argument('--order',type=int,choices=(32,64,128),default=64)
     p.add_argument('--group-edges',type=Path,default=ROOT/'config/p0_photon_group_edges_ev.txt')
     p.add_argument('--transport-ledger',type=Path,default=ROOT/'data/p4_pilot_agn_photon_ledger.json')
+    p.add_argument('--group-profile',default='snrt_agn9_v1')
+    p.add_argument('--profile-manifest',type=Path,default=ROOT/'config/snrt_group_profiles_v1.json')
     build(p.parse_args())

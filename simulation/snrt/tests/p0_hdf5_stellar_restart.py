@@ -33,6 +33,7 @@ RELEASE_FIELDS = ("tpp", "mp0", "indtab")
 M5_PAYLOAD_HEADER = 4
 M5_PRIMARY_GROUPS = 9
 M5_STORAGE_STRIDE = 80
+CHIMES_HDF5_SPECIES_OFFSET = 29
 
 
 def _synthetic_arrays() -> dict[str, np.ndarray]:
@@ -1349,25 +1350,229 @@ def _run_fortran_hdf5_roundtrip(root: Path) -> dict[str, object]:
     }
 
 
+def _chimes_element_stoichiometry(proto_header: Path) -> tuple[list[str], np.ndarray]:
+    """Read the network ordering and stoichiometry used by this build."""
+    header_text = proto_header.read_text(encoding="utf-8")
+    enum_match = re.search(
+        r"Enumeration of the indices for.*?enum\s*\{(.*?)\};",
+        header_text,
+        flags=re.DOTALL,
+    )
+    if enum_match is None:
+        raise AssertionError(f"cannot locate CHIMES species enum in {proto_header}")
+    names: list[str | None] = [None] * 157
+    for match in re.finditer(
+        r"^\s*(sp_[A-Za-z0-9_]+)\s*,?\s*/\*\s*(\d+)\s*\*/",
+        enum_match.group(1),
+        flags=re.MULTILINE,
+    ):
+        name, index = match.group(1), int(match.group(2))
+        if not 0 <= index < len(names) or names[index] is not None:
+            raise AssertionError(f"invalid/duplicate CHIMES species index {index}: {name}")
+        names[index] = name
+    if any(name is None for name in names):
+        raise AssertionError("CHIMES enum does not define all 157 species indices")
+    species_names = [str(name) for name in names]
+    species_index = {name: index for index, name in enumerate(species_names)}
+    if species_index.get("sp_HeIII") != 6 or species_index.get("sp_CH") != 145:
+        raise AssertionError("CHIMES species ordering does not match the HDF5 field anchors")
+
+    bridge_text = (ROOT / "patch/lagRamses/snrt_chimes_bridge.c").read_text(encoding="utf-8")
+
+    def initializer(name: str, count: int) -> list[str]:
+        match = re.search(
+            rf"\b(?:static\s+)?const\s+int\s+{re.escape(name)}\[{count}\]\s*=\s*\{{([^}}]+)\}}\s*;",
+            bridge_text,
+        )
+        if match is None:
+            raise AssertionError(f"cannot locate CHIMES stoichiometry array {name}[{count}]")
+        values = [value.strip() for value in match.group(1).split(",")]
+        if len(values) != count:
+            raise AssertionError(f"wrong length for CHIMES stoichiometry array {name}")
+        return values
+
+    neutral = initializer("neutral", 11)
+    atomic_z = [int(value) for value in initializer("atomic_z", 11)]
+    matrix = np.zeros((157, 11), dtype=np.float64)
+    for element, (neutral_name, maximum_charge) in enumerate(zip(neutral, atomic_z, strict=True)):
+        if neutral_name not in species_index:
+            raise AssertionError(f"CHIMES neutral species missing from enum: {neutral_name}")
+        start = species_index[neutral_name]
+        for charge_state in range(maximum_charge + 1):
+            slot = start + charge_state
+            if slot >= len(species_names):
+                raise AssertionError(f"atomic species block exceeds CHIMES network: {neutral_name}")
+            matrix[slot, element] = 1.0
+
+    negative_ions = re.findall(
+        r"nuclei\[(sp_[A-Za-z0-9_]+)\]\[(\d+)\]\s*=\s*1\s*;",
+        bridge_text,
+    )
+    expected_negative_ions = {"sp_Hm": 0, "sp_Cm": 2, "sp_Om": 4}
+    parsed_negative_ions = {name: int(element) for name, element in negative_ions}
+    if parsed_negative_ions != expected_negative_ions:
+        raise AssertionError(f"unexpected CHIMES negative-ion stoichiometry: {parsed_negative_ions}")
+    for name, element in parsed_negative_ions.items():
+        matrix[species_index[name], element] = 1.0
+
+    molecular_start = species_index.get("sp_H2")
+    if molecular_start is None:
+        raise AssertionError("CHIMES network lacks sp_H2")
+    molecule_h = [int(value) for value in initializer("mol_h", 20)]
+    molecule_c = [int(value) for value in initializer("mol_c", 20)]
+    molecule_o = [int(value) for value in initializer("mol_o", 20)]
+    for molecule in range(20):
+        slot = molecular_start + molecule
+        if slot >= len(species_names):
+            raise AssertionError("CHIMES molecular block exceeds the 157-species network")
+        matrix[slot, 0] = molecule_h[molecule]
+        matrix[slot, 2] = molecule_c[molecule]
+        matrix[slot, 4] = molecule_o[molecule]
+    zero_rows = np.flatnonzero(np.sum(np.abs(matrix), axis=1) == 0.0)
+    if zero_rows.tolist() != [species_index["sp_elec"]]:
+        raise AssertionError(f"unexpected element-free CHIMES species: {zero_rows.tolist()}")
+    return species_names, matrix
+
+
+def _restart_cell_element_budgets(
+    left: h5py.File,
+    right: h5py.File,
+    grid_permutations: dict[str, np.ndarray],
+    grid_coordinates: dict[str, np.ndarray],
+    outlier_cells: dict[tuple[str, int, int], dict[str, object]],
+    proto_header: Path,
+) -> list[dict[str, object]]:
+    """Compute elemental state at comparator outlier cells from all saved species."""
+    if not outlier_cells:
+        return []
+    species_names, stoichiometry = _chimes_element_stoichiometry(proto_header)
+    element_names = ["H", "He", "C", "N", "O", "Ne", "Mg", "Si", "S", "Ca", "Fe"]
+    reports: list[dict[str, object]] = []
+    for (level, grid_row, cell_in_grid), metadata in sorted(outlier_cells.items()):
+        permutation = grid_permutations[level]
+        continuous = np.empty(157, dtype=np.float64)
+        restarted = np.empty(157, dtype=np.float64)
+        for species_index in range(157):
+            dataset = f"hydro/{level}/uold_{species_index + CHIMES_HDF5_SPECIES_OFFSET}"
+            if dataset not in left or dataset not in right:
+                raise AssertionError(f"missing CHIMES species field needed for elemental budget: {dataset}")
+            x = np.asarray(left[dataset]).reshape(len(permutation), 8, -1)
+            y = np.asarray(right[dataset]).reshape(len(permutation), 8, -1)[permutation]
+            if x.shape[2] != 1 or y.shape[2] != 1:
+                raise AssertionError(f"expected one scalar per cell for CHIMES species field {dataset}")
+            continuous[species_index] = x[grid_row, cell_in_grid, 0]
+            restarted[species_index] = y[grid_row, cell_in_grid, 0]
+        element_left = stoichiometry.T @ continuous
+        element_right = stoichiometry.T @ restarted
+        element_report: dict[str, object] = {}
+        for index, element in enumerate(element_names):
+            delta = float(element_left[index] - element_right[index])
+            scale = max(abs(float(element_left[index])), abs(float(element_right[index])))
+            relative = abs(delta) / scale if scale > 0.0 else (0.0 if delta == 0.0 else None)
+            element_report[element] = {
+                "continuous": float(element_left[index]),
+                "restarted": float(element_right[index]),
+                "signed_continuous_minus_restarted": delta,
+                "relative_to_larger_inventory": relative,
+            }
+        outlier_species = []
+        for value in metadata["outlier_species"]:
+            entry = dict(value)
+            slot = int(entry.pop("species_index"))
+            entry["species"] = species_names[slot]
+            outlier_species.append(entry)
+        grid_center = [float(value) for value in grid_coordinates[level][grid_row]]
+        reports.append({
+            "level": level,
+            "continuous_grid_row": grid_row,
+            "cell_in_grid": cell_in_grid,
+            "grid_center_xyz": grid_center,
+            "outlier_species": outlier_species,
+            "element_state_basis": "CHIMES nuclear sums from saved species state, in RAMSES hydro-state units",
+            "elemental_state": element_report,
+        })
+    return reports
+
+
 def compare_m5_coupled(
     left: Path,
     right: Path,
     checkpoint: Path | None,
     expected_step: int = 4,
+    candidate_profile_id: str | None = None,
+    require_stellar_return: bool = True,
+    relative_tolerance: float = 1e-12,
+    chimes_proto_header: Path | None = None,
 ) -> dict[str, object]:
     """Compare actual coupled outputs, not synthetic reader/schema fixtures.
 
-    Same-rank/static-layout comparison only. Retains the selected effective
-    profile's rtol=1e-12/atol=1e-25. For M5 spherical-harmonic coefficients,
+    Same-rank/static-layout comparison only. The default relative tolerance is
+    1e-12 with absolute tolerance 1e-25; a restricted candidate restart may
+    supply a candidate-specific relative tolerance. For M5 spherical-harmonic coefficients,
     the relative scale is the largest of that coefficient and its channel's
     l=0 coefficient in either run; applying only a component-relative scale
     to a high-l coefficient near zero would compare it against its own
     numerical noise instead of the represented radiation.
     Integer, source identity and contract attributes must match exactly.
     """
-    rtol, atol = 1e-12, 1e-25
+    if not np.isfinite(relative_tolerance) or not (0.0 < relative_tolerance <= 1e-6):
+        raise ValueError("restart relative tolerance must be finite and in (0, 1e-6]")
+    if (relative_tolerance != 1e-12
+            and candidate_profile_id != "snrt_agn25_joint_diag_20261102_v1"):
+        raise ValueError("non-default restart tolerance is restricted to the AGN25 diagnostic profile")
+    rtol, atol = relative_tolerance, 1e-25
     scopes = ("hydro/", "snrt/", "gravity/", "particles/", "sinks/")
     paths = (left, right) if checkpoint is None else (left, right, checkpoint)
+    candidate_identity: dict[str, str] = {}
+    if candidate_profile_id is not None:
+        manifest_path = ROOT / "simulation" / "snrt" / "data" / (
+            f"{candidate_profile_id}_diagnostic_asset_manifest_v1.json"
+        )
+        source_path = ROOT / "simulation" / "snrt" / "data" / (
+            f"{candidate_profile_id}_source_boundary_contract_v1.json"
+        )
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        source_contract = json.loads(source_path.read_text(encoding="utf-8"))
+        identity = source_contract["runtime_contract_identity"]
+        if (manifest.get("group_profile", {}).get("id") != candidate_profile_id
+                or manifest.get("group_profile", {}).get("runtime_admissible") is not False
+                or source_contract.get("profile_id") != candidate_profile_id
+                or source_contract.get("group_set_id") != candidate_profile_id):
+            raise AssertionError("candidate restart comparison inputs are not bound to the restricted profile")
+        candidate_identity = {
+            "group_set_id": candidate_profile_id,
+            "source_sha256": str(identity["source_sha256"]),
+            "source_commit": str(identity["source_commit_binding"]),
+            "approval": str(identity["approval_id"]),
+            "edges_sha256": str(source_contract["group_edges_sha256"]),
+            "spectral_status": str(identity["contract_status"]),
+            "fraction_semantics": str(identity["fraction_semantics"]),
+            "chimes_bank_sha256": str(manifest["components"]["chimes"]["atomic_sha256"]),
+            "chimes_molecular_sha256": str(manifest["components"]["chimes"]["molecular_sha256"]),
+        }
+
+        def text_attr(value: object) -> str:
+            if isinstance(value, np.ndarray):
+                if value.size != 1:
+                    return str(value).rstrip("\x00 ")
+                value = value.flat[0]
+            if isinstance(value, np.generic):
+                value = value.item()
+            if isinstance(value, bytes):
+                return value.decode("ascii").rstrip("\x00 ")
+            return str(value).rstrip("\x00 ")
+
+        for path in paths:
+            with h5py.File(path, "r") as handle:
+                attrs = handle["snrt"].attrs
+                for key, expected in candidate_identity.items():
+                    if key not in attrs or text_attr(attrs[key]) != expected:
+                        raise AssertionError(
+                            f"candidate checkpoint identity mismatch in {path}: {key}"
+                        )
+        primary_groups = int(manifest["group_profile"]["group_count"])
+    else:
+        primary_groups = M5_PRIMARY_GROUPS
     for path in paths:
         assert path.is_file() and (path.parent / "COMPLETE").is_file(), path
     if checkpoint is not None:
@@ -1378,11 +1583,17 @@ def compare_m5_coupled(
             assert int(np.asarray(seed["snrt"].attrs["moment_order"]).flat[0]) == 5
             assert int(np.asarray(seed["snrt"].attrs["format_version"]).flat[0]) >= 1000
             width = int(np.asarray(seed["snrt"].attrs["cell_width"]).flat[0])
-            # This executable's level0 angular family pads 36 M5 coefficients
+            # This executable's level0 angular family pads M5 coefficients
             # into 80 entries/group. Signed higher moments are NOT photon counts.
             payload = np.asarray(seed["snrt/level_2"]).reshape(64, width)
-            assert width >= 1444 and np.all(np.isfinite(payload))
-            assert np.any(payload[:, 4:724:80] > 0), "checkpoint has no live primary photons"
+            minimum_width = M5_PAYLOAD_HEADER + 2 * M5_STORAGE_STRIDE * primary_groups
+            assert width >= minimum_width and np.all(np.isfinite(payload))
+            photon_columns = slice(
+                M5_PAYLOAD_HEADER,
+                M5_PAYLOAD_HEADER + M5_STORAGE_STRIDE * primary_groups,
+                M5_STORAGE_STRIDE,
+            )
+            assert np.any(payload[:, photon_columns] > 0), "checkpoint has no live primary photons"
             existing_stars = set(np.asarray(seed["particles/identity"])[
                 np.asarray(seed["particles/ptypep"]) == 1])
     else:
@@ -1393,6 +1604,23 @@ def compare_m5_coupled(
             assert int(np.asarray(seed["snrt"].attrs["format_version"]).flat[0]) >= 1000
         existing_stars = set()
     with h5py.File(left, "r") as a, h5py.File(right, "r") as b:
+        def ordering_name(handle: h5py.File) -> str:
+            value = handle["header"].attrs["ordering"]
+            if isinstance(value, np.ndarray):
+                value = value.flat[0]
+            if isinstance(value, bytes):
+                value = value.decode("ascii")
+            return str(value).rstrip("\x00 ").lower()
+
+        ordering_a = ordering_name(a)
+        ordering_b = ordering_name(b)
+        assert ordering_a == ordering_b, ("ordering", ordering_a, ordering_b)
+        # Multi-rank Hilbert HDF5 restarts intentionally rebuild their
+        # decomposition, even when ncpu is unchanged. Preserve exact owner
+        # equality for fixed-decomposition comparisons.
+        allow_owner_redistribution = (
+            checkpoint is not None and expected_ncpu > 1 and ordering_a == "hilbert"
+        )
         snrt_attrs = a["snrt"].attrs
         transport_model = np.asarray(snrt_attrs["transport_model"]).flat[0]
         if isinstance(transport_model, bytes):
@@ -1401,14 +1629,14 @@ def compare_m5_coupled(
         moment_order = int(np.asarray(snrt_attrs["moment_order"]).flat[0])
         moment_count = (moment_order + 1) ** 2
         m5_payload_width = int(np.asarray(snrt_attrs["cell_width"]).flat[0])
-        ir_width = m5_payload_width - M5_PAYLOAD_HEADER - 2 * M5_STORAGE_STRIDE * M5_PRIMARY_GROUPS
+        ir_width = m5_payload_width - M5_PAYLOAD_HEADER - 2 * M5_STORAGE_STRIDE * primary_groups
         assert ir_width >= 0 and ir_width % M5_STORAGE_STRIDE == 0
         ir_groups = ir_width // M5_STORAGE_STRIDE
         assert moment_count <= M5_STORAGE_STRIDE
         m5_layout = {
             "moment_order": moment_order,
             "moment_count": moment_count,
-            "primary_groups": M5_PRIMARY_GROUPS,
+            "primary_groups": primary_groups,
             "storage_stride": M5_STORAGE_STRIDE,
             "ir_groups": ir_groups,
             "payload_width": m5_payload_width,
@@ -1421,20 +1649,29 @@ def compare_m5_coupled(
             stars = np.asarray(handle["particles/ptypep"]) == 1
             mass = np.asarray(handle["particles/mass"])[stars]
             initial = np.asarray(handle["particles/mp0"])[stars]
-            assert np.any(stars) and np.all(mass > 0) and np.all(initial >= mass)
-            if checkpoint is not None:
+            if require_stellar_return:
+                assert np.any(stars) and np.all(mass > 0) and np.all(initial >= mass)
+            if checkpoint is not None and require_stellar_return:
                 assert np.sum(initial - mass) > 0, "ordinary stellar return was not exercised"
         def objects(handle: h5py.File, kind: type) -> list[str]:
             names: list[str] = []
             handle.visititems(lambda name, obj: names.append(name)
                               if isinstance(obj, kind) and name.startswith(scopes) else None)
             return sorted(names)
-        # Distributed restart/remap can change the rank-local grid-list
-        # order. Compare cell state at the SAME physical coordinate, never
-        # file row number. This does not relax the numerical tolerance.
+        # Distributed restart/remap can change both rank-local grid-list order
+        # and grid ownership. Compare physical state at the SAME coordinate,
+        # never file row number. Ownership is checked for valid rank IDs and
+        # reported, but is not physical state: the HDF5 Hilbert restart path
+        # deliberately rebuilds its domain decomposition.
         grid_permutations = {}
         grid_coordinates = {}
-        for level in a["amr"]:
+        owner_map_differences = {}
+        grid_owner_differences = {}
+        grid_counts_by_rank = {}
+        levels_a = sorted(a["amr"].keys())
+        levels_b = sorted(b["amr"].keys())
+        assert levels_a == levels_b, ("amr_levels", levels_a, levels_b)
+        for level in levels_a:
             xyz_a = np.column_stack([a[f"amr/{level}/xg_{i}"][:] for i in (1, 2, 3)])
             xyz_b = np.column_stack([b[f"amr/{level}/xg_{i}"][:] for i in (1, 2, 3)])
             rows_b = {tuple(row): i for i, row in enumerate(xyz_b)}
@@ -1444,14 +1681,51 @@ def compare_m5_coupled(
             permutation = np.array([rows_b[tuple(row)] for row in xyz_a])
             grid_permutations[level] = permutation
             grid_coordinates[level] = xyz_a
-            for key in ("son_flag", "cpu_map"):
-                x = np.asarray(a[f"amr/{level}/{key}"]).reshape(-1, 8)
-                y = np.asarray(b[f"amr/{level}/{key}"]).reshape(-1, 8)[permutation]
-                assert np.array_equal(x, y), (level, key)
+            son_a = np.asarray(a[f"amr/{level}/son_flag"]).reshape(-1, 8)
+            son_b = np.asarray(b[f"amr/{level}/son_flag"]).reshape(-1, 8)[permutation]
+            assert np.array_equal(son_a, son_b), (level, "son_flag")
+            owner_a = np.asarray(a[f"amr/{level}/cpu_map"]).reshape(-1, 8)
+            owner_b = np.asarray(b[f"amr/{level}/cpu_map"]).reshape(-1, 8)[permutation]
+            for label, owners in (("continuous", owner_a), ("restarted", owner_b)):
+                valid = (owners >= 1) & (owners <= expected_ncpu)
+                assert np.all(valid), (
+                    level, "invalid_cpu_map", label,
+                    np.unique(owners[~valid]).tolist(), expected_ncpu,
+                )
+            owner_map_differences[level] = int(np.count_nonzero(owner_a != owner_b))
+            counts_a = np.asarray(a[f"amr/{level}/ngrid_per_cpu"], dtype=np.int64).reshape(-1)
+            counts_b = np.asarray(b[f"amr/{level}/ngrid_per_cpu"], dtype=np.int64).reshape(-1)
+            for label, counts, xyz in (("continuous", counts_a, xyz_a),
+                                       ("restarted", counts_b, xyz_b)):
+                assert counts.size == expected_ncpu and np.all(counts >= 0), (
+                    level, "invalid_ngrid_per_cpu", label, counts.tolist(), expected_ncpu,
+                )
+                assert int(counts.sum()) == len(xyz), (
+                    level, "ngrid_per_cpu_coverage", label, int(counts.sum()), len(xyz),
+                )
+            grid_counts_by_rank[level] = {
+                "continuous": counts_a.tolist(),
+                "restarted": counts_b.tolist(),
+            }
+            grid_cpu_a = np.repeat(np.arange(1, expected_ncpu + 1), counts_a)
+            grid_cpu_b = np.repeat(np.arange(1, expected_ncpu + 1), counts_b)[permutation]
+            grid_owner_differences[level] = int(np.count_nonzero(grid_cpu_a != grid_cpu_b))
+            if not allow_owner_redistribution:
+                assert np.array_equal(owner_a, owner_b), (level, "cpu_map")
+                assert np.array_equal(counts_a, counts_b), (level, "ngrid_per_cpu")
         same_row_identity = all(
             np.array_equal(a[f"particles/{key}"], b[f"particles/{key}"])
             for key in ("identity", "ptypep", "levelp")
         )
+        ids_a = np.asarray(a["particles/identity"])
+        kinds_a = np.asarray(a["particles/ptypep"])
+        levels_a = np.asarray(a["particles/levelp"])
+        # Equal arrays of repeated sentinel IDs do not establish row identity:
+        # RAMSES can reorder indistinguishable-ID particles on HDF5 restart.
+        same_row_identity = same_row_identity and len({
+            (int(kind), int(ident), int(level))
+            for ident, kind, level in zip(ids_a, kinds_a, levels_a, strict=True)
+        }) == len(ids_a)
 
         def particle_keys(handle: h5py.File) -> list[tuple]:
             p = handle["particles"]
@@ -1459,6 +1733,7 @@ def compare_m5_coupled(
             birth = np.asarray(p["birth_epoch"])
             xyz = np.column_stack([p[f"x_{i}"][:] for i in (1, 2, 3)])
             keys = []
+            sentinel_occurrences: dict[tuple, int] = {}
             for i, ident in enumerate(ids):
                 if kinds[i] == 1 and ident in existing_stars:
                     key = (1, 0, int(ident))
@@ -1467,13 +1742,18 @@ def compare_m5_coupled(
                     # Match their exact birth event, not a newly assigned ID.
                     key = (1, 1, float(birth[i]), *xyz[i])
                 elif same_row_identity:
-                    # Dark-matter rows can use the repeated sentinel ID -1.
-                    # With an unchanged row identity/type/level inventory,
-                    # retain that row mapping and compare coordinates using
-                    # the normal numerical tolerance below. Exact coordinates
-                    # are unsuitable as keys because harmless restart
-                    # roundoff would force all new stars back to row matching.
                     key = (int(kinds[i]), 0, int(ident), int(levels[i]), i)
+                elif int(ident) < 0:
+                    # Repeated sentinel IDs have no stable particle key. Match
+                    # by periodic physical position rounded well below the
+                    # comparator tolerance; retain a per-position multiplicity
+                    # for truly coincident particles, whose remaining fields
+                    # are then checked after the deterministic pairing.
+                    pos = tuple(round(float(value) % 1.0, 12) for value in xyz[i])
+                    base = (int(kinds[i]), 0, int(ident), int(levels[i]), *pos)
+                    ordinal = sentinel_occurrences.get(base, 0)
+                    sentinel_occurrences[base] = ordinal + 1
+                    key = (*base, ordinal)
                 else:
                     key = (int(kinds[i]), 0, int(ident), int(levels[i]), *xyz[i])
                 keys.append(key)
@@ -1499,14 +1779,31 @@ def compare_m5_coupled(
         for i in np.flatnonzero(relabelled):
             assert keys_a[i][:2] == (1, 1), "pre-existing/nonstellar ID changed"
         assert np.array_equal(np.sort(ids_a), np.sort(ids_b)), "ID inventory changed"
+        particle_counts_a = np.asarray(a["particles/npart_per_cpu"], dtype=np.int64).reshape(-1)
+        particle_counts_b = np.asarray(b["particles/npart_per_cpu"], dtype=np.int64).reshape(-1)
+        for label, counts, particles in (("continuous", particle_counts_a, ids_a),
+                                         ("restarted", particle_counts_b, ids_b)):
+            assert counts.size == expected_ncpu and np.all(counts >= 0), (
+                "invalid_npart_per_cpu", label, counts.tolist(), expected_ncpu,
+            )
+            assert int(counts.sum()) == len(particles), (
+                "npart_per_cpu_coverage", label, int(counts.sum()), len(particles),
+            )
+        if not allow_owner_redistribution:
+            assert np.array_equal(particle_counts_a, particle_counts_b), "npart_per_cpu"
         names = objects(a, h5py.Dataset)
         assert names == objects(b, h5py.Dataset) and names
         assert all(any(name.startswith(scope) for name in names) for scope in scopes)
         differences = []
         tolerance_violations = []
+        repartition_metadata_datasets = set()
+        chemistry_outlier_cells: dict[tuple[str, int, int], dict[str, object]] = {}
         for name in names:
             x, y = np.asarray(a[name]), np.asarray(b[name])
             assert x.shape == y.shape and x.dtype == y.dtype, name
+            if allow_owner_redistribution and name == "particles/npart_per_cpu":
+                repartition_metadata_datasets.add(name)
+                continue
             level = name.split("/")[1]
             if level in grid_permutations:
                 permutation = grid_permutations[level]
@@ -1527,8 +1824,8 @@ def compare_m5_coupled(
                     # major (direction stride within each group). The live IR
                     # serializer stores groups contiguously within each moment.
                     for base in (M5_PAYLOAD_HEADER,
-                                 M5_PAYLOAD_HEADER + M5_STORAGE_STRIDE * M5_PRIMARY_GROUPS):
-                        for group in range(M5_PRIMARY_GROUPS):
+                                 M5_PAYLOAD_HEADER + M5_STORAGE_STRIDE * primary_groups):
+                        for group in range(primary_groups):
                             first = base + group * M5_STORAGE_STRIDE
                             scale = np.maximum(np.abs(x[:, :, first]), np.abs(y[:, :, first]))
                             target = limit[:, :, first:first + moment_count]
@@ -1541,7 +1838,7 @@ def compare_m5_coupled(
                             )
                     if ir_groups:
                         base = (M5_PAYLOAD_HEADER
-                                + 2 * M5_STORAGE_STRIDE * M5_PRIMARY_GROUPS)
+                                + 2 * M5_STORAGE_STRIDE * primary_groups)
                         for group in range(ir_groups):
                             indices = base + group + np.arange(M5_STORAGE_STRIDE) * ir_groups
                             first = int(indices[0])
@@ -1571,13 +1868,46 @@ def compare_m5_coupled(
                             float(value) for value in grid_coordinates[level][grid_row]
                         ],
                     })
+                if max_index:
+                    summary_left = float(x[max_index])
+                    summary_right = float(y[max_index])
+                    summary_signed = summary_left - summary_right
+                else:
+                    summary_left = summary_right = summary_signed = 0.0
                 summary = {
                     "name": name,
                     "max_absolute": float(np.max(delta)) if delta.size else 0.0,
                     "max_tolerance_ratio": float(np.max(ratio)) if ratio.size else 0.0,
                     "elements_outside_tolerance": outside_count,
                     "max_tolerance_location": max_location,
+                    "left_value_at_max_tolerance_location": summary_left,
+                    "right_value_at_max_tolerance_location": summary_right,
+                    "signed_left_minus_right_at_max_tolerance_location": summary_signed,
                 }
+                uold_match = re.fullmatch(r"hydro/(level_\d+)/uold_(\d+)", name)
+                if outside_count and uold_match is not None:
+                    species_index = int(uold_match.group(2)) - CHIMES_HDF5_SPECIES_OFFSET
+                    if 0 <= species_index < 157:
+                        for sample in np.argwhere(outside):
+                            if len(sample) != 3:
+                                raise AssertionError(f"unexpected CHIMES field shape for {name}: {x.shape}")
+                            grid_row, cell_in_grid, component = (int(i) for i in sample)
+                            key = (uold_match.group(1), grid_row, cell_in_grid)
+                            cell = chemistry_outlier_cells.setdefault(
+                                key, {"outlier_species": []}
+                            )
+                            cell["outlier_species"].append({
+                                "species_index": species_index,
+                                "dataset": name,
+                                "component": component,
+                                "continuous_value": float(x[grid_row, cell_in_grid, component]),
+                                "restarted_value": float(y[grid_row, cell_in_grid, component]),
+                                "signed_continuous_minus_restarted": float(
+                                    x[grid_row, cell_in_grid, component]
+                                    - y[grid_row, cell_in_grid, component]
+                                ),
+                                "tolerance_ratio": float(ratio[grid_row, cell_in_grid, component]),
+                            })
                 differences.append(summary)
                 if outside_count:
                     tolerance_violations.append(summary)
@@ -1609,9 +1939,12 @@ def compare_m5_coupled(
                     "elements_outside_tolerance": int(np.count_nonzero(outside)),
                     "max_tolerance_ratio": float(np.max(ratio)),
                 })
-        comparison_label = (
-            "M5_COUPLED_RESTART" if checkpoint is not None else "M5_COUPLED_FINAL_PAIR"
-        )
+        if candidate_profile_id is not None:
+            comparison_label = "M5_AGN25_CANDIDATE_RESTART"
+        else:
+            comparison_label = (
+                "M5_COUPLED_RESTART" if checkpoint is not None else "M5_COUPLED_FINAL_PAIR"
+            )
         if tolerance_violations and clock_tolerance_violations:
             status = f"{comparison_label}_FAIL_CLOCK_AND_NUMERIC_TOLERANCE"
         elif clock_tolerance_violations:
@@ -1635,16 +1968,54 @@ def compare_m5_coupled(
                 float(summary["max_tolerance_ratio"]),
                 float(violation["max_tolerance_ratio"]),
             )
+        chemistry_element_budgets: list[dict[str, object]] = []
+        chemistry_diagnostic_sources: dict[str, str | int] = {}
+        if candidate_profile_id is not None:
+            if chimes_proto_header is None:
+                raise ValueError("candidate restart diagnostics require the matching CHIMES proto header")
+            stoichiometry_source = ROOT / "patch/lagRamses/snrt_chimes_bridge.c"
+            chemistry_diagnostic_sources = {
+                "species_header": str(chimes_proto_header),
+                "species_header_sha256": hashlib.sha256(chimes_proto_header.read_bytes()).hexdigest(),
+                "stoichiometry_source": str(stoichiometry_source),
+                "stoichiometry_source_sha256": hashlib.sha256(stoichiometry_source.read_bytes()).hexdigest(),
+                "hdf5_uold_offset_from_zero_based_species_index": CHIMES_HDF5_SPECIES_OFFSET,
+            }
+            chemistry_element_budgets = _restart_cell_element_budgets(
+                a, b, grid_permutations, grid_coordinates,
+                chemistry_outlier_cells, chimes_proto_header,
+            )
         return {"status": status, "comparison_mode": comparison_label,
                 "expected_step": expected_step, "moment_order": 5,
-                "compared_datasets": len(names),
-                "bitwise_datasets": len(names)-len(differences)-int(np.any(relabelled)),
+                "compared_datasets": len(names)-len(repartition_metadata_datasets),
+                "bitwise_datasets": (len(names)-len(repartition_metadata_datasets)
+                                     -len(differences)-int(np.any(relabelled))),
                 "floating_differences": differences, "exact_contract_attributes": attribute_count,
+                "chemistry_element_budgets_at_outlier_cells": chemistry_element_budgets,
+                "chemistry_diagnostic_sources": chemistry_diagnostic_sources,
                 "tolerance_violations": tolerance_violations,
                 "tolerance_violations_by_scope": violations_by_scope,
                 "clock_tolerance_violations": clock_tolerance_violations,
                 "clock_bitwise": clocks, "rtol": rtol, "atol": atol,
-                "grid_identity": "exact_level_and_xyz_with_exact_son_and_owner",
+                "tolerance_basis": ("restricted_candidate_restart_override"
+                                    if candidate_profile_id is not None else
+                                    "legacy_default_restart_tolerance"),
+                "grid_identity": (
+                    "exact_level_xyz_and_son;valid_cpu_owner_with_remap_count"
+                    if allow_owner_redistribution else
+                    "exact_level_xyz_and_son_and_cpu_owner"
+                ),
+                "ordering": ordering_a,
+                "owner_redistribution_allowed": allow_owner_redistribution,
+                "cpu_map_mismatch_cells_by_level": owner_map_differences,
+                "cpu_map_mismatch_cells_total": sum(owner_map_differences.values()),
+                "grid_owner_mismatch_grids_by_level": grid_owner_differences,
+                "grid_counts_by_rank_by_level": grid_counts_by_rank,
+                "particle_counts_by_rank": {
+                    "continuous": particle_counts_a.tolist(),
+                    "restarted": particle_counts_b.tolist(),
+                },
+                "repartition_metadata_datasets": sorted(repartition_metadata_datasets),
                 "reordered_grids": {level: int(np.count_nonzero(p != np.arange(len(p))))
                                     for level, p in grid_permutations.items()},
                 "particle_identity": particle_match_method,
@@ -1656,7 +2027,9 @@ def compare_m5_coupled(
                     **m5_layout,
                 },
                 "mpi_ranks": expected_ncpu,
-                "scope": f"same_MPI{expected_ncpu}_effective_population_co_moving_dust"}
+                "scope": (f"same_MPI{expected_ncpu}_restricted_{candidate_profile_id}_cold_dust_chimes"
+                          if candidate_profile_id is not None else
+                          f"same_MPI{expected_ncpu}_effective_population_co_moving_dust")}
 
 
 def main() -> None:
@@ -1667,10 +2040,36 @@ def main() -> None:
         help="also run the bounded one-rank linked HDF5 writer/reader fixture",
     )
     parser.add_argument("--compare-m5-coupled", nargs=2, type=Path, metavar=("CONTINUOUS", "RESTARTED"))
+    parser.add_argument("--compare-m5-candidate-restart", nargs=2, type=Path,
+                        metavar=("CONTINUOUS", "RESTARTED"))
+    parser.add_argument("--candidate-restart-rtol", type=float, default=1e-12,
+                        help="relative tolerance for candidate-only restart comparison (atol remains 1e-25)")
     parser.add_argument("--compare-m5-coupled-pair", nargs=2, type=Path, metavar=("LEFT", "RIGHT"))
     parser.add_argument("--expected-step", type=int)
     parser.add_argument("--source-checkpoint", type=Path)
+    parser.add_argument("--chimes-proto-header", type=Path,
+                        help="matching CHIMES enum header for candidate chemistry diagnostics")
     args = parser.parse_args()
+    if (args.compare_m5_candidate_restart is None
+            and args.candidate_restart_rtol != 1e-12):
+        parser.error("--candidate-restart-rtol is only valid with --compare-m5-candidate-restart")
+    if args.compare_m5_candidate_restart is not None:
+        if (args.source_checkpoint is None or args.chimes_proto_header is None
+                or args.fortran_runtime or args.expected_step is not None
+                or args.compare_m5_coupled is not None
+                or args.compare_m5_coupled_pair is not None):
+            parser.error("candidate restart comparison needs --source-checkpoint, --chimes-proto-header, and no other comparison mode")
+        result = compare_m5_coupled(
+            *args.compare_m5_candidate_restart, args.source_checkpoint,
+            candidate_profile_id="snrt_agn25_joint_diag_20261102_v1",
+            require_stellar_return=False,
+            relative_tolerance=args.candidate_restart_rtol,
+            chimes_proto_header=args.chimes_proto_header,
+        )
+        print(json.dumps(result, indent=2), flush=True)
+        if result["status"] != "M5_AGN25_CANDIDATE_RESTART_PASS":
+            raise SystemExit(1)
+        return
     if args.compare_m5_coupled is not None:
         if (args.source_checkpoint is None or args.fortran_runtime
                 or args.expected_step is not None or args.compare_m5_coupled_pair is not None):

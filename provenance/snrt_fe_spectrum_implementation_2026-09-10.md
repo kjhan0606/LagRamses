@@ -108,3 +108,31 @@ new completion requirement is created. Evaluated raw snapshots are removed
 under [the cleanup manifest](snrt_fe_spectrum_raw_cleanup_2026-09-10.md):
 three files22900904 bytes permanently deleted, absence verified.
 Inputs, logs and compact results remain.
+
+## Edge-aware quadrature follow-up — 2026-11-06
+
+The checked-in 128-node Fe opacity grid was compared against a 2048-node
+reference that explicitly includes the Henke table knots bracketing the Fe
+L-shell edge (706.7/706.9 eV), the K-shell edge (7111.9/7112.1 eV), and each
+edge midpoint. Both grids use the native positive trapezoidal-dE
+maximum-entropy reconstruction at the stored N/E representative for each
+affected group. The comparison covers the legacy, AGN12 and AGN25 Fe group
+profiles and both existing grain sizes.
+
+The largest relative difference among photon/energy-weighted Fe absorption
+and transport opacities is 1.11534% (AGN25 group 18, 500--707.1068 eV,
+10-nm-radius bin, energy-weighted absorption). This supports the 128-node
+opacity quadrature for these stored group moments; it is not a pointwise edge
+accuracy claim or a heating-yield validation. The exact-edge Geant4 model
+sensitivity remains a separate limitation.
+
+Reproduce with
+`simulation/snrt/tools/compare_fe_edge_quadrature.py`, the pinned raw inputs
+under `.fe-spectral.MDeWoz/source/`, Python 3.13.11, NumPy 2.3.3,
+miepython 3.3.0, PyMuPDF 1.26.7, and `MIEPYTHON_USE_JIT=0`. The source URLs
+and original source hashes are listed in
+[`dust_fe_electric_base_generation_v1.json`](../simulation/snrt/data/dust_fe_electric_base_generation_v1.json).
+The machine-readable result records source, include and script hashes. The
+high-energy Fe runtime gate remains closed: this comparison does not supply
+photoelectron escape, grain heating, magnetic spin absorption, or complete
+Fe optics. No production selector or runtime table was changed.

@@ -12,6 +12,7 @@
 #include <mpi.h>
 #include "chimes_proto.h"
 #include "chimes_vars.h"
+#include "snrt_group_profile.h"
 #include "snrt_chimes_atomization.h"
 #ifdef SNRT_CHIMES_CUDA
 #include "snrt_chimes_cvode_cuda.h"
@@ -19,7 +20,11 @@
 #endif
 
 #define NS 157
-#define NG 9
+#define NG SNRT_GROUP_COUNT
+#if SNRT_GROUP_COUNT > CHIMES_MAX_UV_SPECTRA
+#error "SNRT group profile exceeds CHIMES_MAX_UV_SPECTRA; increase CHIMES capacity and rebuild all ABI consumers"
+#endif
+#define group_edges snrt_profile_group_edges
 extern int snrt_chimes_receiver_abi(void);
 /* ABI 4 remains usable for the existing neutral-solid receiver. ABI 5 adds
  * this optional hook without changing either CHIMES structure layout. */
@@ -48,9 +53,7 @@ struct secondary_source {
 static struct secondary_source secondary_sources[4];
 static double secondary_xi[14];
 static double h2_sigma[NG][2],co_sigma[NG][2];
-static const double group_edges[NG+1]={.01,1,5.6,11.2,13.6,24.59,54.42,500,2000,10000};
-static const double group_energy[NG]={.1,2.3664319132398464,10.56942670578782,12.2954112566775,
-    17.662918001204492,34.381528542610674,106.63925876378897,869.6341490248457,4023.594574013186};
+static double group_energy[NG];
 static int nuclei[NS][11],charge[NS];
 static const int neutral[11]={sp_HI,sp_HeI,sp_CI,sp_NI,sp_OI,sp_NeI,sp_MgI,sp_SiI,sp_SI,sp_CaI,sp_FeI};
 static const int atomic_z[11]={1,2,6,7,8,10,12,14,16,20,26};
@@ -232,6 +235,32 @@ static int read_vector(hid_t file,const char *name,int count,double *values)
     if(!ok)return 1;
     for(int i=0;i<count;i++)if(!isfinite(values[i]) || values[i]<0)return 1;
     return 0;
+}
+
+static int read_string_attribute(hid_t file,const char *name,char *value,size_t capacity)
+{
+    if(!name || !value || capacity<2 || H5Aexists(file,name)<=0)return 1;
+    hid_t attr=H5Aopen(file,name,H5P_DEFAULT);
+    if(attr<0)return 1;
+    hid_t type=H5Aget_type(attr);
+    if(type<0){H5Aclose(attr);return 1;}
+    int ok=0;
+    if(H5Tget_class(type)==H5T_STRING && H5Tis_variable_str(type)>0){
+        char *raw=NULL;
+        if(H5Aread(attr,type,&raw)>=0 && raw && strlen(raw)<capacity){
+            memcpy(value,raw,strlen(raw)+1);ok=1;
+        }
+        if(raw)H5free_memory(raw);
+    }else if(H5Tget_class(type)==H5T_STRING){
+        const size_t n=H5Tget_size(type);
+        if(n>0 && n<capacity){
+            char raw[512]={0};
+            if(n<sizeof(raw) && H5Aread(attr,type,raw)>=0){
+                raw[n]='\0';memcpy(value,raw,n+1);ok=1;
+            }
+        }
+    }
+    H5Tclose(type);H5Aclose(attr);return !ok;
 }
 
 int snrt_chimes_identity(double *values)
@@ -679,6 +708,11 @@ int snrt_chimes_initialize(const char *main_path,int nspectra,const char *paths,
         if(receiver_abi==6 && (!thermal_ceiling_hook || !thermal_root_hook))return 1;
     }
     if(nspectra>0 && !snrt_chimes_fs_ready())return 1;
+    if(nspectra<0 || nspectra>CHIMES_MAX_UV_SPECTRA){
+        fprintf(stderr,"CHIMES spectrum count %d exceeds supported range [0,%d]\n",
+                nspectra,CHIMES_MAX_UV_SPECTRA);
+        return 2;
+    }
     if(!main_path || strlen(main_path)>=500 || (nspectra!=0 && nspectra!=NG))return 2;
     if(nspectra && (!paths || stride<1 || stride>500))return 2;
     if(file_digest(main_path,table_identity))return 2;
@@ -699,8 +733,16 @@ int snrt_chimes_initialize(const char *main_path,int nspectra,const char *paths,
         double edges[2],mean;
         int bad=read_vector(file,"Header/snrt_group_edges_ev",2,edges);
         bad|=read_vector(file,"Header/snrt_mean_energy_ev",1,&mean);
+        if(SNRT_GROUP_COUNT!=9 || H5Aexists(file,"snrt_group_set_id")>0){
+            char profile_id[128]={0},edge_digest[128]={0};
+            bad|=read_string_attribute(file,"snrt_group_set_id",profile_id,sizeof(profile_id));
+            bad|=read_string_attribute(file,"snrt_group_edges_sha256",edge_digest,sizeof(edge_digest));
+            if(strcmp(profile_id,SNRT_GROUP_SET_ID) || strcmp(edge_digest,SNRT_GROUP_EDGES_SHA256))bad=1;
+        }
         H5Fclose(file);
-        if(bad || edges[0]!=group_edges[b] || edges[1]!=group_edges[b+1] || mean!=group_energy[b])return 2;
+        if(bad || edges[0]!=group_edges[b] || edges[1]!=group_edges[b+1] ||
+           mean<edges[0] || mean>edges[1])return 2;
+        group_energy[b]=mean;
     }
     configuration.rt_update_flux=nspectra>0;
     configuration.rt_use_on_the_spot_approx=1;
@@ -720,12 +762,15 @@ int snrt_chimes_initialize(const char *main_path,int nspectra,const char *paths,
     chimes_exit=fatal_library_error;
     initialized=-1; /* A failed library initialization cannot be retried. */
     init_chimes(&configuration);
+    if(configuration.totalNumberOfSpecies!=NS)return 3;
+    fprintf(stderr,"CHIMES cross-section initialization complete spectra=%d capacity=%d first_table=%s\n",
+            configuration.N_spectra,CHIMES_MAX_UV_SPECTRA,
+            configuration.N_spectra>0?configuration.PhotoIonTablePath[0]:"none");
     /* init_chimes intentionally resets these callback pointers. Install the
      * receiver only after initialization has finished. */
     configuration.hybrid_cooling_fn=remove_duplicate_dust_energy;
     if(receiver_abi>=5)*solid_charge_hook=solid_charge;
     if(receiver_abi==6){*thermal_ceiling_hook=thermal_ceiling;*thermal_root_hook=thermal_root;}
-    if(configuration.totalNumberOfSpecies!=NS)return 3;
     for(int i=0;i<NS;i++)if(configuration.speciesIndices[i]!=i)return 3;
     int nf=chimes_table_photoion_auger_fuv.N_reactions[1];
     int ne=chimes_table_photoion_auger_euv.N_reactions[1];
@@ -782,41 +827,135 @@ int snrt_chimes_neutral(const double *elements,double *abundance)
  * ejecta injection or grain exchange. Molecules are never silently broken to
  * supply grain growth: the grain receiver must reserve their locked atoms.
  * Both inputs can be number densities instead of normalized abundances. */
-int snrt_chimes_reconcile_charged(const double *elements,const double *old,double solid_q,double *next)
+static void report_reconcile_failure(const char *branch,const double *elements,const double *old,
+                                     const double *state,double solid_q)
+{
+    static int reported=0;
+    long double old_pos=0,old_neg=0,old_net=0,post_pos=0,post_neg=0,post_net=0;
+    long double derived_e=solid_q,charge_scale=fabsl((long double)solid_q),max_element_rel=0;
+    for(int s=0;s<NS;s++){
+        long double old_term=(long double)charge[s]*old[s];
+        long double post_term=(long double)charge[s]*state[s];
+        old_net+=old_term;post_net+=post_term;
+        if(old_term>0)old_pos+=old_term;else old_neg+=old_term;
+        if(post_term>0)post_pos+=post_term;else post_neg+=post_term;
+        if(s!=sp_elec){derived_e+=post_term;charge_scale+=fabsl(post_term);}
+    }
+    for(int e=0;e<11;e++){
+        long double measured=0,target=elements[e];
+        for(int s=0;s<NS;s++)measured+=(long double)nuclei[s][e]*state[s];
+        long double relative=fabsl(measured-target)/fmaxl(fabsl(target),1e-30L);
+        if(relative>max_element_rel)max_element_rel=relative;
+    }
+    flockfile(stderr);
+    if(!reported){
+        fprintf(stderr,"CHIMES reconcile failure detail branch=%s solid_q=%.17g old_e=%.17g ",
+                branch,solid_q,old[sp_elec]);
+        fprintf(stderr,"old_charge(pos/neg/net)=%.21Lg/%.21Lg/%.21Lg ",old_pos,old_neg,old_net);
+        fprintf(stderr,"post_charge(pos/neg/net)=%.21Lg/%.21Lg/%.21Lg ",post_pos,post_neg,post_net);
+        fprintf(stderr,"derived_e=%.21Lg charge_scale=%.21Lg ",derived_e,charge_scale);
+        fprintf(stderr,"old_Hm/Cm/Om=%.17g/%.17g/%.17g post_Hm/Cm/Om=%.17g/%.17g/%.17g ",
+                old[sp_Hm],old[sp_Cm],old[sp_Om],state[sp_Hm],state[sp_Cm],state[sp_Om]);
+        fprintf(stderr,"max_element_relative_error=%.21Lg\n",max_element_rel);
+        reported=1;
+    }
+    funlockfile(stderr);
+}
+
+static int reconcile_charged_impl(const double *elements,const double *negative_scale,const double *old,
+                                  double solid_q,double *next,int transport_roundoff)
 {
     double measured[11],q,work[NS],locked[11]={0};
     memcpy(next,old,NS*sizeof(double));
     if(!isfinite(solid_q))return 1;
     memcpy(work,old,sizeof(work));
     for(int e=0;e<11;e++)if(!isfinite(elements[e]) || elements[e]<0)return 2;
-    /* Conservative cell transport can leave a trace neutral/ion population
-     * a few hundred ulps below zero when subtracting nearly equal face
-     * fluxes. Admit only negatives whose elemental debit is <=512 ulps of
-     * every affected live element reservoir; set those roundoff residues to
-     * zero, then let the ordinary conservative reconciliation restore the
-     * element ledger and derive electrons from charge. This is not an
-     * abundance floor: larger negatives and negative electrons remain hard
-     * failures. */
+    if(transport_roundoff){
+        if(!negative_scale)return 2;
+        for(int e=0;e<11;e++)if(!isfinite(negative_scale[e]) || negative_scale[e]<0)return 2;
+    }
+    /* Direct reconciliation keeps its gas-phase-reservoir bound. At the
+     * transport/preparation boundary, however, gas-phase depletion into
+     * grains can make that reservoir zero while the total element inventory
+     * is finite. Permit only atomic roundoff residues there, bounded by the
+     * summed elemental debit and total (gas+solid) inventory. */
+    double negative_debit[11]={0};
     for(int s=0;s<NS;s++){
         if(!isfinite(work[s]))return 1;
         if(work[s]>=0)continue;
         if(s==sp_elec)return 1;
-        int has_nucleus=0;
+        int has_nucleus=0,n_element=0,n_total=0;
         for(int e=0;e<11;e++)if(nuclei[s][e]>0){
             has_nucleus=1;
+            n_element++;
+            n_total+=nuclei[s][e];
             double debit=-work[s]*nuclei[s][e];
-            double tolerance=512*DBL_EPSILON*fmax(elements[e],DBL_MIN);
-            if(!isfinite(debit) || debit>tolerance)return 1;
+            if(!isfinite(debit))return 1;
+            if(transport_roundoff){
+                negative_debit[e]+=debit;
+                if(!isfinite(negative_debit[e]))return 1;
+            }else{
+                double tolerance=512*DBL_EPSILON*fmax(elements[e],DBL_MIN);
+                if(debit>tolerance)return 1;
+            }
         }
         if(!has_nucleus)return 1;
-        work[s]=0;
+        if(transport_roundoff){
+            /* H2 and all multi-nucleus molecules retain strict rejection. */
+            if(n_element!=1 || n_total!=1)return 1;
+        }else{
+            work[s]=0;
+        }
+    }
+    if(transport_roundoff){
+        for(int e=0;e<11;e++){
+            double tolerance=512*DBL_EPSILON*fmax(negative_scale[e],DBL_MIN);
+            if(negative_debit[e]>tolerance)return 1;
+        }
+        for(int s=0;s<NS;s++)if(work[s]<0)work[s]=0;
     }
     if(snrt_chimes_budget(work,measured,&q))return 1;
+    for(int s=sp_H2;s<NS;s++)for(int e=0;e<11;e++)locked[e]+=nuclei[s][e]*work[s];
+    /* A gas element can be exactly depleted in the mass carrier while the
+     * transported molecular state retains a sub-ULP positive tail. Such a
+     * tail cannot be represented in total-minus-solid mass, but the strict
+     * molecular lock below would reject every positive value against a zero
+     * reservoir. Remove it only when its entire locked inventory is within
+     * four ULPs of a nonzero total (gas+solid) element carrier. Transfer the
+     * other nuclei in those trace molecules to neutral atoms, preserving
+     * their elemental inventories; the depleted element itself has no
+     * representable gas reservoir. Larger molecular excesses still reject.
+     */
+    if(transport_roundoff){
+        int depleted[11]={0},have_depleted=0;
+        for(int e=0;e<11;e++){
+            if(elements[e]!=0.0 || negative_scale[e]<=0.0 || locked[e]<=0.0)continue;
+            const double ulp=nextafter(negative_scale[e],INFINITY)-negative_scale[e];
+            const double bound=4.0*ulp;
+            if(!isfinite(bound) || locked[e]>bound)return 2;
+            depleted[e]=1;have_depleted=1;
+        }
+        if(have_depleted){
+            for(int s=sp_H2;s<NS;s++){
+                int touches_depleted=0;
+                for(int e=0;e<11;e++)if(depleted[e] && nuclei[s][e]>0){
+                    touches_depleted=1;break;
+                }
+                if(!touches_depleted || work[s]==0.0)continue;
+                const double population=work[s];
+                for(int e=0;e<11;e++)if(!depleted[e] && nuclei[s][e]>0)
+                    work[neutral[e]]+=population*nuclei[s][e];
+                work[s]=0.0;
+            }
+            if(snrt_chimes_budget(work,measured,&q))return 1;
+            memset(locked,0,sizeof(locked));
+            for(int s=sp_H2;s<NS;s++)for(int e=0;e<11;e++)locked[e]+=nuclei[s][e]*work[s];
+        }
+    }
     /* Lock only the accepted post-roundoff species state. Using old here
      * would let a clipped negative molecule perturb the amount of atomic
      * material available for grain exchange, leaving a small element-ledger
      * drift when the requested gas-phase reservoir also changes. */
-    for(int s=sp_H2;s<NS;s++)for(int e=0;e<11;e++)locked[e]+=nuclei[s][e]*work[s];
     for(int e=0;e<11;e++){
         if(!isfinite(elements[e]) || elements[e]<0 ||
            elements[e]<locked[e]-1e-12*fmax(elements[e],locked[e]))return 2;
@@ -835,12 +974,110 @@ int snrt_chimes_reconcile_charged(const double *elements,const double *old,doubl
      * accept only this <DBL_MIN charge residual as zero electrons. Normal
      * negative populations, even 1e-300, still reject unchanged. */
     if(work[sp_elec]<0 && work[sp_elec]>-DBL_MIN)work[sp_elec]=0;
-    if(work[sp_elec]<0)return 3;
-    if(snrt_chimes_budget(work,measured,&q))return 3;
+    if(work[sp_elec]<0){
+        report_reconcile_failure("negative_electron",elements,old,work,solid_q);
+        return 3;
+    }
+    if(snrt_chimes_budget(work,measured,&q)){
+        report_reconcile_failure("corrected_budget",elements,old,work,solid_q);
+        return 3;
+    }
     for(int e=0;e<11;e++)if(fabs(measured[e]-elements[e])>
-        1e-10*fmax(elements[e],1e-30))return 3;
+        1e-10*fmax(elements[e],1e-30)){
+        report_reconcile_failure("element_closure",elements,old,work,solid_q);
+        return 3;
+    }
     memcpy(next,work,sizeof(work));
     return 0;
+}
+
+int snrt_chimes_reconcile_charged(const double *elements,const double *old,double solid_q,double *next)
+{
+    return reconcile_charged_impl(elements,elements,old,solid_q,next,0);
+}
+
+/* The mode-3 dark transition can leave solver-scale H- and C- populations
+ * after its algebraic electron abundance reaches zero. This private-state
+ * projection is deliberately narrower than the public strict reconciler:
+ * only an exactly dark, uncharged input and only tolerance-bounded H-/C-
+ * tails are eligible. Return 0 only after the unchanged strict reconciler
+ * accepts the projected state; otherwise leave `next` untouched. */
+int snrt_chimes_reconcile_dark_mode3(const double *elements,const double *state,
+    double solid_q,int original_zero_incident,double accepted_absolute_tolerance,
+    int scale_metal_tolerances,double *next)
+{
+    if(initialized!=1 || !elements || !state || !next ||
+       original_zero_incident!=1 || !isfinite(solid_q) || solid_q!=0.0 ||
+       !isfinite(accepted_absolute_tolerance) || accepted_absolute_tolerance<=0.0 ||
+       (scale_metal_tolerances!=0 && scale_metal_tolerances!=1))return 1;
+    for(int e=0;e<11;e++)if(!isfinite(elements[e]) || elements[e]<0.0)return 1;
+    for(int s=0;s<NS;s++)if(!isfinite(state[s]) || state[s]<0.0)return 1;
+    if(state[sp_elec]!=0.0)return 1;
+
+    const double hminus=state[sp_Hm],cminus=state[sp_Cm];
+    if((hminus>0.0 && state[sp_HI]<=0.0) ||
+       (cminus>0.0 && state[sp_CI]<=0.0))return 1;
+
+    /* Reject every unsupported anion, and sum the remaining positive charge
+     * without cancellation. The negative required electron must be fully
+     * explained by the two permitted tails. */
+    long double positive_charge=0.0L;
+    for(int s=1;s<NS;s++){
+        if(s==sp_Hm || s==sp_Cm || charge[s]==0 || state[s]==0.0)continue;
+        if(charge[s]<0)return 1;
+        positive_charge+=(long double)charge[s]*(long double)state[s];
+    }
+    const long double negative_tail=(long double)hminus+(long double)cminus;
+    const long double required_electron=positive_charge-negative_tail;
+    if(!isfinite((double)positive_charge) || required_electron>=0.0L ||
+       positive_charge>negative_tail)return 1;
+
+    const double h_tolerance=accepted_absolute_tolerance*
+        (scale_metal_tolerances==1?elements[0]:1.0);
+    const double c_tolerance=accepted_absolute_tolerance*
+        (scale_metal_tolerances==1?elements[2]:1.0);
+    if(!isfinite(h_tolerance) || !isfinite(c_tolerance))return 1;
+    const double h_cap=fmin(.01*h_tolerance,512.0*DBL_EPSILON*elements[0]);
+    const double c_cap=fmin(.01*c_tolerance,512.0*DBL_EPSILON*elements[2]);
+    const double electron_cap=.01*accepted_absolute_tolerance;
+    if(!isfinite(electron_cap) || hminus>h_cap || cminus>c_cap ||
+       negative_tail>(long double)electron_cap)return 1;
+
+    double before_elements[11],after_elements[11],state_charge,after_charge;
+    if(snrt_chimes_budget(state,before_elements,&state_charge) ||
+       !isfinite(state_charge) || state_charge>=0.0)return 1;
+    double candidate[NS],corrected[NS];
+    memcpy(candidate,state,sizeof(candidate));
+    candidate[sp_HI]+=hminus;candidate[sp_Hm]=0.0;
+    candidate[sp_CI]+=cminus;candidate[sp_Cm]=0.0;
+    for(int s=0;s<NS;s++)if(!isfinite(candidate[s]) || candidate[s]<0.0)return 2;
+    if(snrt_chimes_budget(candidate,after_elements,&after_charge))return 2;
+    for(int e=0;e<11;e++){
+        const double scale=fmax(fmax(before_elements[e],after_elements[e]),DBL_MIN);
+        if(fabs(after_elements[e]-before_elements[e])>64.0*DBL_EPSILON*scale)return 2;
+    }
+
+    /* Keep the public acceptance rule unchanged. In particular, this helper
+     * cannot broaden the element-ledger tolerance or repair the original state. */
+    if(snrt_chimes_reconcile_charged(elements,candidate,solid_q,corrected))return 2;
+    if(snrt_chimes_budget(corrected,after_elements,&after_charge))return 2;
+    long double charge_scale=0.0L,stable_charge=(long double)solid_q-(long double)corrected[sp_elec];
+    charge_scale=fabsl((long double)corrected[sp_elec]);
+    for(int s=1;s<NS;s++){
+        const long double term=(long double)charge[s]*(long double)corrected[s];
+        stable_charge+=term;charge_scale+=fabsl(term);
+    }
+    if(!isfinite(after_charge) || !isfinite((double)stable_charge) ||
+       fabs(after_charge)>512.0*DBL_EPSILON*fmax((double)charge_scale,DBL_MIN) ||
+       fabsl(stable_charge)>512.0L*(long double)DBL_EPSILON*fmaxl(charge_scale,DBL_MIN))return 2;
+    memcpy(next,corrected,sizeof(corrected));
+    return 0;
+}
+
+int snrt_chimes_reconcile_transported(const double *elements,const double *total_element_scale,
+                                      const double *old,double solid_q,double *next)
+{
+    return reconcile_charged_impl(elements,total_element_scale,old,solid_q,next,1);
 }
 
 int snrt_chimes_reconcile(const double *elements,const double *old,double *next)
@@ -864,7 +1101,9 @@ int snrt_chimes_locked(const double *abundance,double *elements)
  * Return only complete trial states. Native caller owns their publication. */
 static int cell_charged_impl(const double *controls,const double *elements,const double *old_abundance,
                      double solid_q,
-                     const double *old_photons,double *temperature,double *abundance,double *photons,int mode,double *elapsed)
+                     const double *old_photons,double *temperature,double *abundance,double *photons,
+                     int mode,int allow_unilluminated_cminus_projection,
+                     int original_zero_incident,double *elapsed)
 {
     *temperature=controls[1];
     memcpy(abundance,old_abundance,NS*sizeof(double));
@@ -995,7 +1234,53 @@ static int cell_charged_impl(const double *controls,const double *elements,const
     /* Publish a state satisfying the next step's stricter input contract.
      * Preserve thermal energy when this roundoff correction changes n_tot. */
     double corrected[NS],before=0,after=0;
-    int reconcile_status=snrt_chimes_reconcile_charged(elements,work,solid_q,corrected);
+    for(int s=0;s<NS;s++)before+=work[s];
+    /* In a hot-atomic solve with exactly zero incident N and E, CVODE can
+     * retain a roundoff-sized C- tail after its electron abundance reaches
+     * zero. Repair only this bounded C- -> C I residual. The explicit flag
+     * comes from the full photo+dark split input, not the dark operator's
+     * deliberately zero photon vector. */
+    if(mode==0 && allow_unilluminated_cminus_projection==1 && solid_q==0 && work[sp_elec]==0){
+        int zero_solver_radiation=1;
+        for(int b=0;b<NG;b++)if(old_photons[b]!=0)zero_solver_radiation=0;
+        if(zero_solver_radiation){
+            double electron_required=solid_q;
+            for(int s=1;s<NS;s++)electron_required+=charge[s]*work[s];
+            const double carbon=elements[2];
+            const double effective_abs_tol=c.absoluteTolerance*
+                (c.scale_metal_tolerances==1?carbon:1.0);
+            const double carbon_roundoff=512*DBL_EPSILON*carbon;
+            const double projection_bound=fmin(carbon_roundoff,.01*effective_abs_tol);
+            const double cminus=work[sp_Cm];
+            if(electron_required<0 && cminus>0){
+                const int eligible=isfinite(cminus) && isfinite(carbon) && carbon>=0 &&
+                    isfinite(effective_abs_tol) && isfinite(projection_bound) &&
+                    cminus<=projection_bound && cminus<=1e-10 && cminus>=-electron_required;
+                static int reported=0;
+                flockfile(stderr);
+                if(!reported){
+                    fprintf(stderr,"CHIMES trace C- projection incident_zero=1 eligible=%d amount=%.17g carbon=%.17g ",
+                            eligible,cminus,carbon);
+                    fprintf(stderr,"solver_abs_tol=%.17g effective_abs_tol=%.17g bound=%.17g ",
+                            c.absoluteTolerance,effective_abs_tol,projection_bound);
+                    fprintf(stderr,"electron_required_before=%.17g charge_adjustment=%.17g\n",
+                            electron_required,cminus);
+                    reported=1;
+                }
+                funlockfile(stderr);
+                if(eligible){
+                    work[sp_CI]+=cminus;
+                    work[sp_Cm]=0;
+                }
+            }
+        }
+    }
+    int reconcile_status=1;
+    if(mode==3)
+        reconcile_status=snrt_chimes_reconcile_dark_mode3(elements,work,solid_q,
+            original_zero_incident,c.absoluteTolerance,c.scale_metal_tolerances,corrected);
+    if(reconcile_status!=0)
+        reconcile_status=snrt_chimes_reconcile_charged(elements,work,solid_q,corrected);
     if(reconcile_status){
         static int reported=0;
         flockfile(stderr);
@@ -1010,7 +1295,7 @@ static int cell_charged_impl(const double *controls,const double *elements,const
         }
         funlockfile(stderr);return 46;
     }
-    for(int s=0;s<NS;s++){before+=work[s];after+=corrected[s];}
+    for(int s=0;s<NS;s++)after+=corrected[s];
     if(after<=0)return 47;
     g.temperature*=before/after;
     if(g.temperature<10 && g.temperature>=10*(1-1e-10))g.temperature=10;
@@ -1027,17 +1312,20 @@ static int cell_charged_impl(const double *controls,const double *elements,const
 }
 
 static int cell_charged(const double *controls,const double *elements,const double *old,
-    double solid_q,const double *old_photons,double *temperature,double *next,double *photons,int mode,double *elapsed)
+    double solid_q,const double *old_photons,double *temperature,double *next,double *photons,
+    int mode,int allow_unilluminated_cminus_projection,int original_zero_incident,double *elapsed)
 {
 #ifdef SNRT_CHIMES_CUDA
     snrt_chimes_rhs_cell_begin();
 #endif
-    int status=cell_charged_impl(controls,elements,old,solid_q,old_photons,temperature,next,photons,mode,elapsed);
+    int status=cell_charged_impl(controls,elements,old,solid_q,old_photons,temperature,next,photons,
+                                 mode,allow_unilluminated_cminus_projection,original_zero_incident,elapsed);
 #ifdef SNRT_CHIMES_CUDA
     if(snrt_chimes_rhs_cell_retry()) {
         /* Fresh private gas/rates/CVODE state and original input/tolerances.
          * Never mix CPU/GPU RHS arithmetic inside a numerical Jacobian. */
-        status=cell_charged_impl(controls,elements,old,solid_q,old_photons,temperature,next,photons,mode,elapsed);
+        status=cell_charged_impl(controls,elements,old,solid_q,old_photons,temperature,next,photons,
+                                 mode,allow_unilluminated_cminus_projection,original_zero_incident,elapsed);
     }
     snrt_chimes_rhs_cell_end();
 #endif
@@ -1047,22 +1335,41 @@ static int cell_charged(const double *controls,const double *elements,const doub
 int snrt_chimes_cell_charged(const double *controls,const double *elements,const double *old,
     double solid_q,const double *number,double *temperature,double *next,double *next_number)
 {
-    return cell_charged(controls,elements,old,solid_q,number,temperature,next,next_number,0,NULL);
+    return cell_charged(controls,elements,old,solid_q,number,temperature,next,next_number,0,0,0,NULL);
+}
+
+int snrt_chimes_cell_charged_unilluminated(const double *controls,const double *elements,const double *old,
+    double solid_q,const double *number,int zero_incident,double *temperature,double *next,double *next_number)
+{
+    return cell_charged(controls,elements,old,solid_q,number,temperature,next,next_number,
+                        0,zero_incident==1,zero_incident==1,NULL);
 }
 
 int snrt_chimes_cell_cold_dark(const double *controls,const double *elements,const double *old,
     double *temperature,double *next)
 {
     double zero[NG]={0},out[NG];
-    return cell_charged(controls,elements,old,0,zero,temperature,next,out,1,NULL);
+    return cell_charged(controls,elements,old,0,zero,temperature,next,out,1,0,1,NULL);
+}
+
+int snrt_chimes_radiation_is_exactly_zero(int nd,const double *number,const double *energy)
+{
+    if(nd<1 || nd>720 || !number || !energy)return 0;
+    const size_t n=(size_t)nd*(size_t)NG;
+    for(size_t i=0;i<n;i++)
+        if(!isfinite(number[i]) || !isfinite(energy[i]) || number[i]!=0.0 || energy[i]!=0.0)return 0;
+    return 1;
 }
 
 int snrt_chimes_cell_transition_dark(const double *controls,const double *elements,const double *old,
-    int atomic,double *temperature,double *next,double *elapsed)
+    int atomic,int nd,const double *original_number,const double *original_energy,double solid_q,
+    double *temperature,double *next,double *elapsed)
 {
     double zero[NG]={0},out[NG];
     if(elapsed)*elapsed=controls[3];
-    return cell_charged(controls,elements,old,0,zero,temperature,next,out,atomic?2:3,elapsed);
+    return cell_charged(controls,elements,old,solid_q,zero,temperature,next,out,
+                        atomic?2:3,0,
+                        snrt_chimes_radiation_is_exactly_zero(nd,original_number,original_energy),elapsed);
 }
 
 int snrt_chimes_cell(const double *controls,const double *elements,const double *old_abundance,

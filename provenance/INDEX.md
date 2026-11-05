@@ -1,10 +1,19 @@
 # High-level RT/feedback/dust provenance index
 
-Project: `/gpfs/kjhan/LRD_JWST` (`kjhan0606/LagRamses`)
+Project: `/gpfs/kjhan/chimes-cvode-gpu-20261001` (`kjhan0606/LagRamses`)
 Index status: active engineering records; historical records remain in place
 until an explicitly approved archive operation.
 Record statuses: `active` = current contract/evidence, `superseded` = retained
 but not a current gate, `long_term_record` = future G5/G6/science work.
+
+Auditor policy (2026-11-05): internal Astra replaces every pending and future
+Fable audit assignment, including plan/design reviews, scientific/technical
+consultations, bundle-end/closeout audits, and fallback reviews. Completed
+Fable links below remain historical records, including unavailable or
+conditional outcomes; their verdicts are not rewritten and they do not assign
+new work. Claude Opus 5 retains its separately assigned code
+implementation/structure audits. See [project instructions](../AGENTS.md) and the
+[audit cadence amendment](audit_cadence_amendment_2026-09-05.md).
 
 This index is deliberately bundle-level. Individual native smokes and Python
 validators are not separate project gates; they are referenced by the bundle
@@ -37,6 +46,80 @@ these establishes full L8 or cosmological production qualification. The earlier
 `snrt_m5_full_connection_2026-09-15.md` entry referenced below is absent from
 this checkout and must not be treated as evidence. Existing physical-asset
 admission blockers remain in force.
+
+[CHIMES dark mode-3 charge projection](chimes_dark_mode3_projection_2026-11-05.md):
+bounded H-/C- roundoff repair with strict charge/element closure, native and
+captured-input production-bridge evidence, plus a current-source CUDA-hybrid
+M5/live-dust/CHIMES candidate run. Syntax job 451493 reached step 4 on both
+continuous and resumed paths but failed the unchanged 626-dataset restart
+comparison: 519 datasets bitwise-identical, with seven out-of-tolerance values
+confined to five CHIMES species and two persistent SNRT He III fractions (the
+payload header, not M5 angular moments). Its 22/31 CVODE warning counts are
+not mapped to individual cells or retries. Raw HDF5 dumps were checksummed
+and removed. The candidate remains nonproduction; the chemistry/ionization
+restart divergence and warning attribution remain unresolved. Same-allocation
+A/B job 451539 captured the prior cell and the exact comparator outlier in turn
+on one A10; all 46 normalized input-manifest entries matched. Both strict
+comparisons passed with zero tolerance violations. The prior-cell capture had
+local CHIMES API differences within the integrated tolerance; the outlier-cell
+capture was bitwise identical at steps 2 and 3. Per Astra's decision rule,
+pass/pass does not implicate the capture target as the cause of job 451493's
+failure, which remains unreproduced and unexplained. Raw HDF5 outputs were
+checksummed then removed. Details and hashes are recorded in the bundle report.
+Context replay job 451130 and integrated A40 replay job 451146 did not start;
+Slurm rejected both with `QOSMaxGRESPerUser`.
+The 2026-11-06 source-level fiber/retry review found no concrete thread-local
+state leak: cooling is consumed inline after continuation resume, adapter
+state is restored per fiber, the CHIMES rate cache is invalidated at switches,
+and whole-cell CPU retry reinitializes from original inputs. Job 451493 remains
+unexplained; no speculative patch or extra runtime matrix is justified. The
+hybrid candidate remains nonproduction and CPU remains the configured default.
+
+[Periodic sink antipode tie convention](sink_periodic_antipode_tie_bundle_2026-11-05.md):
+the one-ULP negative-image rule is implemented and passed GNU/Intel native
+fixtures plus CPU MPI2/OMP4 integration. The fixed-order sink-stat reduction
+passes a native permutation test and CPU/CUDA source-object compilation.
+Matched CPU replays 1271793 and 1271805 both passed the unchanged strict
+626-dataset continuous/restart comparison with zero tolerance violations
+(623 datasets bitwise-identical; three roundoff-level sink differences).
+Together with the matched control failure, this supports sink-stat
+accumulation as the cause of the tested CPU restart mismatch. The earlier
+1271786 attempt stopped at provenance parsing before evolution. CUDA and
+production admission remain unqualified; no production promotion is claimed.
+
+[Event-weighted AGN SED assessment](agn_physical_sed_bundle_plan_2026-10-31.md):
+Astra's plan review permits bounded offline work but keeps runtime admission
+closed until an AGN-on source-state domain and out-of-group energy treatment
+are justified. On 2026-11-06, the operator explicitly chose to keep production
+AGN SED work blocked until a target AGN-on run is designated. The P4 Run0
+snapshot remains diagnostic only. The CHIMES restart-context 2×2 replay and
+integrated A40 replay were rejected at Slurm admission as jobs 451130 and
+451146 (`FAILED`, `ExitCode=2:0`, `QOSMaxGRESPerUser`, 4 s and 29 s elapsed);
+neither produced scientific evidence. Their 2026-11-06 terminal accounting
+supersedes the earlier pending estimate; they were not resubmitted after the
+same-allocation A/B and source review provided no new testable hypothesis. The
+later integrated restart run is recorded separately under the
+CHIMES dark mode-3 evidence. Current source inspection confirms that `mkrun.py`
+rejects the non-admissible 25-group profile, while RAMSES permits only the
+explicitly opted-in, collectively validated diagnostic fixture; diagnostic
+permission does not change the production runtime-admission flag. CPU-only
+grammar job 1271987 passed the existing native spectral-contract smoke for the
+candidate: runtime admission stayed false, diagnostic permission stayed closed
+without the full fixture gate, and the incompatible legacy grey H/He path was
+rejected. It did not run RAMSES or promote the profile; details/hashes are in
+the linked plan and `.snrt-admission-gate-20261106/`.
+The later CPU-only MPI2 source-receipt integration, job 1272009, passed the
+rank-local source-class/aggregate injection check and combined stellar plus
+thermal-AGN attribution for one bounded M5 transaction. It produced no raw
+dumps and leaves production AGN SED admission blocked; see the
+[`M5 source attribution review`](m5_stellar_agn_source_attribution_2026-10-31.md).
+Astra's 2026-11-06 next-bundle triage answered Q-GOAL: the receipt work advances
+the effective-model objective, but current evidence identifies no further
+source-independent code gap to bundle; Q-LEAN: do not add another runtime
+matrix or instrumentation. Keep the strict CHIMES restart limitation and
+AGN/Fe physical blockers unchanged. This is a sequencing disposition, not
+project completion; resume the AGN SED bundle only after a target AGN-on run is
+designated and its source domain is justified.
 
 Historical current-source A40 integration smoke (2026-10-21,
 Slurm job430823): a fresh binary built from source HEAD
@@ -314,11 +397,23 @@ dust-field and CR-field interactions explicitly deferred to long-term work.
   parsed-zero precision interpretation, not the historical audit record.
 - [production/publication readiness plan](production_publication_readiness_plan.md)
   remains the governing high-level RT/stellar/AGN feedback/dust roadmap.
-- [audit cadence amendment](audit_cadence_amendment_2026-09-05.md) governs one
-  plan audit plus one end audit per bundle, with fallback only when needed.
-  Every future plan audit asks **Q-GOAL** (final-objective alignment) first,
-  then **Q-LEAN** (excessive instrumentation/gates); no extra audit or gate.
-- [Fable operational audit](fable_operational_instrumentation_gate_efficiency_audit_2026-09-05.md)
+- [audit cadence amendment](audit_cadence_amendment_2026-09-05.md) governs
+  selective Astra review: request a plan audit for a new physical model,
+  substantive conservation/coupling change, unresolved scientific question,
+  or explicit operator request. The driver performs end evaluation; there is
+  no routine end audit or automatic fallback. Every requested plan audit asks
+  **Q-GOAL** first, then **Q-LEAN**; this adds no audit or gate.
+- [Fe edge quadrature comparison](fe_edge_quadrature_comparison_2026-11-06.json)
+  verifies the current 128-node opacity averages against an edge-split
+  2048-node reference for the checked group N/E means; maximum relative
+  difference is 1.116%. It does not validate photoelectron heating or admit
+  high-energy Fe at runtime.
+- [Astra review of the Fe hard-photon response plan](astra_fe_hard_photon_response_plan_audit_2026-11-06.md)
+  defers the proposed sub-edge extension: AGN25 groups 8–9 cover 25.827462% of
+  `L_grid`, while occupied groups 10–25 cover 33.930488%. Keep hard-photon Fe
+  fail-closed until an effective charged-grain electron/energy-partition model
+  covers the intended source domain.
+- Historical [Fable operational audit](fable_operational_instrumentation_gate_efficiency_audit_2026-09-05.md)
   classified the workspace `OVERINSTRUMENTED`; F-P2.7 is the approved
   consolidation response.
 - SNIa HESMA N100 and Maoz DTD retain their prior physical approval

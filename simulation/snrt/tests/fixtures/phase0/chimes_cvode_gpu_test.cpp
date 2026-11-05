@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <dlfcn.h>
 #include <openssl/evp.h>
+#include <limits>
+#include <vector>
 #include <nvector/nvector_serial.h>
 #include <sunlinsol/sunlinsol_dense.h>
 #include "snrt_chimes_cvode_cuda.h"
@@ -31,6 +33,8 @@ int snrt_chimes_initialize(const char*,int,const char*,int);
 int snrt_chimes_neutral(const double*,double*);
 int snrt_chimes_budget(const double*,double*,double*);
 int snrt_chimes_reconcile_charged(const double*,const double*,double,double*);
+int snrt_chimes_reconcile_dark_mode3(const double*,const double*,double,int,double,int,double*);
+int snrt_chimes_radiation_is_exactly_zero(int,const double*,const double*);
 int snrt_chimes_cell_cold_dark(const double*,const double*,const double*,double*,double*);
 int snrt_chimes_fs_ready(void){return 0;}
 int snrt_chimes_fs_fractions(double,double,double*){std::abort();}
@@ -102,6 +106,86 @@ static void reconcile_roundoff_test(){
     std::copy(old,old+ns,bad);bad[sp_H2]=0.;bad[sp_elec]=-DBL_MIN;
     require(snrt_chimes_reconcile_charged(target,bad,0.,next)!=0,"negative electron rejected");
     puts("CHIMES_ROUNDOFF_RECONCILE_CONSERVATION_PASS");
+}
+static void dark_mode3_projection_test(){
+    constexpr double abs_tol=1e-17;
+    double target[11]={},base[ns],state[ns],next[ns],measured[11],net_charge;
+    target[0]=1.;target[2]=4.47736893520026e-4;
+    require(!snrt_chimes_neutral(target,base),"dark projection neutral fixture");
+    auto prepare=[&](double hm,double cm){
+        std::copy(base,base+ns,state);
+        state[sp_Hm]=hm;state[sp_Cm]=cm;state[sp_elec]=0.;
+    };
+    auto accepted=[&](double hm,double cm,const char *label){
+        prepare(hm,cm);std::fill(next,next+ns,-7.);
+        require(snrt_chimes_reconcile_charged(target,state,0.,next)!=0,
+                "strict public reconcile still rejects unprojected dark charge");
+        require(!snrt_chimes_reconcile_dark_mode3(target,state,0.,1,abs_tol,1,next),label);
+        require(next[sp_Hm]==0. && next[sp_Cm]==0. && next[sp_elec]==0.,
+                "mode-3 tails transfer to neutral parents and close charge");
+        require(!snrt_chimes_budget(next,measured,&net_charge),"projected mode-3 budget");
+        require(std::abs(net_charge)<=64.*DBL_EPSILON &&
+                std::abs(measured[0]-target[0])<=1e-10 &&
+                std::abs(measured[2]-target[2])<=1e-10,
+                "projected mode-3 elemental and charge closure");
+    };
+    accepted(1.0101183007e-41,0.,"captured H- tail accepted");
+    accepted(0.,5.1976948942e-37,"captured C- tail accepted");
+    accepted(9.3549580114e-37,1.3104171344e-41,"captured mixed H-/C- tails accepted");
+
+    const double hcap=std::min(.01*abs_tol,512.*DBL_EPSILON*target[0]);
+    const double ccap=std::min(.01*abs_tol*target[2],512.*DBL_EPSILON*target[2]);
+    accepted(hcap,0.,"H- cap boundary accepted");
+    accepted(0.,ccap,"C- cap boundary accepted");
+
+    auto unchanged_rejection=[&](const double *elts,const double *input,double solid_q,
+                                 int dark,double tolerance,int scale,const char *label){
+        std::fill(next,next+ns,-7.);
+        require(snrt_chimes_reconcile_dark_mode3(elts,input,solid_q,dark,tolerance,scale,next)!=0,label);
+        require(std::all_of(next,next+ns,[](double x){return x==-7.;}),
+                "ineligible projection leaves caller output untouched");
+    };
+    prepare(hcap,ccap);
+    unchanged_rejection(target,state,0.,0,abs_tol,1,"nonzero original radiation disables projection");
+    unchanged_rejection(target,state,1e-30,1,abs_tol,1,"nonzero solid charge disables projection");
+    unchanged_rejection(target,state,0.,1,0.,1,"invalid accepted tolerance disables projection");
+    prepare(hcap*1.01,0.);
+    unchanged_rejection(target,state,0.,1,abs_tol,1,"oversized anion tail rejected");
+    prepare(hcap,ccap);
+    unchanged_rejection(target,state,0.,1,abs_tol,1,"aggregate electron tolerance cap enforced");
+
+    prepare(1e-37,0.);state[sp_elec]=1e-37;
+    unchanged_rejection(target,state,0.,1,abs_tol,1,"nonzero solver electron rejected");
+    prepare(1e-37,0.);state[sp_HII]=1e-37;
+    unchanged_rejection(target,state,0.,1,abs_tol,1,"zero derived electron requirement rejected");
+    prepare(1e-37,0.);state[sp_HII]=2e-37;
+    unchanged_rejection(target,state,0.,1,abs_tol,1,"positive derived electron requirement rejected");
+    prepare(1e-37,0.);state[sp_HI]=0.;
+    unchanged_rejection(target,state,0.,1,abs_tol,1,"missing neutral parent rejected");
+    prepare(1e-37,0.);state[sp_Om]=1e-40;
+    unchanged_rejection(target,state,0.,1,abs_tol,1,"unsupported O- tail rejected");
+
+    // A strict reconciliation failure after projection must not publish a
+    // partial candidate when a locked molecule exceeds the element ledger.
+    double inconsistent[11];std::copy(target,target+11,inconsistent);
+    inconsistent[4]=0.;prepare(1e-37,0.);state[sp_CO]=1e-5;state[sp_CI]-=1e-5;
+    unchanged_rejection(inconsistent,state,0.,1,abs_tol,1,"strict element-closure failure rolls projection back");
+
+    std::vector<double> photons(CHIMES_MAX_UV_SPECTRA,0.),energy(CHIMES_MAX_UV_SPECTRA,0.);
+    require(snrt_chimes_radiation_is_exactly_zero(1,photons.data(),energy.data()),
+            "all-zero original radiation accepted");
+    photons[0]=std::nextafter(0.,1.);
+    require(!snrt_chimes_radiation_is_exactly_zero(1,photons.data(),energy.data()),
+            "tiny nonzero photon number disables dark gate");
+    photons[0]=0.;energy[0]=std::nextafter(0.,1.);
+    require(!snrt_chimes_radiation_is_exactly_zero(1,photons.data(),energy.data()),
+            "tiny nonzero radiation energy disables dark gate");
+    energy[0]=0.;energy[0]=std::numeric_limits<double>::quiet_NaN();
+    require(!snrt_chimes_radiation_is_exactly_zero(1,photons.data(),energy.data()),
+            "nonfinite radiation disables dark gate");
+    require(!snrt_chimes_radiation_is_exactly_zero(0,photons.data(),energy.data()),
+            "invalid radiation extent disables dark gate");
+    puts("CHIMES_DARK_MODE3_BOUNDED_PROJECTION_PASS");
 }
 static Cell input[nc];
 static int fixture_cell_index[nc];
@@ -671,7 +755,7 @@ int main(int argc,char **argv) {
 #endif
     double start=omp_get_wtime();
     int init_status=snrt_chimes_initialize(argv[1],0,nullptr,0);
-    if(!init_status)reconcile_roundoff_test();
+    if(!init_status){reconcile_roundoff_test();dark_mode3_projection_test();}
     if(argc==3 && (!std::strcmp(argv[2],"cpu-bench") || !std::strcmp(argv[2],"cpu-state"))) {
         require(!init_status,"CPU build initialization");cpu_build_test(!std::strcmp(argv[2],"cpu-bench"));return 0;
     }

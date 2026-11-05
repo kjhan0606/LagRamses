@@ -21,6 +21,9 @@ readonly ASSETS=/gpfs/kjhan/LRD_JWST
 readonly SOURCE_DIR=$ASSETS/.parsec-sources.9ZIUlJ
 readonly SUKHBOLD_ROOT=$ASSETS/external/g2_candidates
 readonly PYTHON=/home/kjhan/miniconda3/bin/python3
+readonly GROUP_PROFILE=${M5_GROUP_PROFILE:-snrt_agn9_v1}
+readonly GROUP_EDGES=${M5_GROUP_EDGES:-$ROOT/simulation/snrt/config/p0_photon_group_edges_ev.txt}
+readonly TRANSPORT_LEDGER=${M5_TRANSPORT_LEDGER:-$ROOT/simulation/snrt/data/p4_pilot_agn_photon_ledger.json}
 readonly WORK=$ROOT/.m5-kroupa-source-package-${SLURM_JOB_ID:?}
 readonly EXISTING=$ASSETS/.mixed-lowmass.Rbb2fZ/input-v5
 
@@ -28,6 +31,8 @@ test -d "$SOURCE_DIR"
 test -d "$SUKHBOLD_ROOT/sukhbold2016_ccsn"
 test -x "$PYTHON"
 test -d "$EXISTING"
+test -s "$GROUP_EDGES"
+test -s "$TRANSPORT_LEDGER"
 test ! -e "$WORK"
 mkdir -- "$WORK"
 exec > >(tee -a "$WORK/build.log") 2>&1
@@ -35,7 +40,8 @@ exec > >(tee -a "$WORK/build.log") 2>&1
 export PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 
-printf 'KROUPA_MIXED_SOURCE_BUILD job=%s python=%s\n' "$SLURM_JOB_ID" "$PYTHON"
+printf 'KROUPA_MIXED_SOURCE_BUILD job=%s python=%s group_profile=%s\n' \
+  "$SLURM_JOB_ID" "$PYTHON" "$GROUP_PROFILE"
 "$PYTHON" -c 'import sys, numpy; print("PYTHON",sys.version); print("NUMPY",numpy.__version__)'
 
 "$PYTHON" "$ROOT/simulation/snrt/tools/build_parsec_pair_feedback.py" \
@@ -50,7 +56,10 @@ printf 'KROUPA_MIXED_SOURCE_BUILD job=%s python=%s\n' "$SLURM_JOB_ID" "$PYTHON"
   --source-dir "$SOURCE_DIR" \
   --feedback "$WORK/upper-feedback" \
   --output "$WORK/upper-sed" \
-  --escape-fraction 1.0
+  --escape-fraction 1.0 \
+  --group-profile "$GROUP_PROFILE" \
+  --group-edges "$GROUP_EDGES" \
+  --transport-ledger "$TRANSPORT_LEDGER"
 
 "$PYTHON" "$ROOT/simulation/snrt/tools/build_parsec_mixed_lowmass.py" \
   --source-dir "$SOURCE_DIR" \
@@ -61,14 +70,18 @@ printf 'KROUPA_MIXED_SOURCE_BUILD job=%s python=%s\n' "$SLURM_JOB_ID" "$PYTHON"
   --sn-wind-km-s 1000 \
   --sukhbold-root "$SUKHBOLD_ROOT"
 
-"$PYTHON" -B - "$WORK" "$EXISTING" "$ROOT/simulation/snrt/config/fp2_snia_effective_population_runtime_v1.nml" <<'PY'
+"$PYTHON" -B - "$WORK" "$EXISTING" \
+  "$ROOT/simulation/snrt/config/fp2_snia_effective_population_runtime_v1.nml" \
+  "$GROUP_PROFILE" "$GROUP_EDGES" "$TRANSPORT_LEDGER" <<'PY'
 import hashlib
 import json
 from pathlib import Path
 import re
 import sys
 
-work, previous, snia_contract = map(Path, sys.argv[1:])
+work, previous, snia_contract = map(Path, sys.argv[1:4])
+group_profile, group_edges, transport_ledger = sys.argv[4:7]
+group_edges, transport_ledger = Path(group_edges), Path(transport_ledger)
 package = work / "input-v5"
 manifest_path = package / "manifest.json"
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -76,6 +89,13 @@ if manifest.get("model") != "parsec_mixed_lowmass_truncated_v1":
     raise SystemExit("unexpected generated stellar source model")
 if manifest.get("imf_id") != 1 or manifest.get("imf_denominator") != [0.08, 600]:
     raise SystemExit("generated package is not normalized for the selected Kroupa IMF")
+edge_sha = hashlib.sha256(group_edges.read_bytes()).hexdigest()
+transport = json.loads(transport_ledger.read_text(encoding="utf-8"))
+if (manifest.get("group_set_id") != group_profile or
+        manifest.get("group_edges_sha256") != edge_sha or
+        transport.get("group_set_id") != group_profile or
+        transport.get("group_edges_sha256") != edge_sha):
+    raise SystemExit("generated stellar package is not bound to the selected group profile")
 
 def sha(path):
     h = hashlib.sha256()
@@ -90,6 +110,13 @@ for name, expected in manifest["output_sha256"].items():
 
 source = (package / "source.nml").read_text(encoding="ascii")
 history = (package / "history.nml").read_text(encoding="ascii")
+if not re.search(rf"\bgroup_set_id='{re.escape(group_profile)}'", source):
+    raise SystemExit("stellar namelist group profile identity mismatch")
+if not re.search(rf"\bedges_sha256='{edge_sha}'", source):
+    raise SystemExit("stellar namelist group-edge hash mismatch")
+transport_sha = hashlib.sha256(transport_ledger.read_bytes()).hexdigest()
+if not re.search(rf"\btransport_sha256='{transport_sha}'", source):
+    raise SystemExit("stellar namelist transport identity mismatch")
 if not re.search(r"\bimf_id=1, population_id=0, binary_fraction=0\b", source):
     raise SystemExit("base source metadata does not bind Kroupa single-star evolution")
 if not re.search(r"\binput_imf_id=1\b", history):
@@ -131,7 +158,9 @@ binding = {
 for name in ("yields.dat", "nodes.dat"):
     old_hash, new_hash = sha(previous / name), sha(package / name)
     print(f"SOURCE_REWEIGHT_CHECK {name} previous={old_hash} kroupa={new_hash} identical={old_hash == new_hash}")
-print("KROUPA_EFFECTIVE_SSP_PACKAGE_PASS", json.dumps(binding, sort_keys=True))
+print("KROUPA_EFFECTIVE_SSP_PACKAGE_PASS", json.dumps(
+    {**binding, "group_profile": group_profile, "group_edges_sha256": edge_sha,
+     "transport_ledger_sha256": transport_sha}, sort_keys=True))
 PY
 
 sha256sum "$WORK/input-v5/manifest.json" "$WORK/input-v5/yields.dat" \

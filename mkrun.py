@@ -22,6 +22,8 @@ Run: python3 mkrun.py                 # terminal wizard
      python3 mkrun.py --gui            # legacy alias for --mode gui
 """
 import argparse
+import hashlib
+import json
 import math
 import os
 import re
@@ -33,6 +35,37 @@ from collections import OrderedDict
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, 'patch', 'cuRamses', 'aux'))
 import ramses_nml_generator as rng  # noqa: E402
+
+
+def snrt_group_profile_details(profile_id):
+    manifest_path = Path(HERE) / 'simulation/snrt/config/snrt_group_profiles_v1.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    if manifest.get('schema') != 'snrt_group_profiles_v1':
+        raise ValueError('Unsupported SNRT group-profile manifest.')
+    try:
+        profile = manifest['profiles'][profile_id]
+    except KeyError as exc:
+        raise ValueError(f'Unknown SNRT group profile: {profile_id}') from exc
+    edge_path = (manifest_path.parent / profile['edge_file']).resolve(strict=True)
+    if edge_path.parent != manifest_path.parent:
+        raise ValueError('SNRT group edges must be stored beside their profile manifest.')
+    raw = edge_path.read_bytes()
+    edge_sha256 = hashlib.sha256(raw).hexdigest()
+    if edge_sha256 != profile.get('edges_sha256'):
+        raise ValueError('SNRT group-edge checksum does not match its profile manifest.')
+    edges = [float(line.split('#', 1)[0].strip()) for line in raw.decode().splitlines()
+             if line.split('#', 1)[0].strip()]
+    group_count = profile.get('group_count')
+    if (not isinstance(group_count, int) or group_count < 1 or len(edges) != group_count+1
+            or any(b <= a for a,b in zip(edges,edges[1:]))):
+        raise ValueError('Invalid SNRT group profile dimensions or edges.')
+    runtime_admissible = profile.get('runtime_admissible')
+    if not isinstance(runtime_admissible, bool):
+        raise ValueError('SNRT group profile must declare runtime_admissible explicitly.')
+    blockers = profile.get('blocking_inputs', [])
+    if not isinstance(blockers, list) or not all(isinstance(x, str) for x in blockers):
+        raise ValueError('SNRT group profile blocking_inputs must be a list of strings.')
+    return group_count, edges, edge_sha256, runtime_admissible, blockers
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +459,34 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         raise ValueError('Comparison requires a NEW output directory; existing runs are preserved.')
     root, dest = Path(HERE), Path(outdir)
     config = root / 'simulation/snrt/config'
+    group_profile_id = os.environ.get('SNRT_GROUP_PROFILE', 'snrt_agn9_v1')
+    (group_count, group_edges, group_edges_sha256,
+     group_runtime_admissible, group_blockers) = snrt_group_profile_details(group_profile_id)
+    if not group_runtime_admissible:
+        blocker_text = '; '.join(group_blockers) if group_blockers else 'runtime data are incomplete'
+        raise ValueError(
+            f'SNRT group profile {group_profile_id} is a science candidate and cannot launch a run: '
+            f'{blocker_text}.')
+    supplied_group_contract = os.environ.get('SNRT_GROUP_CONTRACT')
+    if group_profile_id == 'snrt_agn9_v1':
+        group_contract = (Path(supplied_group_contract).resolve() if supplied_group_contract
+                          else config / 'snrt_group_contract_reference_control_v1.nml')
+    else:
+        if not supplied_group_contract:
+            raise ValueError('A nonlegacy SNRT_GROUP_PROFILE requires an explicit matching SNRT_GROUP_CONTRACT.')
+        group_contract = Path(supplied_group_contract).resolve()
+    if not group_contract.is_file():
+        raise ValueError(f'SNRT group contract does not exist: {group_contract}')
+    group_contract_text = group_contract.read_text(encoding='utf-8')
+    group_id_match = re.search(r"\bgroup_set_id\s*=\s*'([^']+)'", group_contract_text)
+    group_sha_match = re.search(r"\bedges_sha256\s*=\s*'([0-9a-f]{64})'", group_contract_text)
+    if group_id_match is None:
+        if group_profile_id != 'snrt_agn9_v1':
+            raise ValueError('Only the registered nine-group legacy contract may omit group_set_id.')
+    elif group_id_match.group(1) != group_profile_id:
+        raise ValueError('SNRT group contract profile ID differs from SNRT_GROUP_PROFILE.')
+    if group_sha_match is None or group_sha_match.group(1) != group_edges_sha256:
+        raise ValueError('SNRT group contract edge checksum differs from the selected profile.')
     source = root / '.agb-physical.4LAOTJ/snia-input'
     binary = root / '.bpass-native.v0ZwR6/ramses_bpass_native3d'
     if parallel:
@@ -761,7 +822,8 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
         ('SNRT_HYBRID_BATCH_CELLS', '256'),
         ('SNRT_AGN_MODEL', 'partition_reference_v1'), ('SNRT_REDUCED_C', '.01'),
         ('SNRT_RT_LEVEL', '3'), ('SNRT_ALLOW_REFERENCE_CONTROL', '1'), ('SNRT_P1_DIAGNOSTIC', '0'),
-        ('SNRT_GROUP_CONTRACT', config / 'snrt_group_contract_reference_control_v1.nml'),
+        ('SNRT_GROUP_PROFILE', group_profile_id),
+        ('SNRT_GROUP_CONTRACT', group_contract),
         ('SNRT_SECONDARY_TABLE_CONTRACT', config / 'snrt_secondary_table_contract_v1.nml'),
         ('SNRT_DUST_CONTRACT', dust_contract),
         ('SNRT_STELLAR_SED', config / 'snrt_stellar_sed_bpass_independent_v2.nml'),
@@ -782,9 +844,25 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
             if not os.environ.get(key):
                 raise ValueError(f'{key} must select the admitted native CHIMES tables.')
             env[key]=str(Path(os.environ[key]).resolve())
-        if not Path(env['SNRT_CHIMES_MAIN_DATA']).is_file() or not all(
-                (Path(env['SNRT_CHIMES_GROUP_DIR'])/f'group_{i:02d}.hdf5').is_file() for i in range(1,10)):
-            raise ValueError('CHIMES main data or one of the nine group tables is missing.')
+        group_dir=Path(env['SNRT_CHIMES_GROUP_DIR'])
+        table_manifest_path=group_dir/'manifest.json'
+        if not Path(env['SNRT_CHIMES_MAIN_DATA']).is_file() or not table_manifest_path.is_file():
+            raise ValueError('CHIMES main data or its group-table manifest is missing.')
+        table_manifest=json.loads(table_manifest_path.read_text(encoding='utf-8'))
+        if (table_manifest.get('group_set_id')!=group_profile_id or
+                table_manifest.get('group_edges_sha256')!=group_edges_sha256 or
+                table_manifest.get('edges_ev')!=group_edges):
+            raise ValueError('CHIMES group-table manifest differs from the selected SNRT group profile.')
+        table_groups=table_manifest.get('groups')
+        if not isinstance(table_groups,list) or len(table_groups)!=group_count:
+            raise ValueError(f'CHIMES group-table manifest must contain {group_count} groups.')
+        for index,entry in enumerate(table_groups,1):
+            relative=Path(entry.get('path',''))
+            table=(group_dir/relative).resolve()
+            if (entry.get('index')!=index or table.parent!=group_dir.resolve() or
+                    table.name!=f'group_{index:02d}.hdf5' or not table.is_file() or
+                    hashlib.sha256(table.read_bytes()).hexdigest()!=entry.get('sha256')):
+                raise ValueError(f'CHIMES table {index} is missing, reordered or changed.')
         # Deliberate profile opt-in, never inherit the ambient RT selector.
         cold_mode='chimes_cold_d03_maxent128_fs2010_v1'
         transition_mode='chimes_transition_d03_maxent128_fs2010_v1'

@@ -280,7 +280,7 @@ contains
     real(mn_dp), intent(out) :: intensity(:)
     integer, intent(out) :: ierr
     real(mn_dp), optional, intent(out) :: residual
-    integer, optional, intent(out) :: diagnostic(2) ! iterations, failure reason (1 input/2 solve/3 search/4 limit)
+    integer, optional, intent(out) :: diagnostic(2) ! iterations; 1 input/2 solve/3 search/4 limit, 5-11 input subtype
     real(mn_dp), optional, intent(inout) :: dual_hint(:) ! numerical initial guess only; updated on success
     ! Optional bounded-memory replay coefficients: alpha(1:nm-1), logit max,
     ! normalization. Replay uses the SAME input moments as its target. This
@@ -291,7 +291,7 @@ contains
     real(mn_dp) :: gradient(b%nm-1),hessian(b%nm-1,b%nm-1),step(b%nm-1)
     real(mn_dp) :: centered(b%nm-1,b%nq)
     real(mn_dp) :: eta(b%nq),trial_eta(b%nq),eta_step(b%nq)
-    real(mn_dp) :: probability(b%nq),nextprob(b%nq),objective,nextobjective,scale,err
+    real(mn_dp) :: probability(b%nq),nextprob(b%nq),objective,nextobjective,line_scale,err
     real(mn_dp) :: radius,decrement,predicted,ratio,merit,nextmerit,merit_slope,change,top,partition
     integer :: it,q,ls,status,iteration_limit
     ierr=mn_bad_input;intensity=0
@@ -302,14 +302,40 @@ contains
     if(iteration_limit<1)return
     if(present(diagnostic))diagnostic=[0,1]
     if(present(residual))residual=huge(1d0)
-    if(b%nm==0.or.size(u)/=b%nm.or.size(intensity)/=b%nq)return
-    if(present(stream_cache))then
-       if(size(stream_cache)/=b%nm+1)return
+    if(b%nm==0.or.size(u)/=b%nm.or.size(intensity)/=b%nq)then
+       if(present(diagnostic))diagnostic(2)=5
+       return
     endif
-    if(any(.not.ieee_is_finite(u)))return
-    if(u(1)<0)return
+    if(present(stream_cache))then
+       if(size(stream_cache)/=b%nm+1)then
+          if(present(diagnostic))diagnostic(2)=6
+          return
+       endif
+    endif
+    if(any(.not.ieee_is_finite(u)))then
+       if(present(diagnostic))diagnostic(2)=7
+       return
+    endif
+    if(u(1)<0)then
+       if(present(diagnostic))diagnostic(2)=8
+       return
+    endif
+    ! Match the CUDA closure: if the complete vector is below the smallest
+    ! normal FP64 value, it contains no resolvable relative angular state.
+    ! Return vacuum before normalizing, so CPU and GPU do not diverge on tiny
+    ! transport round-off tails.
+    if(maxval(abs(u))<tiny(1d0))then
+       ierr=mn_ok
+       if(present(diagnostic))diagnostic=0
+       if(present(residual))residual=0
+       if(present(stream_cache))stream_cache=0
+       return
+    endif
     if(u(1)==0)then
-       if(any(u/=0))return
+       if(any(u/=0))then
+          if(present(diagnostic))diagnostic(2)=9
+          return
+       endif
        ierr=mn_ok
        if(present(diagnostic))diagnostic=0
        if(present(residual))residual=0
@@ -317,8 +343,19 @@ contains
        return
     endif
     target=u(2:)/u(1)
-    if(any(.not.ieee_is_finite(target)))return
-    if(any(abs(target)>maxval(abs(b%harmonic(2:,:)),dim=2)+1d-12))return
+    if(any(.not.ieee_is_finite(target)))then
+       if(present(diagnostic))diagnostic(2)=10
+       q=maxloc(abs(target),dim=1)
+!$omp critical(snrt_mn_closure_diag)
+       write(*,'(A,I0,A,ES24.16E3,A,ES24.16E3,A,ES24.16E3)') &
+            'M_N_TARGET_NONFINITE component=',q,' M0=',u(1),' moment=',u(q+1),' ratio=',target(q)
+!$omp end critical(snrt_mn_closure_diag)
+       return
+    endif
+    if(any(abs(target)>maxval(abs(b%harmonic(2:,:)),dim=2)+1d-12))then
+       if(present(diagnostic))diagnostic(2)=11
+       return
+    endif
     alpha=0;ierr=mn_no_closure;radius=1d0
     if(present(dual_hint))then
        if(size(dual_hint)==b%nm-1)then
@@ -383,41 +420,41 @@ contains
           if(present(diagnostic))diagnostic(2)=2
           return
        endif
-       scale=min(1d0,radius/sqrt(decrement))
+       line_scale=min(1d0,radius/sqrt(decrement))
        merit=dot_product(gradient,gradient)
        merit_slope=dot_product(gradient,matmul(hessian,step))
        do q=1,b%nq
           eta_step(q)=-dot_product(step,b%harmonic(2:,q)-target)
        enddo
        do ls=1,48
-          trial=alpha-scale*step
-          trial_eta=eta+scale*eta_step
+          trial=alpha-line_scale*step
+          trial_eta=eta+line_scale*eta_step
           call dual(trial_eta,nextprob,nextmean,nextobjective)
           if(maxval(abs(nextmean-target))<=2d-12)exit
-          change=local_change(probability,eta,scale*eta_step,objective,nextobjective)
-          if(change<0.and.change<=-1d-4*scale*decrement)exit
+          change=local_change(probability,eta,line_scale*eta_step,objective,nextobjective)
+          if(change<0.and.change<=-1d-4*line_scale*decrement)exit
           if(err<1d-7)then
              ! Supplement stable objective descent with residual descent in
              ! its roundoff-limited regime. Do not require gradient norm to
              ! decrease on EVERY Newton step of a nonquadratic objective.
              nextmerit=sum((nextmean-target)**2)
              if(nextmerit<merit.and.nextmerit<=merit- &
-                  1d-4*scale*max(0d0,merit_slope))exit
+                  1d-4*line_scale*max(0d0,merit_slope))exit
           endif
-          scale=scale*.5d0
+          line_scale=line_scale*.5d0
        enddo
        if(ls>48)then
           if(present(diagnostic))diagnostic(2)=3
           return
        endif
-       predicted=scale*decrement-.5d0*scale**2*dot_product(step,matmul(hessian,step))
+       predicted=line_scale*decrement-.5d0*line_scale**2*dot_product(step,matmul(hessian,step))
        ! Objective differences are cancellation dominated near the solution;
        ! retain the radius there and rely on the residual acceptance above.
        if(err>=1d-7.and.predicted>0)then
-          change=local_change(probability,eta,scale*eta_step,objective,nextobjective)
+          change=local_change(probability,eta,line_scale*eta_step,objective,nextobjective)
           ratio=-change/predicted
           if(ratio<.25d0)radius=max(1d-8,.25d0*radius)
-          if(ratio>.75d0.and.scale*sqrt(decrement)>.8d0*radius)radius=min(16d0,2d0*radius)
+          if(ratio>.75d0.and.line_scale*sqrt(decrement)>.8d0*radius)radius=min(16d0,2d0*radius)
        endif
        alpha=trial;eta=trial_eta
     enddo

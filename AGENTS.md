@@ -74,15 +74,21 @@ the directory name alone.
 
 ## Planning audits
 
-Current operator-role update (2026-09-16): Fable performs plan reviews and
-bundle-end audits; Claude Opus 5 performs code implementation/structure
-audits. The default Fable plan-audit timeout is 600 seconds (10 minutes). A
-timeout is recorded as no verdict, not as approval or rejection.
+Current operator-role update (2026-11-05; supersedes the 2026-09-16
+assignment): Astra, invoked as a Codex sub-agent, replaces Fable for every
+pending and future audit assignment, regardless of type: plan/design review,
+scientific or technical consultation, bundle-end/closeout audit, or fallback
+review. Use the internal Astra agent (model `gpt-6-astra`), not an external
+CLI. Claude Opus 5 continues to perform its separately assigned code
+implementation/structure audits. Give a plan review up to 600 seconds; a
+timeout is no verdict, not approval or rejection. Completed Fable audit
+records remain historical evidence; do not rewrite or relabel their verdicts.
+This role replacement does not add audit calls or reopen completed reviews.
 
-Operator-approved reduction (2026-09-10): Fable is not a routine per-bundle
-gate. Request a plan review for a new physical model, a substantive change
-to conservation or module coupling, or a scientific uncertainty the driver
-cannot resolve confidently. One review may cover multiple implementation
+Operator-approved reduction (2026-09-10, retained under the Astra role): Astra
+is not a routine per-bundle gate. Request a plan review for a new physical
+model, a substantive change to conservation or module coupling, or a scientific
+uncertainty the driver cannot resolve confidently. One review may cover multiple implementation
 bundles within the same design. Continuing approved work, extending data
 coverage within that design, bounded fixes, regression tests and documentation
 do not require another call. The driver performs end evaluations; optional

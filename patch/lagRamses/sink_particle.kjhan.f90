@@ -3064,9 +3064,12 @@ subroutine bondi_hoyle(ilevel)
 !$omp threadprivate(/openmp_b_h/)
   integer, dimension(:), allocatable:: nparticles, ptrhead
   integer:: mythread, nthreads,npart3,ithread
+  integer::agn_stencil_status
+  character(len=8)::agn_stencil_env
   common /omp1_threads/ mythread
 !$omp threadprivate(/omp1_threads/)
   real(dp),allocatable::density_thread(:,:,:)
+  logical::trace_agn_stencil
 
   real(dp)::r2,dx_loc,dx_min,scale
   real(dp)::dx,factG,pi
@@ -3094,6 +3097,10 @@ subroutine bondi_hoyle(ilevel)
   allocate(nparticles(0:nthreads-1), ptrhead(0:nthreads-1))
   allocate(density_thread(1:max(nsink,1),1:3+ndim,0:nthreads-1))
   density_thread=0d0
+  trace_agn_stencil=.false.
+  call get_environment_variable('SNRT_AGN_RESTART_STENCIL_TRACE',agn_stencil_env, &
+       status=agn_stencil_status)
+  trace_agn_stencil=agn_stencil_status==0.and.trim(agn_stencil_env)=='1'
 !!$omp parallel
 ! ind_grid => Pind_grid(:, mythread)
 ! ind_part => Pind_part(:, mythread)
@@ -3308,7 +3315,7 @@ subroutine bondi_hoyle(ilevel)
               endif
               if(ip==nvector)then
                  call kjhan_average_density(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel, &
-                      & density_thread(:,:,mythread))
+                      & density_thread(:,:,mythread),trace_agn_stencil)
                  if((.not.random_jet)) call kjhan_jet_AGN(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
                  ip=0
                  ig=0
@@ -3322,7 +3329,7 @@ subroutine bondi_hoyle(ilevel)
      end do
      ! End loop over grids
      if(ip>0)call kjhan_average_density(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel, &
-          & density_thread(:,:,mythread))
+          & density_thread(:,:,mythread),trace_agn_stencil)
      if(ip>0 .and.(.not.random_jet)) call kjhan_jet_AGN(ind_grid,ind_part,ind_grid_part,ig,ip,ilevel)
 #ifndef OMP_TEST
 !$omp end parallel
@@ -3635,7 +3642,7 @@ end subroutine kjhan_bondi_velocity
 !################################################################
 !################################################################
 subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
-     & density_thread)
+     & density_thread,trace_stencil)
   use amr_commons
   use pm_commons
   use hydro_commons
@@ -3643,6 +3650,7 @@ subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
 #include "amr_index.h"
   implicit none
   integer, intent(in)::ng,np,ilevel
+  logical, intent(in)::trace_stencil
   integer,dimension(1:nvector), intent(in)::ind_grid
   integer,dimension(1:nvector), intent(in)::ind_grid_part,ind_part
   real(dp),dimension(1:max(nsink,1),1:3+ndim),intent(inout)::density_thread
@@ -3652,7 +3660,8 @@ subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
   ! position in the grid.
   !-----------------------------------------------------------------------
   logical::error
-  integer::i,j,ind,idim,nx_loc,isink
+  integer::i,j,ind,idim,nx_loc,isink,donor_grid,donor_owner,donor_level,trace_cell_index
+  integer::donor_child,donor_grid_key(1:3)
   integer(i8b):: ksink
   real(dp)::dx,length,scale,weight,r2
   ! Grid-based arrays
@@ -3670,6 +3679,9 @@ subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
   real(dp),dimension(1:3)::skip_loc
   real(dp)::u,v,w,d,e,v2,c2
   real(dp)::bx1,bx2,by1,by2,bz1,bz2
+  real(dp)::trace_xyz(1:ndim),trace_rho,trace_e,trace_c2,trace_v2
+  real(dp)::trace_momentum(1:ndim)
+  real(dp)::trace_axis_weight(1:ndim)
 
   ! Mesh spacing in that level
   dx=0.5D0**ilevel
@@ -3953,6 +3965,71 @@ subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
         r2=r2+(xp(ind_part(j),idim)-xsink(ksink,idim))**2
      end do
      weight=exp(-r2/r2k(ksink))
+#if NDIM==3
+     if(trace_stencil.and.nstep_coarse==2.and.ilevel==3)then
+        do ind=1,twotondim
+           trace_rho=uold(indp(j,ind),1)
+           trace_momentum(1:ndim)=uold(indp(j,ind),2:ndim+1)/trace_rho
+           trace_e=uold(indp(j,ind),ndim+2)/trace_rho
+           trace_v2=sum(trace_momentum(1:ndim)**2)
+           trace_e=trace_e-0.5d0*trace_v2
+#ifdef SOLVERmhd
+           bx1=uold(indp(j,ind),6)
+           by1=uold(indp(j,ind),7)
+           bz1=uold(indp(j,ind),8)
+           bx2=uold(indp(j,ind),nvar+1)
+           by2=uold(indp(j,ind),nvar+2)
+           bz2=uold(indp(j,ind),nvar+3)
+           trace_e=trace_e-0.125d0*((bx1+bx2)**2+(by1+by2)**2+(bz1+bz2)**2)/trace_rho
+#endif
+           trace_c2=max(gamma*(gamma-1d0)*trace_e,smallc**2)
+           if(ok(j))then
+              donor_level=ilevel
+              donor_grid=igrid(j,ind)
+           else
+              donor_level=ilevel-1
+              donor_grid=nbors_father_grids(ind_grid_part(j),kg(j,ind))
+           endif
+           donor_owner=-1
+           donor_child=ICHILD_OF(indp(j,ind))
+           donor_grid_key=0
+           if(donor_grid>0)then
+              donor_owner=cpu_map(donor_grid)
+              do idim=1,ndim
+                 donor_grid_key(idim)=nint(xg(donor_grid,idim)/(0.5d0**donor_level))
+              enddo
+           endif
+           do idim=1,ndim
+              if(btest(ind-1,idim-1))then
+                 trace_cell_index=id(j,idim)
+                 trace_axis_weight(idim)=dd(j,idim)
+              else
+                 trace_cell_index=ig(j,idim)
+                 trace_axis_weight(idim)=dg(j,idim)
+              endif
+              if(ok(j))then
+                 trace_xyz(idim)=x0(ind_grid_part(j),idim) &
+                      +(dble(trace_cell_index)+0.5d0)*dx
+              else
+                 trace_xyz(idim)=x0(ind_grid_part(j),idim) &
+                      +(2d0*dble(trace_cell_index)+1d0)*dx
+              endif
+           enddo
+           write(*,'(A,5(1X,I0),A,5(1X,I0),A,5(1X,I0),A,3(1X,ES24.16),A,3(1X,ES24.16),A,14(1X,ES24.16))') &
+                'SNRT_AGN_RESTART_STENCIL',myid,nstep_coarse,ilevel,ksink,idp(ind_part(j)), &
+                ' donor(level,grid,cell_addr,owner,ghost)=',donor_level,donor_grid, &
+                indp(j,ind),donor_owner,merge(1,0,donor_owner/=myid), &
+                ' donor_key(level,ix,iy,iz,child)=',donor_level,donor_grid_key,donor_child, &
+                ' cell_xyz=',trace_xyz(1),trace_xyz(2),trace_xyz(3), &
+                ' particle_xyz=',xp(ind_part(j),1),xp(ind_part(j),2),xp(ind_part(j),3), &
+                ' rho/mom_xyz/Econs/eint/c2/CICxyz/CIC/Gaussian/rho_c/c2_c=', &
+                trace_rho,uold(indp(j,ind),2),uold(indp(j,ind),3),uold(indp(j,ind),4), &
+                uold(indp(j,ind),ndim+2),trace_e,trace_c2,trace_axis_weight(1), &
+                trace_axis_weight(2),trace_axis_weight(3),vol(j,ind),weight, &
+                trace_rho*vol(j,ind)*weight,trace_rho*trace_c2*vol(j,ind)*weight
+        enddo
+     endif
+#endif
      density_thread(ksink,1)=density_thread(ksink,1)+weight*dgas(j)
      density_thread(ksink,2)=density_thread(ksink,2)+weight
      density_thread(ksink,3)=density_thread(ksink,3)+weight*c2gas(j)
@@ -3968,6 +4045,320 @@ subroutine kjhan_average_density(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
 end subroutine kjhan_average_density
 !################################################################
 !################################################################
+
+subroutine snrt_agn_restart_hydro_fingerprint(stage)
+  use amr_commons
+  use hydro_commons
+#include "amr_index.h"
+  implicit none
+  character(len=*),intent(in)::stage
+  character(len=8)::trace_env
+  integer::env_status,ilevel,igrid_index,igrid,ind,idim,cell,owner,grid_key(1:3)
+  real(dp)::dx,cell_xyz(1:3),rho,velocity(1:3),eint,c2,state(1:7)
+  real(dp)::bx1,by1,bz1,bx2,by2,bz2
+
+  call get_environment_variable('SNRT_AGN_RESTART_STENCIL_TRACE',trace_env, &
+       status=env_status)
+  if(env_status/=0.or.trim(trace_env)/='1')return
+  if(nstep_coarse/=2)return
+  if(.not.allocated(active))return
+
+  do ilevel=2,min(3,nlevelmax)
+     if(active(ilevel)%ngrid<=0)cycle
+     dx=0.5d0**ilevel
+     do igrid_index=1,active(ilevel)%ngrid
+        igrid=active(ilevel)%igrid(igrid_index)
+        owner=cpu_map(igrid)
+        grid_key=0
+        cell_xyz=0d0
+        do idim=1,ndim
+           grid_key(idim)=nint(xg(igrid,idim)/dx)
+        enddo
+        do ind=1,twotondim
+           cell=ICELL_OF(igrid,ind)
+           rho=uold(cell,1)
+           velocity=0d0
+           velocity(1:ndim)=uold(cell,2:ndim+1)/rho
+           eint=uold(cell,ndim+2)/rho-0.5d0*sum(velocity**2)
+#ifdef SOLVERmhd
+           bx1=uold(cell,6)
+           by1=uold(cell,7)
+           bz1=uold(cell,8)
+           bx2=uold(cell,nvar+1)
+           by2=uold(cell,nvar+2)
+           bz2=uold(cell,nvar+3)
+           eint=eint-0.125d0*((bx1+bx2)**2+(by1+by2)**2+(bz1+bz2)**2)/rho
+#endif
+           c2=max(gamma*(gamma-1d0)*eint,smallc**2)
+           do idim=1,ndim
+              if(btest(ind-1,idim-1))then
+                 cell_xyz(idim)=xg(igrid,idim)+0.5d0*dx
+              else
+                 cell_xyz(idim)=xg(igrid,idim)-0.5d0*dx
+              endif
+           enddo
+           state(1)=rho
+           state(2:4)=velocity
+           state(5)=uold(cell,ndim+2)
+           state(6)=eint
+           state(7)=c2
+           write(*,'(A,A,6(A,I0),A,3(1X,I0),A,3(1X,ES25.16),A,7(1X,ES25.16))') &
+                'SNRT_AGN_RESTART_HYDRO stage=',trim(stage), &
+                ' rank=',myid,' step=',nstep_coarse,' level=',ilevel,' owner=',owner, &
+                ' grid=',igrid,' child=',ind,' grid_key(ix,iy,iz)=',grid_key, &
+                ' cell_xyz=',cell_xyz,' rho/vx/vy/vz/E/eint/c2=',state
+        enddo
+     enddo
+  enddo
+end subroutine snrt_agn_restart_hydro_fingerprint
+!################################################################
+!################################################################
+subroutine snrt_agn_restart_donor_snapshot(stage)
+  use amr_commons
+  use hydro_commons
+  use poisson_commons, only: f
+#include "amr_index.h"
+  implicit none
+  character(len=*),intent(in)::stage
+  character(len=8)::trace_env,donor_env
+  character(len=64)::target_env
+  character(len=1024)::key_file,key_line
+  character(len=160)::input_error
+  integer,parameter::max_donor_keys=4096
+  integer::env_status,key_status,target_status,unit,ios,nkeys,k,ilevel,igrid_index,igrid
+  integer::idim,ind,cell,owner,copy_kind,grid_key(1:3),extra,icpu,nremote,remote_index
+  integer::target_oct(1:3),target_count
+  integer::donor_keys(1:6,1:max_donor_keys)
+  logical::found(1:max_donor_keys),target_enabled
+  logical::bad_input
+  real(dp)::dx,rho,velocity(1:3),eint,c2,state(1:7),force(1:3)
+  real(dp)::bx1,by1,bz1,bx2,by2,bz2
+
+  donor_env=''
+  call get_environment_variable('SNRT_AGN_RESTART_DONOR_SNAPSHOT',donor_env, &
+       status=env_status)
+  if(env_status/=0.or.trim(donor_env)/='1')then
+     ! Preserve the earlier coupled diagnostic switch for existing run scripts.
+     trace_env=''
+     call get_environment_variable('SNRT_AGN_RESTART_STENCIL_TRACE',trace_env, &
+          status=env_status)
+     if(env_status/=0)return
+     if(trim(trace_env)/='1')return
+  endif
+  target_env=''
+  call get_environment_variable('SNRT_AGN_RESTART_DONOR_OCT',target_env, &
+       status=target_status)
+  target_enabled=target_status==0.and.len_trim(target_env)>0
+  target_oct=0
+  if(target_enabled)then
+     read(target_env,*,iostat=ios)target_oct
+     if(ios/=0)then
+        if(myid==1)write(*,'(A,A)')'SNRT_AGN_RESTART_DONOR_OCT invalid: ',trim(target_env)
+        call clean_stop
+        return
+     endif
+     read(target_env,*,iostat=ios)target_oct,extra
+     if(ios>=0.or.any(target_oct<0))then
+        if(myid==1)write(*,'(A,A)')'SNRT_AGN_RESTART_DONOR_OCT invalid: ',trim(target_env)
+        call clean_stop
+        return
+     endif
+     if(trim(stage)/='pre_gravity_sync'.and.trim(stage)/='post_gravity_sync'.and. &
+          trim(stage)/='pre_level3_recursion'.and. &
+          index(trim(stage),'pre_level3_recursion_i')/=1.and. &
+          trim(stage)/='pre_level3_entry'.and. &
+          index(trim(stage),'pre_level3_entry_i')/=1.and. &
+          trim(stage)/='post_level3_repartition'.and. &
+          trim(stage)/='post_level3_output'.and. &
+          trim(stage)/='pre_level3_feedback_operators'.and. &
+          trim(stage)/='post_level3_kinetic_feedback'.and. &
+          trim(stage)/='post_level3_agn_feedback'.and. &
+          trim(stage)/='post_level3_create_sink'.and. &
+          trim(stage)/='post_level3_eeos'.and. &
+          trim(stage)/='post_level3_feedback'.and. &
+          trim(stage)/='post_level3_particle_sort'.and. &
+          trim(stage)/='pre_level3_negative_sync')return
+  endif
+  ! restore_hydro_hdf5 calls this before Hilbert balancing rebuilds the
+  ! reception lists. The active-cell hydro fingerprint covers this restore
+  ! boundary; defer donor/reception snapshots until post_hilbert_balance.
+  if(.not.target_enabled.and.trim(stage)=='restore_prebalance')return
+  if(nstep_coarse/=2)return
+  key_file=''
+  call get_environment_variable('SNRT_AGN_RESTART_DONOR_KEYS',key_file, &
+       status=key_status)
+  if(key_status/=0)return
+  if(len_trim(key_file)==0)return
+  open(newunit=unit,file=trim(key_file),status='old',action='read',iostat=ios)
+  if(ios/=0)then
+     bad_input=.true.
+     input_error='cannot open donor-key file: '//trim(key_file)
+  else
+     bad_input=.false.
+  endif
+  nkeys=0
+  if(.not.bad_input)then
+     do
+        read(unit,'(A)',iostat=ios)key_line
+        if(ios<0)exit
+        if(ios/=0)then
+           bad_input=.true.
+           input_error='I/O failure while reading donor-key file'
+           exit
+        endif
+        if(len_trim(key_line)==0)cycle
+        if(nkeys>=max_donor_keys)then
+           bad_input=.true.
+           input_error='donor-key file exceeds the 4096-row limit'
+           exit
+        endif
+        read(key_line,*,iostat=ios)donor_keys(:,nkeys+1)
+        if(ios/=0)then
+           bad_input=.true.
+           input_error='donor-key row must contain six integers'
+           exit
+        endif
+        read(key_line,*,iostat=ios)donor_keys(:,nkeys+1),extra
+        if(ios==0)then
+           bad_input=.true.
+           input_error='donor-key row has extra fields'
+           exit
+        else if(ios>0)then
+           bad_input=.true.
+           input_error='donor-key row has malformed trailing content'
+           exit
+        endif
+        nkeys=nkeys+1
+     enddo
+     close(unit)
+  endif
+  if(.not.bad_input.and.ncpu/=2)then
+     bad_input=.true.
+     input_error='donor-key masks are valid only for the recorded MPI2 run'
+  endif
+  if(.not.bad_input.and.nkeys/=462)then
+     bad_input=.true.
+     input_error='expected exactly 462 unique level-3 donor cells'
+  endif
+  if(.not.bad_input)then
+     do k=1,nkeys
+        if(donor_keys(1,k)<1.or.donor_keys(1,k)>3.or.donor_keys(2,k)/=3.or. &
+             donor_keys(3,k)<0.or.donor_keys(4,k)<0.or.donor_keys(5,k)<0.or. &
+             donor_keys(6,k)<1.or.donor_keys(6,k)>twotondim)then
+           bad_input=.true.
+           input_error='donor-key mask, level, coordinate, or child is out of range'
+           exit
+        endif
+        do idim=1,k-1
+           if(all(donor_keys(2:6,idim)==donor_keys(2:6,k)))then
+              bad_input=.true.
+              input_error='donor-key file contains a duplicate physical cell key'
+              exit
+           endif
+        enddo
+        if(bad_input)exit
+     enddo
+  endif
+  if(.not.bad_input.and..not.allocated(active))then
+     bad_input=.true.
+     input_error='AMR active-grid lists are not initialized at donor snapshot'
+  endif
+  if(bad_input)then
+     if(myid==1)write(*,'(A,A)')'SNRT_AGN_RESTART_DONOR_KEYS invalid: ',trim(input_error)
+     call clean_stop
+     return
+  endif
+  found=.false.
+  target_count=0
+
+  do k=1,nkeys
+     if(target_enabled)then
+        if(any(donor_keys(3:5,k)/=target_oct))cycle
+        target_count=target_count+1
+     endif
+     ilevel=donor_keys(2,k)
+     dx=0.5d0**ilevel
+     do igrid_index=1,active(ilevel)%ngrid
+        igrid=active(ilevel)%igrid(igrid_index)
+        call emit_donor_copy(k,igrid,0)
+     enddo
+#ifndef WITHOUTMPI
+     do icpu=1,ncpu
+        if(icpu==myid)cycle
+        nremote=reception(icpu,ilevel)%ngrid
+        do remote_index=1,nremote
+#ifdef LIGHT_MPI_COMM
+           igrid=reception(icpu,ilevel)%pcomm%igrid(remote_index)
+#else
+           igrid=reception(icpu,ilevel)%igrid(remote_index)
+#endif
+           call emit_donor_copy(k,igrid,1)
+        enddo
+     enddo
+#endif
+     if(btest(donor_keys(1,k),myid-1).and..not.found(k)) &
+          write(*,'(A,A,A,I0,A,I0,A,6(1X,I0))') &
+          'SNRT_AGN_RESTART_DONOR missing stage=',trim(stage),' rank=',myid, &
+          ' step=',nstep_coarse,' consumer_mask/level/ix/iy/iz/child=',donor_keys(:,k)
+  enddo
+  if(target_enabled.and.target_count/=twotondim)then
+     if(myid==1)write(*,'(A,I0,A,3(1X,I0),A,I0)') &
+          'SNRT_AGN_RESTART_DONOR_OCT expected_cells=',twotondim, &
+          ' oct=',target_oct,' found=',target_count
+     call clean_stop
+     return
+  endif
+
+contains
+
+  subroutine emit_donor_copy(key_index,grid_index,storage_kind)
+    integer,intent(in)::key_index,grid_index,storage_kind
+
+    grid_key=0
+    do idim=1,ndim
+       grid_key(idim)=nint(xg(grid_index,idim)/dx)
+    enddo
+    if(any(grid_key(1:3)/=donor_keys(3:5,key_index)))return
+    ind=donor_keys(6,key_index)
+    cell=ICELL_OF(grid_index,ind)
+    owner=cpu_map(grid_index)
+    if(.not.btest(donor_keys(1,key_index),myid-1).and.owner/=myid)return
+    if(target_enabled.and.any(donor_keys(3:5,key_index)/=target_oct))return
+    rho=uold(cell,1)
+    velocity=0d0
+    if(rho>0d0)velocity(1:ndim)=uold(cell,2:ndim+1)/rho
+    eint=0d0
+    if(rho>0d0)eint=uold(cell,ndim+2)/rho-0.5d0*sum(velocity**2)
+#ifdef SOLVERmhd
+    bx1=uold(cell,6)
+    by1=uold(cell,7)
+    bz1=uold(cell,8)
+    bx2=uold(cell,nvar+1)
+    by2=uold(cell,nvar+2)
+    bz2=uold(cell,nvar+3)
+    if(rho>0d0)eint=eint-0.125d0*((bx1+bx2)**2+(by1+by2)**2+ &
+         (bz1+bz2)**2)/rho
+#endif
+    c2=max(gamma*(gamma-1d0)*eint,smallc**2)
+    state(1)=rho
+    state(2:4)=0d0
+    state(2:ndim+1)=uold(cell,2:ndim+1)
+    state(5)=uold(cell,ndim+2)
+    state(6)=eint
+    state(7)=c2
+    force=0d0
+    force(1:ndim)=f(cell,1:ndim)
+    write(*,'(A,A,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,3(1X,I0),A,7(1X,ES25.16),A,3(1X,ES25.16),A,ES25.16)') &
+         'SNRT_AGN_RESTART_DONOR stage=',trim(stage),' rank=',myid, &
+         ' step=',nstep_coarse,' consumer_mask=',donor_keys(1,key_index), &
+         ' level=',donor_keys(2,key_index),' cpu_map_grid=',owner, &
+         ' copy_kind=',storage_kind,' grid=',grid_index,' cell_addr=',cell, &
+         ' child=',ind,' grid_key(ix,iy,iz)=',grid_key(1:3), &
+         ' rho/mx/my/mz/E/eint/c2=',state,' f_xyz=',force, &
+         ' dtnew=',dtnew(ilevel)
+    if(btest(donor_keys(1,key_index),myid-1))found(key_index)=.true.
+  end subroutine emit_donor_copy
+end subroutine snrt_agn_restart_donor_snapshot
 !################################################################
 !################################################################
 subroutine grow_bondi(ilevel)
@@ -4013,6 +4404,9 @@ subroutine grow_bondi(ilevel)
   logical,save::notice_reported(2)=.false.
   integer :: scalar_fields(nvar),nscalar,metal_slot,receipt_error,receipt_error_all
   logical :: capture_radiation
+  logical :: trace_agn_restart
+  integer :: agn_trace_status,agn_trace_sink
+  character(len=8) :: agn_trace_env
 
   call MPI_BARRIER(MPI_COMM_WORLD,info)
 
@@ -4031,6 +4425,9 @@ subroutine grow_bondi(ilevel)
 #ifdef SNRT
   capture_radiation=snrt_transport_selected()
 #endif
+  trace_agn_restart=.false.
+  call get_environment_variable('SNRT_AGN_RESTART_TRACE',agn_trace_env,status=agn_trace_status)
+  trace_agn_restart=agn_trace_status==0.and.trim(agn_trace_env)=='1'
 
   !$omp parallel shared(nthreads) private(mythread)
      mythread = omp_get_thread_num()
@@ -4147,6 +4544,11 @@ subroutine grow_bondi(ilevel)
      if(dMBHoverdt(isink)/dMEdoverdt(isink) .lt. X_floor)dMBHoverdt(isink)=f_bondi*dMBHoverdt(isink)
      c_avgptr(isink)=dsqrt(c2mean)
      d_avgptr(isink)=density
+     if(trace_agn_restart.and.myid==1)write(*,'(A,I0,A,I0,A,I0,9(1X,ES25.16))') &
+          'SNRT_AGN_RESTART_TRACE stage=grow_bondi_input sink=',isink, &
+          ' ilevel=',ilevel,' nstep_coarse=',nstep_coarse, &
+          density,volume,c2mean,velocity(1),velocity(2),velocity(3), &
+          v2mean,dMBHoverdt(isink),dMEdoverdt(isink)
   end do
   !$omp end parallel do
 
@@ -4338,6 +4740,17 @@ subroutine grow_bondi(ilevel)
      dMsmbh   (isink)=dMsmbh      (isink)+dMsmbh_all     (isink)
   end do
   !$omp end parallel do
+
+  if(trace_agn_restart.and.myid==1)then
+     do agn_trace_sink=1,nsink
+        write(*,'(A,I0,A,I0,A,I0,11(1X,ES25.16))') &
+             'SNRT_AGN_RESTART_TRACE stage=grow_bondi_output sink=',agn_trace_sink, &
+             ' ilevel=',ilevel,' nstep_coarse=',nstep_coarse,msink(agn_trace_sink), &
+             dMBH_coarse(agn_trace_sink),dMEd_coarse(agn_trace_sink),dMsmbh(agn_trace_sink), &
+             Esave(agn_trace_sink),agn_pending_erg(agn_trace_sink), &
+             agn_mechanical_pending(:,agn_trace_sink),sum(sink_stat(agn_trace_sink,:,:))
+     end do
+  end if
 
   ! YDspin
   if(spin_bh)call kjhan_growspin
@@ -6602,12 +7015,10 @@ subroutine AGN_feedback
      call average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_norm,vol_blast, &
           mass_blast,ind_blast,nAGN,iAGN_myid,ok_blast_agn,EsaveAGN,vloadAGN,nscalar,scalar_fields, &
           metal_slot,cloadAGN,reference_replay,reference_jet,reference_load)
-     ! Use one receiver predicate for both deposition eligibility and ledger
-     ! commit.  Replay uses the thermal bubble volume; fresh events require
-     ! the unique local donor/receiver cell.
+     ! Every rank with positive global bubble volume participates in spatial
+     ! deposition. The unique donor owner is handled separately by average_AGN.
      do iAGN=1,nAGN
-        ok_blast_agn(iAGN)=agn_reference_receiver_ready(reference_replay(iAGN),ok_blast_agn(iAGN), &
-             vol_gas(iAGN),ind_blast(iAGN))
+        ok_blast_agn(iAGN)=agn_reference_receiver_ready(ok_blast_agn(iAGN),vol_gas(iAGN))
      enddo
      feedback_error=0
      do iAGN=1,nAGN
@@ -7951,7 +8362,6 @@ subroutine kjhan_update_sink_position_velocity
   xbound(1:3)=(/dble(nx),dble(ny),dble(nz)/)
   nx_loc=(icoarse_max-icoarse_min+1)
   scale=boxlen/dble(nx_loc)
-
   ! update the sink particle position based on total sink particles
 #ifndef WITHOUTMPI
   size_mpi=nsinkmax*(nlevelmax-levelmin+1)*(ndim*2+1)

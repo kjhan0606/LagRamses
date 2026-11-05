@@ -13,6 +13,7 @@ subroutine read_params
   use snrt_runtime_backend, only: snrt_backend_initialize
   use snrt_spectral_contract, only: snrt_spectral_contract_load_from_environment, &
        snrt_spectral_contract_status, snrt_spectral_contract_runtime_allowed, &
+       snrt_spectral_candidate_25g_diagnostic_requested,snrt_spectral_status_candidate, &
        snrt_spectral_contract_error_name, snrt_spectral_contract_error_message, &
        snrt_spectral_contract_source_id
   use snrt_thermochemistry, only: snrt_secondary_tables_load_from_environment, &
@@ -45,6 +46,7 @@ subroutine read_params
   logical::agn_snrt_built
 #ifdef SNRT
   integer :: snrt_requested_local, snrt_requested_min, snrt_requested_max
+  integer :: snrt_candidate_diagnostic_local,snrt_candidate_diagnostic_min,snrt_candidate_diagnostic_max
   integer :: stellar_requested_local, stellar_requested_min, stellar_requested_max
   integer :: snrt_thermochemistry_error, snrt_dust_contract_error
   integer :: snrt_dust_contract_env_length
@@ -1844,6 +1846,20 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   snrt_requested_local=merge(1,0,snrt_transport_selected())
   snrt_requested_min=snrt_requested_local
   snrt_requested_max=snrt_requested_local
+  snrt_candidate_diagnostic_local=merge(1,0,snrt_spectral_candidate_25g_diagnostic_requested())
+  snrt_candidate_diagnostic_min=snrt_candidate_diagnostic_local
+  snrt_candidate_diagnostic_max=snrt_candidate_diagnostic_local
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(snrt_candidate_diagnostic_local,snrt_candidate_diagnostic_min,1, &
+       MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,ierr)
+  call MPI_ALLREDUCE(snrt_candidate_diagnostic_local,snrt_candidate_diagnostic_max,1, &
+       MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,ierr)
+#endif
+  if(snrt_candidate_diagnostic_min/=snrt_candidate_diagnostic_max)then
+     if(myid==1)write(*,'(A)')'SNRT candidate diagnostic opt-in must agree across MPI ranks'
+     nml_ok=.false.
+     snrt_candidate_diagnostic_min=0
+  endif
   if (snrt_requested_max==1 .and. sink .and. sink_AGN .and. &
        snrt_agn_model()/=snrt_agn_model_reference) then
      if(myid==1)write(*,*)'AGN source ownership conflict: legacy feedback plus live SNRT is not approved'
@@ -1872,13 +1888,21 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      ! the first AMR level would allow a missing or non-admissible contract
      ! to look like a successful no-op run.
      call snrt_spectral_contract_load_from_environment(agn_contract_error)
-     if (agn_contract_error/=0 .or. .not.snrt_spectral_contract_runtime_allowed) then
+     if (agn_contract_error/=0 .or. &
+          (.not.snrt_spectral_contract_runtime_allowed.and.snrt_candidate_diagnostic_min/=1)) then
         if(myid==1)write(*,'(A,I0,A,A)') &
              'SNRT startup rejected spectral contract: error=',agn_contract_error, &
              ' (',trim(snrt_spectral_contract_error_name(agn_contract_error))//')'
         if(myid==1 .and. len_trim(snrt_spectral_contract_error_message)>0) &
              write(*,'(A,A)') '  detail: ',trim(snrt_spectral_contract_error_message)
         nml_ok=.false.
+     else if(snrt_candidate_diagnostic_min==1.and. &
+          trim(snrt_spectral_contract_status)/=snrt_spectral_status_candidate)then
+        if(myid==1)write(*,'(A)')'SNRT restricted candidate request does not match loaded candidate identity'
+        nml_ok=.false.
+     else if(myid==1.and.snrt_candidate_diagnostic_min==1)then
+        write(*,'(A,A,A,A)')'SNRT startup accepted restricted diagnostic only: status=', &
+             trim(snrt_spectral_contract_status),' source=',trim(snrt_spectral_contract_source_id)
      else if(myid==1)then
         write(*,'(A,A,A,A)') 'SNRT startup spectral contract admitted: status=', &
              trim(snrt_spectral_contract_status),' source=',trim(snrt_spectral_contract_source_id)
@@ -2077,8 +2101,11 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      endif
 #ifdef SNRT
      call snrt_spectral_contract_load_from_environment(agn_contract_error)
-     if(agn_contract_error/=0.or..not.snrt_spectral_contract_runtime_allowed.or. &
-          trim(snrt_spectral_contract_status)/='reference_control')then
+     if(agn_contract_error/=0.or. &
+          (.not.snrt_spectral_contract_runtime_allowed.and.snrt_candidate_diagnostic_min/=1).or. &
+          (trim(snrt_spectral_contract_status)/='reference_control'.and. &
+           .not.(snrt_candidate_diagnostic_min==1.and. &
+                 trim(snrt_spectral_contract_status)==snrt_spectral_status_candidate)))then
         if(myid==1)write(*,*) 'partition_reference_v1 requires explicitly enabled reference_control SED'
         nml_ok=.false.
      endif

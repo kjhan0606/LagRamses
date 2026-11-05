@@ -53,8 +53,15 @@ recursive subroutine amr_step(ilevel,icount)
   ! unless you check all consequences first                           !
   !-------------------------------------------------------------------!
   integer::i,idim,ivar,mpi_err,jgrid,igrid_lb,ind_lb
+  integer::agn_trace_status,agn_trace_sink
+  integer::agn_negative_sync_status,agn_entry_status
+  character(len=8)::agn_negative_sync_env,agn_entry_env
+  character(len=64)::agn_entry_stage
+  logical::agn_trace_negative_sync,agn_trace_level_entry
   integer(kind=8)::nleaf_lb
   logical::ok_defrag,output_now_all,lb_timing_sample
+  logical::trace_agn_restart
+  character(len=8)::agn_trace_env
   logical::phi_topology_changed,phi_topology_changed_all
 !!$  integer::i,idim,ivar
 !!$  logical::ok_defrag
@@ -113,6 +120,22 @@ recursive subroutine amr_step(ilevel,icount)
 #endif
 
   if(numbtot(1,ilevel)==0)return
+  agn_negative_sync_env=''
+  call get_environment_variable('SNRT_AGN_RESTART_NEGATIVE_SYNC_TRACE', &
+       agn_negative_sync_env,status=agn_negative_sync_status)
+  agn_trace_negative_sync=agn_negative_sync_status==0.and. &
+       trim(agn_negative_sync_env)=='1'
+  agn_entry_env=''
+  call get_environment_variable('SNRT_AGN_RESTART_LEVEL_ENTRY_TRACE', &
+       agn_entry_env,status=agn_entry_status)
+  agn_trace_level_entry=agn_entry_status==0.and.trim(agn_entry_env)=='1'
+
+  ! The diagnostic fixture has levelmin=levelmax=3, so there is no recursive
+  ! level-2-to-level-3 handoff. Capture the target oct at level-3 entry instead.
+  if(agn_trace_level_entry.and.ilevel==3.and.ilevel==levelmin.and.icount==1)then
+     write(agn_entry_stage,'(A,I0)')'pre_level3_entry_i',icount
+     call snrt_agn_restart_donor_snapshot(trim(agn_entry_stage))
+  endif
 
   if(verbose)write(*,999)icount,ilevel, levelmin
 
@@ -251,6 +274,23 @@ recursive subroutine amr_step(ilevel,icount)
         call morton_hash_rebuild()
         call restore_psi_postlb()
      end if
+     trace_agn_restart=.false.
+     call get_environment_variable('SNRT_AGN_RESTART_TRACE',agn_trace_env,status=agn_trace_status)
+     trace_agn_restart=agn_trace_status==0.and.trim(agn_trace_env)=='1'
+     if(trace_agn_restart.and.myid==1)then
+        do agn_trace_sink=1,nsink
+           write(*,'(A,I0,A,I0,11(1X,ES25.16))') &
+                'SNRT_AGN_RESTART_TRACE stage=post_hilbert_balance sink=',agn_trace_sink, &
+                ' nstep_coarse=',nstep_coarse,msink(agn_trace_sink),dMBH_coarse(agn_trace_sink), &
+                dMEd_coarse(agn_trace_sink),dMsmbh(agn_trace_sink),Esave(agn_trace_sink), &
+                agn_pending_erg(agn_trace_sink),agn_mechanical_pending(:,agn_trace_sink), &
+                sum(sink_stat(agn_trace_sink,:,:))
+        end do
+     end if
+#ifdef SNRT
+     call snrt_agn_restart_hydro_fingerprint('post_hilbert_balance')
+     call snrt_agn_restart_donor_snapshot('post_hilbert_balance')
+#endif
      if(allocated(varcpu_nactive)) deallocate(varcpu_nactive)
      if(allocated(varcpu_my_files)) deallocate(varcpu_my_files)
      if(allocated(varcpu_ngrid_file)) deallocate(varcpu_ngrid_file)
@@ -294,6 +334,11 @@ recursive subroutine amr_step(ilevel,icount)
         end if
      endif
   end if
+
+#ifdef SNRT
+  if(agn_trace_level_entry.and.ilevel==3.and.ilevel==levelmin.and.icount==1) &
+       call snrt_agn_restart_donor_snapshot('post_level3_repartition')
+#endif
 
   ! Sparse measurement starts after any coarse-level remap.  It is outside
   ! the hydro block so DMO, SIDM, and modified-gravity runs are all sampled.
@@ -359,6 +404,11 @@ recursive subroutine amr_step(ilevel,icount)
 
   endif
 
+#ifdef SNRT
+  if(agn_trace_level_entry.and.ilevel==3.and.ilevel==levelmin.and.icount==1) &
+       call snrt_agn_restart_donor_snapshot('post_level3_output')
+#endif
+
   !----------------------------
   ! Output frame to movie dump (without synced levels)
   !----------------------------
@@ -400,6 +450,10 @@ recursive subroutine amr_step(ilevel,icount)
 
      !jaehyun
 
+#ifdef SNRT
+     if(agn_trace_level_entry.and.ilevel==3.and.ilevel==levelmin.and.icount==1) &
+          call snrt_agn_restart_donor_snapshot('pre_level3_feedback_operators')
+#endif
                                call timer('feedback','start')
         !----------------------------------------------------
         ! Kinetic feedback
@@ -415,12 +469,20 @@ recursive subroutine amr_step(ilevel,icount)
      if(hydro.and.star.and.f_w>0.)call diag_check_eint('kinetic_fb',0)
 #endif
      call diag_check_nan('post_kinfb')
+#ifdef SNRT
+     if(agn_trace_level_entry.and.ilevel==3.and.ilevel==levelmin.and.icount==1) &
+          call snrt_agn_restart_donor_snapshot('post_level3_kinetic_feedback')
+#endif
 
      call timer('sinks','start')
      call system_clock(sk_t1)
      if(sink .and. sink_AGN)call AGN_feedback
      if(sink .and. sink_AGN)call diag_check_eint('AGN_fb',0)
      call diag_check_nan('post_agnfb')
+#ifdef SNRT
+     if(agn_trace_level_entry.and.ilevel==3.and.ilevel==levelmin.and.icount==1) &
+          call snrt_agn_restart_donor_snapshot('post_level3_agn_feedback')
+#endif
      call system_clock(sk_t2)
      sk_agn_fb = sk_agn_fb + dble(sk_t2-sk_t1)/dble(pt_rate)
      !-----------------------------------------------------
@@ -429,6 +491,10 @@ recursive subroutine amr_step(ilevel,icount)
      call system_clock(sk_t1)
      if(sink)call create_sink
      if(sink)call diag_check_eint('create_sink',0)
+#ifdef SNRT
+     if(agn_trace_level_entry.and.ilevel==3.and.ilevel==levelmin.and.icount==1) &
+          call snrt_agn_restart_donor_snapshot('post_level3_create_sink')
+#endif
      call system_clock(sk_t2)
      sk_create_sink = sk_create_sink + dble(sk_t2-sk_t1)/dble(pt_rate)
 
@@ -440,8 +506,17 @@ recursive subroutine amr_step(ilevel,icount)
      if(hydro .and. eeos_poly_coeff > 0d0)then
         call enforce_eeos_after_sink
      endif
+#ifdef SNRT
+     if(agn_trace_level_entry.and.ilevel==3.and.ilevel==levelmin.and.icount==1) &
+          call snrt_agn_restart_donor_snapshot('post_level3_eeos')
+#endif
 
   endif
+
+#ifdef SNRT
+  if(agn_trace_level_entry.and.ilevel==3.and.ilevel==levelmin.and.icount==1) &
+       call snrt_agn_restart_donor_snapshot('post_level3_feedback')
+#endif
 
   if(ilevel==levelmin) call diag_check_nan('pre_rho')
 
@@ -472,6 +547,10 @@ recursive subroutine amr_step(ilevel,icount)
      call system_clock(pt_t2)
      pt_killtree = pt_killtree + dble(pt_t2-pt_t1)/dble(pt_rate)
   end if
+#ifdef SNRT
+  if(agn_trace_level_entry.and.ilevel==3.and.ilevel==levelmin.and.icount==1) &
+       call snrt_agn_restart_donor_snapshot('post_level3_particle_sort')
+#endif
 !############################################################
 !       call getmem(real_mem)
 !       call MPI_ALLREDUCE(real_mem,real_mem_tot,1,MPI_REAL,MPI_MAX,MPI_COMM_WORLD,info)
@@ -491,7 +570,20 @@ recursive subroutine amr_step(ilevel,icount)
      ! Remove gravity source term with half time step and old force
 !    call MPI_BARRIER(MPI_COMM_WORLD,mpi_err)
      if(hydro)then
+#ifdef SNRT
+        if(agn_trace_negative_sync.and.ilevel==3.and.sink.and.bondi)then
+           call snrt_agn_restart_donor_snapshot('pre_gravity_sync')
+        endif
+        if(agn_trace_level_entry.and.ilevel==3.and.icount==1.and.sink.and.bondi)then
+           call snrt_agn_restart_donor_snapshot('pre_level3_negative_sync')
+        endif
+#endif
         call synchro_hydro_fine(ilevel,-0.5*dtnew(ilevel))
+#ifdef SNRT
+        if(agn_trace_negative_sync.and.ilevel==3.and.sink.and.bondi)then
+           call snrt_agn_restart_donor_snapshot('post_gravity_sync')
+        endif
+#endif
      endif
 
      if(ilevel==levelmin) call diag_check_nan('post_sync1')
@@ -725,7 +817,16 @@ recursive subroutine amr_step(ilevel,icount)
 
 !    call MPI_BARRIER(MPI_COMM_WORLD,mpi_err)
         ! Add gravity source term with half time step and new force
+#ifdef SNRT
+        if(.not.agn_trace_negative_sync.and.ilevel==3.and.sink.and.bondi) &
+             call snrt_agn_restart_donor_snapshot('pre_gravity_sync')
+#endif
         call synchro_hydro_fine(ilevel,+0.5*dtnew(ilevel))
+
+#ifdef SNRT
+        if(.not.agn_trace_negative_sync.and.ilevel==3.and.sink.and.bondi) &
+             call snrt_agn_restart_donor_snapshot('post_gravity_sync')
+#endif
 
         if(ilevel==levelmin) call diag_check_nan('post_sync2')
 !############################################################
@@ -748,6 +849,10 @@ recursive subroutine amr_step(ilevel,icount)
            endif
            call diag_check_eint('grow_bondi',ilevel)
         endif
+#ifdef SNRT
+        if(ilevel==3.and.sink.and.bondi) &
+             call snrt_agn_restart_donor_snapshot('post_grow_bondi')
+#endif
         call system_clock(sk_t2)
         sk_grow = sk_grow + dble(sk_t2-sk_t1)/dble(pt_rate)
 !############################################################
@@ -945,6 +1050,10 @@ recursive subroutine amr_step(ilevel,icount)
      call upload_fine(ilevel)
 
   endif
+#ifdef SNRT
+  if(ilevel==3.and.sink.and.bondi) &
+       call snrt_agn_restart_donor_snapshot('post_hydrodynamics')
+#endif
  
 
   !---------------------
@@ -989,6 +1098,10 @@ recursive subroutine amr_step(ilevel,icount)
   call diag_check_eint('cooling',ilevel)
 #endif
 #ifdef SNRT
+  if(ilevel==3.and.sink.and.bondi) &
+       call snrt_agn_restart_donor_snapshot('post_thermal_solver')
+#endif
+#ifdef SNRT
   cool_t1=omp_get_wtime()
   call dust_mass_advance_level(ilevel)
 #ifdef SNRT_CHIMES
@@ -1019,11 +1132,19 @@ recursive subroutine amr_step(ilevel,icount)
   snrt_diagnose_wall=snrt_diagnose_wall+omp_get_wtime()-cool_t1
 #endif
 #endif
+#ifdef SNRT
+  if(ilevel==3.and.sink.and.bondi) &
+       call snrt_agn_restart_donor_snapshot('post_snrt_matter')
+#endif
 #ifdef SNRT_LEDGER_DIAGNOSTIC
   call snrt_agn_ledger_diagnose(ilevel)
 #endif
   ! SGS turbulence source terms (production, dissipation, PdV coupling)
   if(use_sgs)call sgs_fine(ilevel)
+#ifdef SNRT
+  if(ilevel==3.and.sink.and.bondi) &
+       call snrt_agn_restart_donor_snapshot('post_sgs')
+#endif
 
   !---------------
   ! Move particles
@@ -1035,12 +1156,21 @@ recursive subroutine amr_step(ilevel,icount)
      call system_clock(pt_t2)
      pt_move = pt_move + dble(pt_t2-pt_t1)/dble(pt_rate)
   end if
+#ifdef SNRT
+  if(ilevel==3.and.sink.and.bondi) &
+       call snrt_agn_restart_donor_snapshot('post_particle_move')
+#endif
 
   !----------------------------------
   ! Star formation in leaf cells only
   !----------------------------------
                                call timer('feedback','start')
   if(hydro.and.star)call star_formation(ilevel)
+
+#ifdef SNRT
+  if(ilevel==3.and.sink.and.bondi) &
+       call snrt_agn_restart_donor_snapshot('pre_bondi_sample')
+#endif
 
   ! Compute Bondi-Hoyle accretion parameters
                                call timer('sinks','start')

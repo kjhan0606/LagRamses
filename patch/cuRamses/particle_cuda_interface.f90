@@ -343,6 +343,9 @@ contains
     integer(c_int) :: ierr
     integer :: j, k, p, b, nb, g0, g1, p0, p1, ng_b, np_b
     integer, dimension(1:nvector) :: r_grid, r_part, r_gpart
+    integer :: sink_record_count, sink_record_capacity, sink_record_overflow
+    integer :: sink_record_sink(1)
+    real(dp) :: sink_record_values(2*ndim,1)
     external :: move1, sync
 
     if (pmg_np(slot) == 0) return
@@ -396,6 +399,13 @@ contains
        ! CUDA failure: disable the GPU path and replay on the CPU
        pm_gpu_dead = .true.
        write(*,*) 'WARNING: particle GPU flush failed, replaying batches on CPU'
+       sink_record_count=0
+       sink_record_capacity=0
+       sink_record_overflow=0
+       if (mode == PM_MODE_MOVE .and. sink) then
+          write(*,*) 'ERROR: CUDA particle fallback entered sink move path'
+          stop 1
+       endif
        if (mode == PM_MODE_SYNC) then
           do j = 1, pmg_np(slot)
              levelp(pmg_idx(j,slot)) = pmg_lvl(j,slot)
@@ -422,7 +432,9 @@ contains
              r_gpart(j) = pmg_pg(p0+j, slot) - g0 + 1
           end do
           if (mode == PM_MODE_MOVE) then
-             call move1(r_grid, r_part, r_gpart, ng_b, np_b, ilevel)
+             call move1(r_grid, r_part, r_gpart, ng_b, np_b, ilevel, &
+                  & sink_record_count,sink_record_capacity,sink_record_overflow, &
+                  & sink_record_sink,sink_record_values)
           else
              call sync(r_grid, r_part, r_gpart, ng_b, np_b, ilevel)
           end if

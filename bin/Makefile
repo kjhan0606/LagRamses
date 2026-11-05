@@ -11,6 +11,39 @@
 #PATCH = ../patch/Horizon5-master
 #EXEC = ramses_ch
 USE_FFTW ?= 1
+SNRT_GROUP_SET ?= snrt_agn9_v1
+SNRT_GROUP_PROFILE_DIR ?= .snrt_group_profiles/$(SNRT_GROUP_SET)
+SNRT_GROUP_PROFILE_MANIFEST = ../simulation/snrt/config/snrt_group_profiles_v1.json
+SNRT_GROUP_PROFILE_GENERATOR = ../simulation/snrt/tools/generate_snrt_group_profile.py
+SNRT_GROUP_PROFILE_SOURCE_CONTRACT = ../simulation/snrt/data/snrt_agn25_joint_diag_20261102_v1_source_boundary_contract_v1.json
+SNRT_GROUP_PROFILE_SOURCE_LEDGER = ../simulation/snrt/data/snrt_agn25_joint_diag_20261102_v1_su_agn_m8_mdot01_moments_v1.json
+SNRT_GROUP_PROFILE_H = $(SNRT_GROUP_PROFILE_DIR)/snrt_group_profile.h
+SNRT_GROUP_PROFILE_F90 = $(SNRT_GROUP_PROFILE_DIR)/snrt_group_profile_f90.inc
+SNRT_GROUP_PROFILE_STAMP = .snrt_group_profiles/.selected_profile
+SNRT_D03_OPTICS_DATA = ../patch/lagRamses/dust_d03_optics_data.inc
+SNRT_D03_BAND_DATA = ../patch/lagRamses/dust_d03_band_data.inc
+SNRT_FE_BASE_DATA = ../patch/lagRamses/dust_fe_electric_base_data.inc
+SNRT_FE_BAND_DATA = ../patch/lagRamses/dust_fe_band_data.inc
+SNRT_FE_PHOTON_DATA = ../patch/lagRamses/dust_fe_photon_data.inc
+ifeq ($(SNRT_GROUP_SET),snrt_agn12_g7log4_v1)
+SNRT_PROFILE_DUST_DATA_DIR = ../simulation/snrt/data/snrt_agn12_g7log4_v1_dust_optics
+SNRT_D03_OPTICS_DATA = $(SNRT_PROFILE_DUST_DATA_DIR)/snrt_agn12_g7log4_v1_dust_d03_optics_data.inc
+SNRT_D03_BAND_DATA = $(SNRT_PROFILE_DUST_DATA_DIR)/snrt_agn12_g7log4_v1_dust_d03_band_data.inc
+SNRT_FE_BASE_DATA = $(SNRT_PROFILE_DUST_DATA_DIR)/snrt_agn12_g7log4_v1_dust_fe_electric_base_data.inc
+SNRT_FE_BAND_DATA = $(SNRT_PROFILE_DUST_DATA_DIR)/snrt_agn12_g7log4_v1_dust_fe_band_data.inc
+SNRT_FE_PHOTON_DATA = $(SNRT_PROFILE_DUST_DATA_DIR)/snrt_agn12_g7log4_v1_dust_fe_photon_data.inc
+else ifneq ($(SNRT_GROUP_SET),snrt_agn9_v1)
+ifeq ($(SNRT_GROUP_SET),snrt_agn25_joint_diag_20261102_v1)
+SNRT_PROFILE_DUST_DATA_DIR = ../simulation/snrt/data/snrt_agn25_joint_diag_20261102_v1_dust_optics
+SNRT_D03_OPTICS_DATA = $(SNRT_PROFILE_DUST_DATA_DIR)/snrt_agn25_joint_diag_20261102_v1_dust_d03_optics_data.inc
+SNRT_D03_BAND_DATA = $(SNRT_PROFILE_DUST_DATA_DIR)/snrt_agn25_joint_diag_20261102_v1_dust_d03_band_data.inc
+SNRT_FE_BASE_DATA = $(SNRT_PROFILE_DUST_DATA_DIR)/snrt_agn25_joint_diag_20261102_v1_dust_fe_electric_base_data.inc
+SNRT_FE_BAND_DATA = $(SNRT_PROFILE_DUST_DATA_DIR)/snrt_agn25_joint_diag_20261102_v1_dust_fe_band_data.inc
+SNRT_FE_PHOTON_DATA = $(SNRT_PROFILE_DUST_DATA_DIR)/snrt_agn25_joint_diag_20261102_v1_dust_fe_photon_data.inc
+else
+$(error Unsupported SNRT_GROUP_SET for profile-specific dust data: $(SNRT_GROUP_SET))
+endif
+endif
 SNRT_ANGULAR_LEVEL ?= 0
 ifeq ($(filter $(SNRT_ANGULAR_LEVEL),0 1 2),)
   $(error SNRT_ANGULAR_LEVEL must be 0, 1 or 2: 80, 320 or 720 directions)
@@ -154,6 +187,12 @@ ifdef FDMDEBUG
   FFLAGS = -fpp -I../patch/lagRamses -O2 -check bounds -traceback -g $(DEFINES) -DFDMDEBUG -DLONGINT -DQUADHILBERT -DOUTPUT_PARTICLE_POTENTIAL
 else
   FFLAGS = -fpp -I../patch/lagRamses -O3 $(DEFINES) -DLONGINT -DQUADHILBERT -DOUTPUT_PARTICLE_POTENTIAL
+endif
+FFLAGS += -I$(SNRT_GROUP_PROFILE_DIR)
+ifeq ($(SNRT_GROUP_SET),snrt_agn12_g7log4_v1)
+FFLAGS += -DSNRT_GROUP_PROFILE_AGN12_G7LOG4_V1 -I$(SNRT_PROFILE_DUST_DATA_DIR)
+else ifeq ($(SNRT_GROUP_SET),snrt_agn25_joint_diag_20261102_v1)
+FFLAGS += -DSNRT_GROUP_PROFILE_AGN25_JOINT_DIAG_20261102_V1 -I$(SNRT_PROFILE_DUST_DATA_DIR)
 endif
 ifdef FDMTRACE
   FFLAGS += -DFDMDEBUG
@@ -369,9 +408,20 @@ LIBS = $(LIBMPI) $(LIBS_HDF5) $(LIBS_CUDA) $(LIBS_SNRT) $(LIBS_FFTW) $(LIBS_CHIM
 #############################################################################
 # Sources directories are searched in this exact order
 VPATH = $(PATCH):../patch/cuda:../patch/oct_tree:../patch/cuRamses:../$(SOLVER):../aton:../hydro:../pm:../poisson:../amr
+# The generated headers are selected from one manifest for all language
+# bindings. Keep this adjacent to VPATH without changing source precedence.
+$(SNRT_GROUP_PROFILE_H): $(SNRT_GROUP_PROFILE_MANIFEST) $(SNRT_GROUP_PROFILE_GENERATOR) \
+  $(SNRT_GROUP_PROFILE_SOURCE_CONTRACT) $(SNRT_GROUP_PROFILE_SOURCE_LEDGER) \
+  ../simulation/snrt/config/p0_photon_group_edges_ev.txt \
+  ../simulation/snrt/config/snrt_agn12_g7log4_edges_ev.txt \
+  ../simulation/snrt/config/snrt_agn25_joint_diag_20261102_v1_edges_ev.txt
+	python3 $(SNRT_GROUP_PROFILE_GENERATOR) --manifest $(SNRT_GROUP_PROFILE_MANIFEST) \
+	  --profile $(SNRT_GROUP_SET) --output-dir $(SNRT_GROUP_PROFILE_DIR)
+$(SNRT_GROUP_PROFILE_F90): $(SNRT_GROUP_PROFILE_H)
+	@test -f $@
 #############################################################################
 # All objects
-MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons.o amr_index.o random.o pm_parameters.o pm_commons.o poisson_parameters.o \
+MODOBJ	= amr_parameters.jaehyun.o snrt_group_profile.o amr_commons.kjhan.o timing.o radiation_commons.o amr_index.o random.o pm_parameters.o pm_commons.o poisson_parameters.o \
 	 poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o delayed_cooling_runtime.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
@@ -404,7 +454,7 @@ AMROBJ = read_params.jaehyun.o init_amr.o init_time.kjhan.o init_refine.o adapti
 		 output_sphere_hydro.o output_sphere_part.o output_sphere_sink.o \
          morton_init.o $(HDF5_OBJS)
 # Particle-Mesh objects
-PMOBJ = init_part.o output_part.o rho_fine.kjhan.o synchro_fine.kjhan.o move_fine.kjhan.o newdt_fine.kjhan.o particle_tree.kjhan.o \
+PMOBJ = init_part.o output_part.o rho_fine.kjhan.o synchro_fine.kjhan.o sink_periodic_geometry.o sink_cloud_statistics.o move_fine.kjhan.o newdt_fine.kjhan.o particle_tree.kjhan.o \
         add_list.o remove_list.o star_formation.kjhan.o sink_particle.kjhan.o stellar_ramses_runtime.o feedback.kjhan3.o \
 		clump_finder.o clump_merger.o \
         flag_formation_sites.o init_sink.o output_sink.o
@@ -520,10 +570,24 @@ force_fine.kjhan.o: scalar_cuda_interface.o
 multigrid_fine_commons.o: poisson_cuda_interface.o
 endif
 amr_index.o: amr_commons.kjhan.o
+sink_periodic_geometry.o: amr_parameters.jaehyun.o
+sink_cloud_statistics.o: amr_parameters.jaehyun.o
+move_fine.kjhan.o: sink_periodic_geometry.o sink_cloud_statistics.o
 # SNRT module graph.  Explicit prerequisites are required because the
 # implicit %.o rule otherwise tries to compile a module before its .mod file
 # exists when a clean production build is requested.
-snrt_spectral_contract.o: amr_parameters.jaehyun.o
+# Update the profile stamp while parsing only when the selected profile changes.
+# A phony prerequisite would rebuild every profile-dependent object on every make.
+SNRT_GROUP_PROFILE_STAMP_UPDATE := $(shell \
+	mkdir -p $(dir $(SNRT_GROUP_PROFILE_STAMP)); \
+	if [ "$$(cat $(SNRT_GROUP_PROFILE_STAMP) 2>/dev/null)" != "$(SNRT_GROUP_SET)" ]; then \
+	  printf '%s\n' "$(SNRT_GROUP_SET)" > "$(SNRT_GROUP_PROFILE_STAMP).tmp"; \
+	  mv -f "$(SNRT_GROUP_PROFILE_STAMP).tmp" "$(SNRT_GROUP_PROFILE_STAMP)"; \
+	fi)
+SNRT_PROFILE_DEPENDENT_OBJECTS = $(sort $(MODOBJ) $(AMROBJ) $(PMOBJ) $(POISSONOBJ) $(HYDROOBJ) $(CUDA_OBJS))
+$(SNRT_PROFILE_DEPENDENT_OBJECTS): $(SNRT_GROUP_PROFILE_STAMP)
+snrt_group_profile.o: amr_parameters.jaehyun.o $(SNRT_GROUP_PROFILE_F90)
+snrt_spectral_contract.o: amr_parameters.jaehyun.o snrt_group_profile.o
 snrt_moment_storage.o: snrt_moment_transport.o
 snrt_moment_spectrum.o: snrt_moment_transport.o
 snrt_moment_live.o: snrt_moment_spectrum.o snrt_spectral_contract.o
@@ -563,7 +627,7 @@ endif
 snrt_agn_locator.o: amr_commons.kjhan.o
 snrt_agn_source.o: amr_parameters.jaehyun.o
 snrt_nlte_coupling.o: snrt_agn_source.o
-snrt_thermochemistry.o: amr_parameters.jaehyun.o snrt_agn_source.o
+snrt_thermochemistry.o: amr_parameters.jaehyun.o snrt_group_profile.o snrt_agn_source.o
 snrt_atomic_cooling.o: snrt_thermochemistry.o dust_element_cooling.o
 snrt_ramses_driver.o dust_mass_runtime.o: snrt_atomic_cooling.o
 ifeq ($(SNRT),1)
@@ -572,11 +636,13 @@ endif
 snrt_thermochemistry_smoke: ../patch/lagRamses/snrt_thermochemistry_smoke.f90 snrt_atomic_cooling.o snrt_thermochemistry.o snrt_agn_source.o dust_element_cooling.o snrt_dust_receiver.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS) $(CHIMES_GPU_TEST_OBJS)
 	$(F90) $(FFLAGS) -I. ../patch/lagRamses/snrt_thermochemistry_smoke.f90 snrt_atomic_cooling.o \
 	  snrt_thermochemistry.o snrt_agn_source.o dust_element_cooling.o snrt_dust_receiver.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS) $(CHIMES_GPU_TEST_OBJS) $(LIBS_CHIMES) -o $@
+snrt_chimes_depleted_element_roundoff_smoke: ../simulation/snrt/tests/fixtures/phase0/chimes_depleted_element_roundoff_test.f90 snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS) $(CHIMES_GPU_TEST_OBJS)
+	$(F90) $(FFLAGS) -I. $< snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS) $(CHIMES_GPU_TEST_OBJS) $(LIBS_CHIMES) -o $@
 .PHONY: FORCE_CHIMES_BACKEND
 FORCE_CHIMES_BACKEND:
-snrt_chimes_bridge.o: ../patch/lagRamses/snrt_chimes_bridge.c ../patch/lagRamses/snrt_chimes_atomization.h $(CHIMES_DIR)/src/chimes_proto.h FORCE_CHIMES_BACKEND
+snrt_chimes_bridge.o: ../patch/lagRamses/snrt_chimes_bridge.c ../patch/lagRamses/snrt_chimes_atomization.h $(CHIMES_DIR)/src/chimes_proto.h $(SNRT_GROUP_PROFILE_H) FORCE_CHIMES_BACKEND
 	mpicc -std=c11 -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -DCHIMES_USE_DOUBLE_PRECISION $(CHIMES_C_FLAGS) -O2 -Wall -Wextra \
-	  -I$(CHIMES_DIR)/src -I$(CHIMES_CUDA_SUNDIALS_INSTALL_DIR)/include \
+	  -I$(SNRT_GROUP_PROFILE_DIR) -I$(CHIMES_DIR)/src -I$(CHIMES_CUDA_SUNDIALS_INSTALL_DIR)/include \
 	  -I$(CHIMES_CUDA_SUNDIALS_SOURCE_DIR)/include -I$(SUNDIALS_DIR)/include \
 	  -I$(HDF5_DIR)/include -c $< -o $@
 snrt_chimes_cvode_cuda.o: ../patch/lagRamses/snrt_chimes_cvode_cuda.cu ../patch/lagRamses/snrt_chimes_cvode_cuda.h \
@@ -587,12 +653,12 @@ snrt_chimes_cvode_cuda.o: ../patch/lagRamses/snrt_chimes_cvode_cuda.cu ../patch/
 	  -I$(SUNDIALS_DIR)/include -c $< -o $@
 snrt_chimes_rhs_cuda.o: ../patch/lagRamses/snrt_chimes_rhs_cuda.cu ../patch/lagRamses/snrt_chimes_rhs_cuda.h $(CHIMES_DIR)/src/chimes_proto.h
 	$(NVCC) $(NVCCFLAGS) -std=c++17 --fmad=false -Xcompiler -fopenmp -Xcompiler -ffp-contract=off -DCHIMES_USE_DOUBLE_PRECISION -I$(SUNDIALS_DIR)/include -I$(CHIMES_DIR)/src -I$(HDF5_DIR)/include -c $< -o $@
-snrt_chimes_spectrum.o: ../patch/lagRamses/snrt_chimes_spectrum.cpp ../patch/lagRamses/snrt_chimes_spectrum.h ../patch/lagRamses/snrt_chimes_spectrum_internal.h ../patch/lagRamses/snrt_band_spectrum.h
-	mpiicpx -std=c++17 -O2 -fp-model=precise -I$(HDF5_DIR)/include -c $< -o $@
-snrt_chimes_photo.o: ../patch/lagRamses/snrt_chimes_photo.cpp ../patch/lagRamses/snrt_chimes_spectrum.h ../patch/lagRamses/snrt_chimes_spectrum_internal.h ../patch/lagRamses/snrt_band_spectrum.h
-	icpx -std=c++17 -O2 -fp-model=precise -I$(SUNDIALS_DIR)/include -c $< -o $@
+snrt_chimes_spectrum.o: ../patch/lagRamses/snrt_chimes_spectrum.cpp ../patch/lagRamses/snrt_chimes_spectrum.h ../patch/lagRamses/snrt_chimes_spectrum_internal.h ../patch/lagRamses/snrt_band_spectrum.h $(SNRT_GROUP_PROFILE_H)
+	mpiicpx -std=c++17 -O2 -fp-model=precise -I$(SNRT_GROUP_PROFILE_DIR) -I$(HDF5_DIR)/include -c $< -o $@
+snrt_chimes_photo.o: ../patch/lagRamses/snrt_chimes_photo.cpp ../patch/lagRamses/snrt_chimes_spectrum.h ../patch/lagRamses/snrt_chimes_spectrum_internal.h ../patch/lagRamses/snrt_band_spectrum.h $(SNRT_GROUP_PROFILE_H)
+	icpx -std=c++17 -O2 -fp-model=precise -I$(SNRT_GROUP_PROFILE_DIR) -I$(SUNDIALS_DIR)/include -c $< -o $@
 ifeq ($(CHIMES),1)
-snrt_chimes.o: snrt_thermochemistry.o
+snrt_chimes.o: snrt_thermochemistry.o snrt_spectral_contract.o
 snrt_chimes_dark_mixed_test: ../simulation/snrt/tests/fixtures/phase0/chimes_dark_mixed_test.f90 snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(CHIMES_GPU_TEST_OBJS)
 	$(F90) $(FFLAGS) -I. $< snrt_thermochemistry.o snrt_agn_source.o $(CHIMES_OBJS) $(CHIMES_GPU_TEST_OBJS) $(LIBS_CHIMES) -o $@
 snrt_chimes_rate_reset_test: ../simulation/snrt/tests/fixtures/phase0/chimes_rate_reset_test.c
@@ -635,13 +701,14 @@ snrt_cpu_device_stubs.o: ../patch/lagRamses/snrt_cpu_device_stubs.cpp ../patch/l
 	icpx -O2 -c $< -o $@
 snrt_openmp_transport.o: ../patch/lagRamses/snrt_openmp_transport.cpp ../patch/lagRamses/snrt_species_dust_cell.h ../patch/lagRamses/snrt_band_spectrum.h
 	icpx -O3 -qopenmp -fp-model=precise -c $< -o $@
-snrt_moment_band.o: ../patch/lagRamses/snrt_moment_band.cpp ../patch/lagRamses/snrt_band_spectrum.h
-	icpx -O3 -qopenmp -fp-model=precise -no-ftz -c $< -o $@
+snrt_moment_band.o: ../patch/lagRamses/snrt_moment_band.cpp ../patch/lagRamses/snrt_band_spectrum.h $(SNRT_GROUP_PROFILE_H)
+	icpx -O3 -qopenmp -fp-model=precise -no-ftz -I$(SNRT_GROUP_PROFILE_DIR) -c $< -o $@
 snrt_dust_material.o: ../patch/lagRamses/snrt_dust_material.cpp ../patch/lagRamses/snrt_dust_material_cell.h
 	icpx -O3 -qopenmp -fp-model=precise -c $< -o $@
 snrt_hybrid.o: ../patch/lagRamses/snrt_hybrid.cpp ../patch/lagRamses/snrt_hybrid.h ../patch/lagRamses/snrt_dust_material_cell.h ../patch/lagRamses/snrt_ir_cell.h
-	# icpx 2025.3 SLP crashes in the outlined dust dispatcher; retain loop vectorization.
-	icpx -O3 -qopenmp -fp-model=precise -fno-slp-vectorize -c $< -o $@
+	# Intel oneAPI 2025.3 O3 crashes in correlated-value propagation for this translation unit.
+	# O2 compiles reliably; keep precise FP semantics and avoid the known SLP path.
+	icpx -O2 -qopenmp -fp-model=precise -fno-slp-vectorize -c $< -o $@
 snrt_dust_material_cuda.o: ../patch/lagRamses/snrt_dust_material_cuda.cu ../patch/lagRamses/snrt_dust_material_cell.h
 	$(NVCC) $(NVCCFLAGS) --fmad=false -c $< -o $@
 snrt_ir_cuda.o: ../patch/lagRamses/snrt_ir_cuda.cu ../patch/lagRamses/snrt_ir_cell.h ../patch/lagRamses/snrt_dust_material_cell.h
@@ -701,6 +768,7 @@ ifeq ($(PHASE0_STELLAR_ENRICHMENT),1)
 read_params.jaehyun.o: stellar_ramses_runtime.o
 endif
 read_hydro_params.o: snrt_agn_efficiency.o
+read_hydro_params.o: snrt_spectral_contract.o
 endif
 backup_hdf5.o restore_hdf5.o: snrt_agn_efficiency.o
 agn_feedback_deposition.o: amr_parameters.jaehyun.o
@@ -746,11 +814,11 @@ umuscl.kjhan.o interpol_hydro.kjhan.o: dust_mass_physics.o
 dust_composition_material.o: dust_mass_physics.o ../patch/lagRamses/dust_dl01_composition_data.inc
 dust_iron_material.o: dust_composition_material.o ../patch/lagRamses/dust_iron_janaf_data.inc
 dust_iron_radiation.o: dust_iron_material.o
-dust_iron_optics.o: dust_composition_optics.o ../patch/lagRamses/dust_fe_electric_base_data.inc ../patch/lagRamses/dust_fe_band_data.inc
+dust_iron_optics.o: dust_composition_optics.o $(SNRT_FE_BASE_DATA) $(SNRT_FE_BAND_DATA)
 dust_iron_compare.o: dust_iron_material.o dust_iron_optics.o
 # Pure Fe comparison kernel: no CHIMES symbol or external-library dependency.
 # Its optional callback is supplied only by the CHIMES-enabled live adapter.
-dust_iron_photons.o: dust_mass_physics.o dust_iron_optics.o ../patch/lagRamses/dust_fe_photon_data.inc
+dust_iron_photons.o: dust_mass_physics.o dust_iron_optics.o snrt_group_profile.o $(SNRT_FE_PHOTON_DATA)
 backup_hdf5.o: dust_iron_photons.o
 ifeq ($(CHIMES),1)
 FE_PHOTON_SECONDARY_OBJS = snrt_thermochemistry.o $(CHIMES_OBJS) $(CHIMES_CHARGE_TEST_OBJS) $(CHIMES_GPU_TEST_OBJS)
@@ -762,7 +830,7 @@ dust_iron_photons_smoke: dust_iron_photons.o dust_iron_compare.o snrt_dust_recei
 snrt_dust_live.o: dust_iron_compare.o dust_iron_radiation.o
 dust_mass_runtime.o snrt_ramses_driver.o: dust_iron_compare.o
 backup_hdf5.o: dust_iron_compare.o
-dust_composition_optics.o: ../patch/lagRamses/dust_d03_optics_data.inc ../patch/lagRamses/dust_d03_band_data.inc
+dust_composition_optics.o: $(SNRT_D03_OPTICS_DATA) $(SNRT_D03_BAND_DATA)
 dust_sublimation.o: dust_composition_material.o snrt_dust_ir.o
 dust_sublimation_material.o: dust_sublimation.o
 snrt_dust_live.o: dust_sublimation_material.o
@@ -787,6 +855,9 @@ dust_pah_mixed.o: dust_pah_live_model.o dust_iron_radiation.o dust_iron_optics.o
 snrt_dust_live.o: dust_pah_mixed.o
 snrt_dust_live.o snrt_ramses_driver.o backup_hdf5.o stellar_ramses_runtime.o: dust_pah_live_model.o
 dust_mass_runtime.o: dust_sublimation.o amr_commons.kjhan.o hydro_commons.o dust_mass_physics.o dust_composition_material.o dust_composition_optics.o stellar_native_units.o snrt_dust_contract.o snrt_dust_ir.o snrt_state.o snrt_thermochemistry.o
+ifeq ($(SNRT),1)
+dust_mass_runtime.o: snrt_spectral_contract.o
+endif
 snrt_ramses_driver.o backup_hdf5.o: dust_composition_material.o dust_composition_optics.o snrt_dust_contract.o
 ifeq ($(SNRT),1)
 amr_step.jaehyun.o stellar_ramses_runtime.o read_params.jaehyun.o: dust_mass_runtime.o

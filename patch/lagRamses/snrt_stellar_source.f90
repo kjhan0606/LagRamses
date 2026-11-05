@@ -6,8 +6,10 @@ module snrt_stellar_source
   use amr_parameters, only: dp
   use snrt_spectral_contract, only: snrt_ngroups, snrt_spectral_contract_source_sha256, &
        snrt_spectral_contract_group_edges_sha256, snrt_spectral_contract_status, &
+       snrt_group_set_id, &
        snrt_spectral_contract_approval_id, snrt_spectral_contract_fraction_semantics, &
-       snrt_spectral_contract_runtime_allowed,snrt_band_enabled,snrt_group_edges_ev
+       snrt_spectral_contract_runtime_allowed,snrt_spectral_contract_execution_allowed, &
+       snrt_spectral_candidate_25g_diagnostic_requested,snrt_band_enabled,snrt_group_edges_ev
   use stellar_enrichment_config, only: default_imf_id, population_model_id, &
        configured_imf_mass_min, configured_imf_mass_max, configured_binary_fraction
   use snrt_parsec_source, only: parsec_sed_load,parsec_photon_interval,parsec_sed_identity
@@ -18,6 +20,7 @@ module snrt_stellar_source
   real(dp),parameter :: myr_s=31557600d6
   logical,save,public :: stellar_sed_enabled=.false.
   logical,save,public :: stellar_sed_has_energy=.false.
+  logical,save :: candidate_diagnostic_sed_loaded=.false.
   character(len=32),save :: energy_semantics=''
   real(dp),save :: energy_rates(snrt_ngroups,max_age,max_z)
   logical,save :: resolved=.false.
@@ -32,6 +35,7 @@ module snrt_stellar_source
   real(dp),save :: imf_min=-1d0,imf_max=-1d0,binary_fraction=-1d0
   real(dp),save :: ages(max_age),metals(max_z),rates(snrt_ngroups,max_age,max_z)
   public :: stellar_sed_load, stellar_photon_interval, stellar_sed_identity
+  public :: stellar_sed_candidate_25g_diagnostic_loaded
   public :: stellar_sed_consensus, stellar_sed_report
 contains
   subroutine stellar_sed_consensus(ierr)
@@ -62,13 +66,14 @@ contains
   subroutine stellar_sed_load(ierr)
     integer,intent(out)::ierr
     character(len=1024)::filename
-    character(len=64)::transport_sha256,edges_sha256
+    character(len=64)::transport_sha256,edges_sha256,group_set_id
     character(len=32)::status,interpolation
     character(len=128)::approval_id
     character(len=32)::fraction_semantics
     integer::ios,unit,length,i
+    logical::candidate_reference_sed
     namelist/snrt_stellar_sed/version,na,nz,imf_id,population_id,imf_min,imf_max,binary_fraction,ages,metals,rates, &
-         transport_sha256,edges_sha256,status,interpolation,approval_id,fraction_semantics, &
+         transport_sha256,edges_sha256,group_set_id,status,interpolation,approval_id,fraction_semantics, &
          population_binding,source_sha256,radiation_population,young_age_policy,spectral_tail_policy, &
          imf_slopes,imf_break,escape_fraction,energy_rates,energy_semantics,node_history_file
     if(resolved)then
@@ -78,18 +83,19 @@ contains
     resolved=.true.
     call get_environment_variable('SNRT_STELLAR_SED',filename,length=length,status=ios)
     ierr=0
+    candidate_reference_sed=.false.
     if(ios==1.or.length==0)return
     load_status=1
     if(ios/=0)goto 900
     ages=0d0;metals=0d0;rates=-1d0
     energy_rates=-1d0;energy_semantics=''
-    version=0;status='';interpolation='';transport_sha256='';edges_sha256=''
+    version=0;status='';interpolation='';transport_sha256='';edges_sha256='';group_set_id=''
     approval_id='';fraction_semantics=''
     open(newunit=unit,file=trim(filename),status='old',action='read',iostat=ios)
     if(ios/=0)goto 900
     read(unit,nml=snrt_stellar_sed,iostat=ios)
     close(unit)
-    if(ios/=0.or.version<1.or.version>5)goto 900
+    if(ios/=0.or.version<1.or.version>6)goto 900
     if(version<4)then
        if(na<2.or.na>max_age.or.nz<2.or.nz>max_z)goto 900
        if(trim(interpolation)/='linear_age_linear_Z'.or.node_history_file/='')goto 900
@@ -118,14 +124,22 @@ contains
        enddo
        if(young_age_policy/='hold_first_to_zero'.or.spectral_tail_policy/='zero_outside_source_domain')goto 900
        if(ages(1)/=0d0.or.ages(2)/=1d0.or.any(rates(:,1,1:nz)/=rates(:,2,1:nz)))goto 900
-    case(4,5)
+    case(4,5,6)
        if(status/='reference_control')goto 900
-       if(version==4)then
+       if(version==4.or.(version==6.and.population_binding=='match_feedback_high_mass_only'))then
           if(population_binding/='match_feedback_high_mass_only')goto 900
           if(radiation_population/='PARSEC_v2_nonrot_high_mass_only')goto 900
-       else
+       else if(version==5.or.(version==6.and.population_binding=='common_imf_mixed_evolution'))then
           if(population_binding/='common_imf_mixed_evolution')goto 900
           if(radiation_population/='PARSEC_mixed_lowmass_comparison')goto 900
+       else
+          goto 900
+       endif
+       if(version<6.and.snrt_ngroups/=9)goto 900
+       if(len_trim(group_set_id)==0)then
+          if(trim(snrt_group_set_id)/='snrt_agn9_v1')goto 900
+       else if(trim(group_set_id)/=trim(snrt_group_set_id))then
+          goto 900
        endif
        if(imf_id/=default_imf_id.or.population_id/=population_model_id.or. &
             imf_min/=configured_imf_mass_min.or.imf_max/=configured_imf_mass_max.or. &
@@ -137,15 +151,27 @@ contains
        if(energy_semantics/='photon_number_and_energy_v1')goto 900
        if(interpolation/='linear_cumulative_age_linear_Z'.or.node_history_file=='')goto 900
        if(young_age_policy/='hold_first_to_zero')goto 900
-       if(version==4.and.spectral_tail_policy/='Q5_Planck_and_track_tail_v1')goto 900
-       if(version==5.and.spectral_tail_policy/='zero_after_track_or_terminal_v1')goto 900
+       if(population_binding=='match_feedback_high_mass_only'.and. &
+            spectral_tail_policy/='Q5_Planck_and_track_tail_v1')goto 900
+       if(population_binding=='common_imf_mixed_evolution'.and. &
+            spectral_tail_policy/='zero_after_track_or_terminal_v1')goto 900
        if(len_trim(source_sha256)/=64)goto 900
        do i=1,64
           if(index('0123456789abcdef',source_sha256(i:i))==0)goto 900
        enddo
     end select
-    if(.not.snrt_spectral_contract_runtime_allowed)goto 900
-    if(trim(snrt_spectral_contract_status)/=trim(status))goto 900
+    candidate_reference_sed=snrt_spectral_candidate_25g_diagnostic_requested().and. &
+         version==6.and.trim(status)=='reference_control'.and. &
+         trim(population_binding)=='common_imf_mixed_evolution'.and. &
+         trim(radiation_population)=='PARSEC_mixed_lowmass_comparison'.and. &
+         trim(group_set_id)=='snrt_agn25_joint_diag_20261102_v1'.and.snrt_ngroups==25.and. &
+         trim(snrt_spectral_contract_status)=='candidate_explicit_sed'
+    if(.not.snrt_spectral_contract_runtime_allowed.and..not.candidate_reference_sed)goto 900
+    if(candidate_reference_sed)then
+       if(trim(status)/='reference_control'.or.trim(snrt_spectral_contract_status)/='candidate_explicit_sed')goto 900
+    else if(trim(snrt_spectral_contract_status)/=trim(status))then
+       goto 900
+    endif
     if(fraction_semantics/=snrt_spectral_contract_fraction_semantics)goto 900
     select case(trim(status))
     case('reference_control')
@@ -163,6 +189,7 @@ contains
        call parsec_sed_load(trim(node_history_file),ios,expected_version=version)
        if(ios/=0)goto 900
        load_status=0;stellar_sed_enabled=.true.;stellar_sed_has_energy=.true.
+       candidate_diagnostic_sed_loaded=candidate_reference_sed
        ierr=0;return
     endif
     if(any(.not.ieee_is_finite(ages(1:na))).or.any(ages(1:na)<0d0))goto 900
@@ -185,8 +212,13 @@ contains
     load_status=0
     stellar_sed_enabled=.true.
     stellar_sed_has_energy=version==3
+    candidate_diagnostic_sed_loaded=candidate_reference_sed
 900 ierr=load_status
   end subroutine
+
+  logical function stellar_sed_candidate_25g_diagnostic_loaded() result(loaded)
+    loaded=resolved.and.load_status==0.and.stellar_sed_enabled.and.candidate_diagnostic_sed_loaded
+  end function stellar_sed_candidate_25g_diagnostic_loaded
 
   subroutine stellar_photon_interval(age0,age1,metallicity,mass_msun,photons,ierr,energy_ev)
     real(dp),intent(in)::age0,age1,metallicity,mass_msun ! Myr, mass fraction, initial Msun
@@ -197,7 +229,7 @@ contains
     real(dp)::lo,hi,wz,wa,wb,q0(snrt_ngroups),q1(snrt_ngroups)
     photons=0d0;ierr=1
     if(present(energy_ev))energy_ev=0d0
-    if(.not.stellar_sed_enabled)return
+    if(.not.stellar_sed_enabled.or..not.snrt_spectral_contract_execution_allowed())return
     if(stellar_sed_has_energy.neqv.present(energy_ev))return
     if(version>=4)then
        call parsec_photon_interval(age0,age1,metallicity,mass_msun,photons,energy_ev,ierr)
@@ -288,7 +320,7 @@ contains
     if(.not.stellar_sed_enabled)return
     write(*,'(A,A)')'SNRT stellar population binding: ',trim(population_binding)
     if(version<2)return
-    if(version==5)then
+    if(version==5.or.(version==6.and.population_binding=='common_imf_mixed_evolution'))then
        write(*,'(A)')'SNRT MIXED POPULATION COMPARISON: common IMF cells, NOT a common stellar evolution grid or full SSP'
        write(*,'(A)')'SNRT mixed low mass: PARSEC pre-terminal Q/E, independently selected terminal yields/lifetimes'
        write(*,'(A)')'SNRT mixed radiation: zero after selected track/terminal cutoff; missing late light is not recovered'
@@ -297,7 +329,7 @@ contains
        write(*,'(A,ES16.8)')'SNRT mixed escaped fraction already applied: ',escape_fraction
        return
     endif
-    if(version==4)then
+    if(version==4.or.(version==6.and.population_binding=='match_feedback_high_mass_only'))then
        write(*,'(A)')'SNRT PARSEC HIGH-MASS ONLY: matched 14--600 Msun; full IMF denominator .08--600; not full SSP'
        write(*,'(A)')'SNRT PARSEC: measured Q5 + within-band Planck prior; missing photon tails use full-track Planck'
        write(*,'(A)')'SNRT PARSEC: native cumulative Q/E; no post-terminal radiation; no below-14 Msun source supplied'

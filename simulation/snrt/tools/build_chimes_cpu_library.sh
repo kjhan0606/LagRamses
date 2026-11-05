@@ -14,8 +14,9 @@ hdf=$(realpath "$4")
 mode=$5
 compiler=${CC:-mpicc}
 patch_root=$(cd "$(dirname "$0")/../data" && pwd)
+chimes_src=$src/src
 flags=(-O3 -ffp-contract=off -fno-fast-math -fPIC -DCHIMES_USE_DOUBLE_PRECISION
-    -I"$src/src" -I"$sun/include" -I"$hdf/include")
+    -I"$chimes_src" -I"$sun/include" -I"$hdf/include")
 case "$mode" in
     reference|trace) ;;
     lto) flags+=(-flto=4 -fno-semantic-interposition) ;;
@@ -23,11 +24,27 @@ case "$mode" in
     *) echo "unknown build mode: $mode" >&2; exit 2 ;;
 esac
 mkdir "$dest"
+if [ "${CHIMES_SPECTRA_CAPACITY_PATCH:-0}" = 1 ]; then
+    mkdir -p "$dest/source"
+    cp -a "$src/src" "$dest/source/src"
+    chimes_src=$dest/source/src
+    patch --batch --fuzz=0 --output="$chimes_src/chimes_proto.h.patched" \
+        "$chimes_src/chimes_proto.h" "$patch_root/chimes_spectra_capacity_32.patch"
+    cp -- "$chimes_src/chimes_proto.h.patched" "$chimes_src/chimes_proto.h"
+    chimes_src=$dest/source/src
+    grep -Eq '^[[:space:]]*#define[[:space:]]+CHIMES_MAX_UV_SPECTRA[[:space:]]+32([[:space:]]|$)' \
+        "$chimes_src/chimes_proto.h"
+    flags=(-O3 -ffp-contract=off -fno-fast-math -fPIC -DCHIMES_USE_DOUBLE_PRECISION
+        -I"$chimes_src" -I"$sun/include" -I"$hdf/include")
+    sha256sum "$src/src/chimes_proto.h" "$chimes_src/chimes_proto.h"
+else
+    sha256sum "$src/src/chimes_proto.h"
+fi
 cd "$dest"
 "$compiler" --version
 for unit in chimes chimes_cooling init_chimes rate_equations update_rates; do
     sha256sum "$src/src/$unit.c"
-    input="$src/src/$unit.c"
+    input="$chimes_src/$unit.c"
     if [ "$mode" = trace ] && [ "$unit" = chimes ]; then
         patch --batch --fuzz=0 --output="$unit.c" "$input" "$patch_root/chimes_trace_solver.patch"
         input="$unit.c"

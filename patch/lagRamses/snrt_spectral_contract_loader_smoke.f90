@@ -2,6 +2,7 @@ program snrt_spectral_contract_loader_smoke
   use snrt_spectral_contract, only: &
        snrt_spectral_contract_load, snrt_spectral_contract_load_from_environment, &
        snrt_spectral_contract_loaded, snrt_spectral_contract_runtime_allowed, &
+       snrt_spectral_contract_diagnostic_allowed, &
        snrt_spectral_contract_ok, snrt_spectral_contract_err_missing, &
        snrt_spectral_contract_err_open, snrt_spectral_contract_err_read, &
        snrt_spectral_contract_err_version, snrt_spectral_contract_err_identity, &
@@ -9,7 +10,7 @@ program snrt_spectral_contract_loader_smoke
        snrt_spectral_contract_err_fraction_semantics
   implicit none
 
-  character(len=32) :: mode
+  character(len=64) :: mode
   character(len=1024) :: path
   integer :: ierr, failures
 
@@ -70,6 +71,17 @@ program snrt_spectral_contract_loader_smoke
           'candidate contract can be loaded for inspection', failures)
      call expect(.not. snrt_spectral_contract_runtime_allowed, &
           'candidate contract is not runtime-admissible', failures)
+  case ('candidate_chimes_d03_diagnostic')
+     call snrt_spectral_contract_load(trim(path), ierr)
+     call expect(ierr == snrt_spectral_contract_ok .and. snrt_spectral_contract_loaded, &
+          'fixed 25-group zero-grey CHIMES+D03 candidate contract loads', failures)
+     call expect(.not. snrt_spectral_contract_runtime_allowed .and. &
+          .not. snrt_spectral_contract_diagnostic_allowed, &
+          'candidate remains blocked until the complete all-rank M5 fixture gate', failures)
+  case ('candidate_chimes_d03_nonzero_legacy')
+     call snrt_spectral_contract_load(trim(path), ierr)
+     call expect(ierr /= snrt_spectral_contract_ok .and. .not. snrt_spectral_contract_loaded, &
+          'candidate rejects legacy grey H/He opacity that would double-count capture', failures)
   case ('intrinsic')
      call snrt_spectral_contract_load(trim(path), ierr)
      call expect(ierr == snrt_spectral_contract_ok .and. &

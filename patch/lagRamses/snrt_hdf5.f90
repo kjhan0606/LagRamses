@@ -13,10 +13,13 @@ module snrt_hdf5
   use snrt_spectral_contract, only: snrt_spectral_contract_source_sha256, &
        snrt_spectral_contract_source_commit_binding, snrt_spectral_contract_approval_id, &
        snrt_spectral_contract_group_edges_sha256, snrt_spectral_contract_status, &
+       snrt_group_set_id, &
        snrt_spectral_contract_fraction_semantics,snrt_band_enabled,snrt_band_model,snrt_band_kind, &
        snrt_d03_band_enabled,snrt_chimes_band_enabled,snrt_chimes_bank_sha256, &
        snrt_chimes_cold_enabled,snrt_chimes_molecular_sha256, &
-       snrt_chimes_transition_enabled,snrt_chimes_atomization_sha256
+       snrt_chimes_transition_enabled,snrt_chimes_atomization_sha256, &
+       snrt_spectral_contract_diagnostic_allowed, &
+       snrt_spectral_candidate_25g_diagnostic_checkpoint_requested
   use snrt_thermochemistry, only: snrt_secondary_loaded_manifest_sha256
 #ifdef DUST_LIVE
   use snrt_dust_contract
@@ -278,8 +281,8 @@ contains
   subroutine identity(grp,writing)
     integer(HID_T), intent(in) :: grp
     logical, intent(in) :: writing
-    character(len=128) :: values(7), loaded,primary_units,ir_units
-    character(len=20) :: names(7)
+    character(len=128) :: values(8), loaded,primary_units,ir_units
+    character(len=20) :: names(8)
     integer :: k,status,width,version,file_version,stellar_switch,count
     logical :: exists
     real(dp),allocatable :: stellar_values(:),saved_stellar(:)
@@ -315,11 +318,12 @@ contains
     legacy_number_only=.false.
     snrt_checkpoint_file_width=snrt_checkpoint_cell_width
     names=[character(len=20)::'source_sha256','source_commit','approval','edges_sha256', &
-         'spectral_status','fraction_semantics','secondary_manifest']
+         'spectral_status','fraction_semantics','secondary_manifest','group_set_id']
     values=[character(len=128)::snrt_spectral_contract_source_sha256, &
          snrt_spectral_contract_source_commit_binding,snrt_spectral_contract_approval_id, &
          snrt_spectral_contract_group_edges_sha256,snrt_spectral_contract_status, &
-         snrt_spectral_contract_fraction_semantics,snrt_secondary_loaded_manifest_sha256]
+         snrt_spectral_contract_fraction_semantics,snrt_secondary_loaded_manifest_sha256, &
+         snrt_group_set_id]
     if(writing)then
        call hdf5_write_attr_int(grp,'cell_width',snrt_checkpoint_cell_width)
        call hdf5_write_attr_int(grp,'format_version',version)
@@ -419,8 +423,19 @@ contains
        if(writing)then
           call hdf5_write_attr_string(grp,trim(names(k)),trim(values(k)))
        else
-          call hdf5_read_attr_string_checked(grp,trim(names(k)),loaded,status)
-          call require_ok(status)
+          if(trim(names(k))=='group_set_id')then
+             call h5aexists_f(grp,trim(names(k)),exists,status)
+             call require_ok(abs(status))
+             if(.not.exists.and.trim(snrt_group_set_id)=='snrt_agn9_v1')then
+                loaded='snrt_agn9_v1'
+             else
+                call hdf5_read_attr_string_checked(grp,trim(names(k)),loaded,status)
+                call require_ok(status)
+             endif
+          else
+             call hdf5_read_attr_string_checked(grp,trim(names(k)),loaded,status)
+             call require_ok(status)
+          endif
           call require_ok(merge(0,1,trim(loaded)==trim(values(k))))
        end if
     end do
@@ -497,7 +512,16 @@ contains
     integer(HID_T) :: grp,dset,dspace,plist
     character(len=32) :: name
     real(dp), allocatable :: buffer(:)
+    logical :: candidate_checkpoint
     include 'mpif.h'
+    candidate_checkpoint=.false.
+    if(trim(snrt_group_set_id)=='snrt_agn25_joint_diag_20261102_v1') &
+         candidate_checkpoint=snrt_spectral_contract_diagnostic_allowed.and. &
+         snrt_spectral_candidate_25g_diagnostic_checkpoint_requested()
+    if((snrt_spectral_contract_diagnostic_allowed.or. &
+         trim(snrt_group_set_id)=='snrt_agn25_joint_diag_20261102_v1').and. &
+         .not.candidate_checkpoint)error stop &
+         'restricted SNRT candidate fixture forbids HDF5 checkpoint writes'
     if(.not.snrt_transport_selected())return
     snrt_checkpoint_cell_width=primary_width
 #ifdef DUST_LIVE
@@ -567,7 +591,15 @@ contains
     integer(HID_T) :: grp,dset,dspace,plist
     character(len=32) :: name
     real(dp), allocatable :: buffer(:)
+    logical :: candidate_checkpoint
     include 'mpif.h'
+    candidate_checkpoint=.false.
+    if(trim(snrt_group_set_id)=='snrt_agn25_joint_diag_20261102_v1') &
+         candidate_checkpoint=snrt_spectral_candidate_25g_diagnostic_checkpoint_requested()
+    if((snrt_spectral_contract_diagnostic_allowed.or. &
+         trim(snrt_group_set_id)=='snrt_agn25_joint_diag_20261102_v1').and. &
+         .not.candidate_checkpoint)error stop &
+         'restricted SNRT candidate fixture forbids HDF5 checkpoint reads'
     if(.not.snrt_transport_selected())return
     call h5gopen_f(hdf5_file_id,'/snrt',grp,status)
     call require_ok(abs(status))

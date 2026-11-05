@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Opt-in mixed evolution comparison; NOT a complete/matched bolometric SSP.
 
-Emit ordinary native yields plus v5 history and v2 positive Q/E intervals.
+Emit ordinary native yields plus v5 history and v2/v3 positive Q/E intervals.
 Uses actual PARSEC2--12 tracks, a named13 proxy, KL16/Fishlock and Sukhbold.
 No late radiation plateau; no double counting of terminal-source wind budgets.
 """
@@ -16,12 +16,14 @@ import zipfile
 import numpy as np
 from build_parsec_pair_feedback import Z_GRIDS, source_name, read_ejecta, compress
 from build_parsec_native_sed import Spectrum, check_rates, intervals, MYR
+from generate_snrt_group_profile import read_profile
 from read_karakas_lugaro2016 import (read_karakas_lugaro2016, read_fishlock2014,
     DEFAULT_MATRIX, LIFETIME_PATH, LIFETIME_SHA256, FISHLOCK_SHA256)
 from build_sukhbold_native_lowmass import build_lowmass
 from audit_g2_sukhbold2016_candidate import DEFAULT_ROOT as DEFAULT_SUKHBOLD_ROOT
 
 MODEL = 'parsec_mixed_lowmass_truncated_v1'
+ROOT = Path(__file__).resolve().parents[1]
 MSUN = 1.98847e33
 LOW_MASSES = [round(2+.2*i, 1) for i in range(40)] + [10., 11., 12., 13.]
 
@@ -160,7 +162,8 @@ def lower_radiation(data, track, terminal, edges, scale, spectrum):
     rel *= scale
     cumulative = np.cumsum(rel, axis=0)
     index, error = compress(t, cumulative, 1e-4)
-    compact = np.vstack((np.zeros(21), [rel[a+1:b+1].sum(axis=0) for a,b in zip(index[:-1], index[1:])]))
+    compact = np.vstack((np.zeros(2*(len(edges)-1)+3),
+                         [rel[a+1:b+1].sum(axis=0) for a,b in zip(index[:-1], index[1:])]))
     check_rates(compact[1:], edges)
     # Round-trip Myr->yr must never put the cutoff one ulp AFTER death.
     return t[index], compact, dict(radiation_stop_yr=min(terminal,stop*1e6),
@@ -173,17 +176,102 @@ def row(channel, m, z, age, ret=0., rem=0., energy=0., gross=None):
     return np.r_[channel,m,z,age,ret,rem,energy,np.zeros(3),g,np.zeros(11)]
 
 
-def load_upper_sed(path):
+def load_upper_sed(path, *, group_set_id, group_edges_sha256, group_edges_ev):
+    edges = np.asarray(group_edges_ev, dtype=float)
+    if edges.ndim != 1 or edges.size < 2 or not np.isfinite(edges).all() or \
+            np.any(edges[1:] <= edges[:-1]):
+        raise ValueError('upper radiation group edges are invalid')
+    ng = edges.size - 1
     nodes = {}
     with path.open() as f:
-        if f.readline().strip() != 'SNRT_PARSEC_QE_INTERVAL_V1':
-            raise ValueError('upper radiation must be existing v1 node payload')
-        nn,nr = map(int, f.readline().split()); model = f.readline().strip(); total = 0
+        magic = f.readline().strip()
+        if magic not in ('SNRT_PARSEC_QE_INTERVAL_V1', 'SNRT_POPULATION_QE_INTERVAL_V3'):
+            raise ValueError('upper radiation must be a supported v1 or profile-bound v3 payload')
+        try:
+            nn, nr = map(int, f.readline().split())
+        except (ValueError, TypeError) as exc:
+            raise ValueError('upper radiation node/record header is malformed') from exc
+        model = f.readline().strip()
+        if not model:
+            raise ValueError('upper radiation model identity is empty')
+        if magic == 'SNRT_POPULATION_QE_INTERVAL_V3':
+            identity = f.readline().split()
+            if len(identity) != 2:
+                raise ValueError('profile-bound upper radiation identity is malformed')
+            payload_profile, payload_edges_sha = identity
+            if payload_profile != group_set_id or payload_edges_sha != group_edges_sha256:
+                raise ValueError('upper radiation profile ID or edge hash differs from its manifest')
+        elif group_set_id != 'snrt_agn9_v1':
+            raise ValueError('legacy v1 upper radiation is only valid for snrt_agn9_v1')
+        if nn < 2 or nn > 1024 or nr < 2 * nn or nr > 500000:
+            raise ValueError('upper radiation node/record count is outside the native contract')
+        total = 0
+        ncolumns = 2 * ng + 4  # age, group N/E, Lbol, IR tail, X-ray tail
         for _ in range(nn):
-            m,z,end,fate,n = map(float, f.readline().split()); n = int(n)
-            values = np.array([list(map(float, f.readline().split())) for _ in range(n)])
-            nodes[z,m] = (end,int(fate),values); total += n
-        if total != nr or f.read().strip(): raise ValueError('upper radiation extent mismatch')
+            header = f.readline().split()
+            expected_header_fields = 5 if magic == 'SNRT_PARSEC_QE_INTERVAL_V1' else 8
+            if len(header) != expected_header_fields:
+                raise ValueError('upper radiation node header is malformed')
+            try:
+                if magic == 'SNRT_PARSEC_QE_INTERVAL_V1':
+                    m, z, end, fate_value, n_value = map(float, header)
+                    radiation_stop, terminal_channel, remnant_kind = end, 3, 4
+                else:
+                    (m, z, end, radiation_stop, terminal_channel,
+                     remnant_kind, fate_value, n_value) = map(float, header)
+            except ValueError as exc:
+                raise ValueError('upper radiation node header is not numeric') from exc
+            integer_fields = [terminal_channel, remnant_kind, fate_value, n_value]
+            if (not np.isfinite([m, z, end, radiation_stop, *integer_fields]).all() or m <= 0 or
+                    z < 0 or z > 1 or end <= 0 or fate_value != int(fate_value) or
+                    radiation_stop <= 0 or radiation_stop > end or
+                    any(value != int(value) for value in integer_fields)):
+                raise ValueError('upper radiation node metadata is invalid')
+            terminal_channel, remnant_kind = int(terminal_channel), int(remnant_kind)
+            fate, n = int(fate_value), int(n_value)
+            if magic == 'SNRT_PARSEC_QE_INTERVAL_V1':
+                if not 1 <= fate <= 5:
+                    raise ValueError('legacy upper radiation fate is invalid')
+            elif terminal_channel == 2:
+                if m >= 9 or fate != 0 or not 0 <= remnant_kind <= 3:
+                    raise ValueError('upper radiation low-mass terminal metadata is inconsistent')
+            elif (terminal_channel not in (3, 5) or m < 9 or not 1 <= fate <= 5 or
+                  remnant_kind != 4 or ((terminal_channel == 5) != (fate in (3, 4)))):
+                raise ValueError('upper radiation high-mass terminal metadata is inconsistent')
+            if n < 2 or n > nr - total:
+                raise ValueError('upper radiation node record count is invalid')
+            rows = []
+            for _ in range(n):
+                try:
+                    row = list(map(float, f.readline().split()))
+                except ValueError as exc:
+                    raise ValueError('upper radiation interval row is not numeric') from exc
+                if len(row) != ncolumns:
+                    raise ValueError('upper radiation interval row has the wrong group layout')
+                rows.append(row)
+            values = np.asarray(rows, dtype=float)
+            if not np.isfinite(values).all() or np.any(values[:, 1:] < 0):
+                raise ValueError('upper radiation intervals contain nonfinite or negative values')
+            if values[0, 0] != 0 or np.any(values[0, 1:] != 0) or \
+                    np.any(values[1:, 0] <= values[:-1, 0]) or values[-1, 0] != radiation_stop:
+                raise ValueError('upper radiation age/zero-interval contract is invalid')
+            photons = values[:, 1:1 + ng]
+            energy = values[:, 1 + ng:1 + 2 * ng]
+            lbol = values[:, 1 + 2 * ng]
+            tails = values[:, 2 + 2 * ng:4 + 2 * ng]
+            if (np.any(energy < photons * edges[:-1] * (1 - 1e-10)) or
+                    np.any(energy > photons * edges[1:] * (1 + 1e-10))):
+                raise ValueError('upper radiation energy lies outside its photon group')
+            residual = np.abs(energy.sum(axis=1) + tails.sum(axis=1) - lbol)
+            if np.any(residual > 1e-10 * np.maximum(np.finfo(float).tiny, lbol)):
+                raise ValueError('upper radiation bolometric energy does not close')
+            key = (z, m)
+            if key in nodes:
+                raise ValueError('upper radiation contains duplicate metallicity/mass nodes')
+            nodes[key] = (end, fate, values)
+            total += n
+        if total != nr or f.read().strip():
+            raise ValueError('upper radiation extent mismatch')
     return model,nodes
 
 
@@ -207,10 +295,20 @@ def build(args):
     if not all(np.isfinite(v) and 0 < v < 29979.2458 for v in (args.agb_wind_km_s,args.sn_wind_km_s)):
         raise ValueError('explicit positive nonrelativistic lower wind speeds required')
     imf = feedback['imf_id']; agb, sn = terminal_sources(imf,args.sukhbold_root)
-    upper_model, radiation = load_upper_sed(args.upper_sed/'nodes.dat')
+    edges = np.array(sed['group_edges_ev']); ng=len(edges)-1
+    group_set_id=sed.get('group_set_id','snrt_agn9_v1')
+    profile_ng,profile_edges,registered_sha=read_profile(
+        ROOT/'config/snrt_group_profiles_v1.json',group_set_id)
+    group_edges_sha256=sed.get('group_edges_sha256',registered_sha)
+    if (len(edges)!=profile_ng+1 or not np.array_equal(edges,profile_edges) or
+            group_edges_sha256!=registered_sha):
+        raise ValueError('upper SED profile ID, edge count, values or SHA-256 differs from registry')
+    upper_model, radiation = load_upper_sed(
+        args.upper_sed/'nodes.dat', group_set_id=group_set_id,
+        group_edges_sha256=group_edges_sha256, group_edges_ev=edges)
     if upper_model != feedback['model']: raise ValueError('upper model identity mismatch')
     upper = np.loadtxt(args.feedback/'yields.dat')
-    edges = np.array(sed['group_edges_ev']); spectrum = Spectrum(64)
+    spectrum = Spectrum(64)
     material=[]; nodes=[]; spectra={}
     with zipfile.ZipFile(args.source_dir/'all_ejecta.zip') as ejecta:
         for zs,ys in coordinates:
@@ -282,7 +380,11 @@ def build(args):
     history='\n'.join(lines+['/'])+'\n'
     nr=sum(len(v) for v in spectra.values())
     if nr>500000: raise ValueError(f'v5 radiation knot capacity exceeded: {nr}')
-    lines=['SNRT_POPULATION_QE_INTERVAL_V2',f'{len(nodes)} {nr}',MODEL]
+    candidate_profile=group_set_id!='snrt_agn9_v1'
+    record_magic='SNRT_POPULATION_QE_INTERVAL_V3' if candidate_profile else 'SNRT_POPULATION_QE_INTERVAL_V2'
+    lines=[record_magic,f'{len(nodes)} {nr}',MODEL]
+    if candidate_profile:
+        lines.append(f'{group_set_id} {group_edges_sha256}')
     for n in nodes:
         v=spectra[n['z'],n['mass']]
         lines.append(' '.join(f'{x:.17e}' for x in (n['mass'],n['z'],n['age_yr']/1e6,v[-1,0]))+
@@ -291,7 +393,8 @@ def build(args):
     payload='\n'.join(lines)+'\n'; digest=hashlib.sha256(payload.encode()).hexdigest()
     template=(args.upper_sed/'source.nml').read_text()
     template=re.sub(r'^!.*\n','! Explicit mixed comparison; omitted late radiation; not full SSP.\n',template,count=1)
-    template=template.replace('version=4','version=5').replace('match_feedback_high_mass_only','common_imf_mixed_evolution')
+    template=template.replace('version=4','version=6' if candidate_profile else 'version=5')
+    template=template.replace('match_feedback_high_mass_only','common_imf_mixed_evolution')
     template=template.replace('PARSEC_v2_nonrot_high_mass_only','PARSEC_mixed_lowmass_comparison')
     template=template.replace('Q5_Planck_and_track_tail_v1','zero_after_track_or_terminal_v1')
     template=re.sub(r"source_sha256='[^']*'",f"source_sha256='{digest}'",template)
@@ -310,7 +413,9 @@ def build(args):
                header='Explicit mixed lifetime budgets; native v5 comparison only')
     (output/'history.nml').write_text(history);(output/'nodes.dat').write_text(payload)
     (output/'source.nml').write_text(template);(output/'enrichment.nml').write_text(config)
-    manifest=dict(model=MODEL,full_ssp=False,same_evolution=False,source_domain=dict(mass=[2,600],z=[float(z) for z,_ in coordinates]),
+    manifest=dict(model=MODEL,full_ssp=False,same_evolution=False,group_set_id=group_set_id,
+        group_edges_sha256=group_edges_sha256,group_edges_ev=edges.tolist(),
+        source_domain=dict(mass=[2,600],z=[float(z) for z,_ in coordinates]),
         imf_id=imf,imf_denominator=[.08,600],input_upper=feedback['model'],upper_output_sha256=feedback['output_sha256'],
         parsec_inputs_sha256=inputs,upper_sed_manifest_sha256=sha(args.upper_sed/'manifest.json'),
         agb_sources=dict(selection_matrix_sha256=sha(DEFAULT_MATRIX),

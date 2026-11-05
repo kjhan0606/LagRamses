@@ -1595,6 +1595,11 @@ subroutine restore_hydro_hdf5()
      end do
   end do
 
+#ifdef SNRT
+  call snrt_agn_restart_hydro_fingerprint('restore_prebalance')
+  call snrt_agn_restart_donor_snapshot('restore_prebalance')
+#endif
+
   if(myid==1) write(*,*) 'HDF5 hydro restore done.'
 
 end subroutine restore_hydro_hdf5
@@ -1934,7 +1939,9 @@ subroutine restore_part_hdf5()
   integer :: hdf5_attr_status_all
   integer :: nindsink_file
   integer :: agn_schema, agn_saved_model, agn_saved_rt, pending_status, pending_status_all
+  integer :: agn_trace_status, agn_trace_sink
   character(len=16) :: agn_saved_transport
+  character(len=8) :: agn_trace_env
   logical :: agn_schema_present
   real(dp),allocatable :: pending_radiation(:), pending_mechanical(:,:)
   character(len=24),parameter :: pending_names(4)=[character(len=24):: &
@@ -2438,6 +2445,17 @@ subroutine restore_part_hdf5()
 
      agn_checkpoint_restored=agn_schema_present
      if(agn_checkpoint_restored.and.myid==1)write(*,'(A,I0)')' AGN checkpoint ledger restored: sinks=',nsink
+     call get_environment_variable('SNRT_AGN_RESTART_TRACE',agn_trace_env,status=agn_trace_status)
+     if(agn_checkpoint_restored.and.agn_trace_status==0.and.trim(agn_trace_env)=='1'.and.myid==1)then
+        do agn_trace_sink=1,nsink
+           write(*,'(A,I0,A,I0,11(1X,ES25.16))') &
+                'SNRT_AGN_RESTART_TRACE stage=restore sink=',agn_trace_sink, &
+                ' nstep_coarse=',nstep_coarse,msink(agn_trace_sink),dMBH_coarse(agn_trace_sink), &
+                dMEd_coarse(agn_trace_sink),dMsmbh(agn_trace_sink),Esave(agn_trace_sink), &
+                agn_pending_erg(agn_trace_sink),agn_mechanical_pending(:,agn_trace_sink), &
+                sum(sink_stat(agn_trace_sink,:,:))
+        end do
+     end if
      call hdf5_close_group(grp_id)
   end if
 

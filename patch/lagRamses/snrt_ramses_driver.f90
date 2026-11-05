@@ -100,11 +100,13 @@ contains
   subroutine snrt_ramses_advance_level(ilevel,step_start_proper)
     use snrt_moment_ramses, only: mn_ramses_advance
     use snrt_state, only: snrt_state_is_moment
-    use amr_parameters, only: sink, sink_AGN
+    use amr_parameters, only: sink, sink_AGN,snrt_transport_model,snrt_moment_order
     use amr_commons, only: levelmin, nstep_coarse, myid, dtnew, boxlen, &
          icoarse_min, icoarse_max, ncpu, nrestart, texp, aexp, active, cosmo
     use hydro_commons, only: uold,magnetic_energy
-    use dust_mass_physics, only: dust_atomic_cooling_enabled,dust_chimes_enabled,dust_gas_elements
+    use dust_mass_physics, only: dust_atomic_cooling_enabled,dust_chimes_enabled,dust_gas_elements, &
+         dust_condensation,dust_growth,dust_sputtering,dust_sn_shocks,dust_coagulation,dust_shattering, &
+         dust_two_size_enabled
 #ifdef SNRT_CHIMES
     use snrt_chimes_runtime, only: chimes_live_capacity,chimes_live_stage,chimes_cell_state,chimes_live_band_stage, &
          chimes_live_cold_stage,chimes_live_grain_scatter,chimes_live_fe_uv_stage
@@ -115,7 +117,8 @@ contains
     use pm_commons, only: nsink, xsink, idsink, agn_pending_erg, nindsink, msink, vsink, jsink, &
          dMBH_coarse, dMEd_coarse, dMsmbh, Esave, spinmag, agn_checkpoint_restored, &
          headp, numbp, nextp, ptypep, PTYPE_STAR, xp, mp0, tpp, zp
-    use snrt_stellar_source, only: stellar_sed_enabled, stellar_photon_interval,stellar_sed_has_energy
+    use snrt_stellar_source, only: stellar_sed_enabled, stellar_photon_interval,stellar_sed_has_energy, &
+         stellar_sed_candidate_25g_diagnostic_loaded
     use snrt_runtime_backend, only: snrt_backend_initialize
     use snrt_state, only: snrt_ndirection, snrt_nmu, snrt_nphi, snrt_ngroups, snrt_intensity, &
          snrt_nslot, snrt_energy_shift, &
@@ -123,8 +126,15 @@ contains
          snrt_helium_iii, snrt_state_get_slot
     use snrt_spectral_contract, only: &
          snrt_nedges, snrt_group_edges_ev, snrt_group_edges_sha256, snrt_band_enabled,snrt_band_model, &
+         snrt_group_profile_runtime_admissible, &
+         snrt_group_set_id,snrt_spectral_candidate_25g_diagnostic_requested, &
+         snrt_spectral_candidate_25g_diagnostic_checkpoint_requested, &
+         snrt_spectral_contract_set_diagnostic_fixture_validated,snrt_spectral_contract_diagnostic_allowed, &
          snrt_d03_band_enabled,snrt_fe_band_enabled,snrt_grain_band_bins, &
-         snrt_node_secondaries_enabled,snrt_chimes_band_enabled,snrt_chimes_cold_enabled,snrt_chimes_transition_enabled, &
+         snrt_node_secondaries_enabled,snrt_chimes_band_enabled,snrt_chimes_cold_enabled, &
+         snrt_chimes_transition_enabled,snrt_chimes_d03_absorption_enabled, &
+         snrt_chimes_candidate_d03_absorption_selected, &
+         snrt_spectral_contract_fraction_semantics, &
          snrt_group_mean_energy_ev, snrt_group_energy_fraction, &
          snrt_group_cross_section_cm2, snrt_group_cross_section_hei_cm2, &
          snrt_group_cross_section_heii_cm2, &
@@ -137,7 +147,7 @@ contains
          snrt_spectral_contract_error_name, snrt_spectral_contract_loaded, &
          snrt_spectral_contract_error_message, &
          snrt_spectral_contract_runtime_allowed, snrt_spectral_contract_status, &
-         snrt_spectral_contract_source_id
+         snrt_spectral_contract_source_id,snrt_spectral_status_candidate
     use snrt_amr_topology, only: snrt_amr_build_same_level_neighbors
 #ifdef DUST_LIVE
     use snrt_dust_live, only: snrt_dust_live_stage, snrt_dust_live_commit, dust_live_coarse_trial
@@ -155,11 +165,16 @@ contains
     use snrt_dust_contract, only: snrt_dust_contract_version, &
          snrt_dust_contract_scattering_enabled, snrt_dust_contract_scattering_per_h_cm2, &
          snrt_dust_contract_exchange_enabled, snrt_dust_contract_collision_area_per_h, &
-         snrt_dust_contract_accommodation, snrt_dust_contract_ir_background_k
+         snrt_dust_contract_accommodation, snrt_dust_contract_ir_background_k, &
+         snrt_dust_contract_loaded,snrt_dust_contract_runtime_allowed, &
+         snrt_dust_contract_number_ir,snrt_dust_contract_reference_control
     use snrt_runtime_backend, only: snrt_runtime_isotropic_scatter
-    use dust_phase_state, only: dust_phase_read,dust_phase_kinetic
+    use dust_phase_state, only: dust_phase_read,dust_phase_kinetic,dust_dynamics_enabled
     use snrt_moving_scatter, only: snrt_moving_scatter_cell
     use hydro_parameters, only: dust_relative_motion,ndust_phase,idust_momentum,nvar
+#endif
+#ifndef WITHOUTMPI
+    use mpi_mod, only: MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD
 #endif
     use snrt_transport_step, only: snrt_transport_absorb_multigroup_prepared_dust_trial
     use snrt_rt_transaction, only: snrt_rt_iteration_config, &
@@ -217,6 +232,7 @@ contains
     integer :: icell, islot, ilevel_found
     integer :: energy_index
     integer :: spectral_status, thermochemistry_status
+    integer :: diagnostic_candidate_local,diagnostic_candidate_all,diagnostic_mpi_status
     integer :: transaction_status, transaction_iteration, ledger_status
     integer :: local_transaction_failure, local_transaction_converged
     integer :: global_transaction_failure, global_transaction_converged
@@ -308,6 +324,9 @@ contains
     type(dust_live_coarse_trial) :: dust_ir_coarse
 #endif
     logical :: enabled, source_ok, accounting_identity_ok
+    logical :: candidate_profile_selected,candidate_opt_in,candidate_fixture_valid,candidate_stellar_required
+    logical :: candidate_restart_checkpoint
+    logical :: candidate_source_pending
     logical, allocatable :: source_transaction_ok(:)
     logical :: transaction_converged, transaction_active
     logical :: transaction_diagnostic_mode
@@ -356,7 +375,8 @@ contains
     if(snrt_d03_band_enabled())then
        if(.not.dust_optics_enabled().or.(dust_iron_enabled().neqv.snrt_fe_band_enabled()).or.dust_pah_enabled().or. &
             ((dust_sublimation_enabled().or.dust_relative_motion).and..not.snrt_chimes_transition_enabled()).or. &
-            (dust_chimes_enabled().and..not.snrt_chimes_cold_enabled()))then
+            (dust_chimes_enabled().and..not.snrt_chimes_cold_enabled().and. &
+             .not.snrt_spectral_candidate_25g_diagnostic_requested()))then
           if(myid==1)write(*,*)'Grain band RT requires matching D03/Fe mode; sublimation/drift need kind7; no PAH'
           call clean_stop;return
        endif
@@ -402,7 +422,15 @@ contains
     ! marker while leaving the transport state in a different mode.
     enabled = enabled_latched
     transaction_diagnostic_mode = transaction_diagnostic_mode_latched
-    if (.not. enabled) return
+    candidate_profile_selected=trim(snrt_group_set_id)=='snrt_agn25_joint_diag_20261102_v1'
+    candidate_opt_in=snrt_spectral_candidate_25g_diagnostic_requested()
+    if (enabled .and. .not. snrt_group_profile_runtime_admissible .and. .not.candidate_profile_selected) then
+       if (myid == 1) write(*,'(A)') &
+            ' SNRT startup rejected: selected group profile is not runtime-admissible'
+       call clean_stop
+       return
+    end if
+    if (.not. enabled.and..not.candidate_profile_selected) return
 #ifdef DUST_LIVE
     if (.not. dust_contract_checked) then
        dust_contract_ok = snrt_dust_contract_loaded .and. &
@@ -417,14 +445,21 @@ contains
        end if
        if(dust_sublimation_rt_enabled())dust_contract_ok=dust_contract_ok.and. &
             snrt_dust_contract_exchange_enabled.and.snrt_dust_contract_version==4
-       if(snrt_d03_band_enabled())dust_contract_ok=dust_contract_ok.and. &
-            snrt_dust_contract_version==4.and.snrt_dust_contract_scattering_enabled
+       if(snrt_d03_band_enabled())then
+          if(snrt_chimes_candidate_d03_absorption_selected())then
+             dust_contract_ok=dust_contract_ok.and.snrt_dust_contract_version==4.and. &
+                  .not.snrt_dust_contract_scattering_enabled.and..not.snrt_dust_contract_exchange_enabled
+          else
+             dust_contract_ok=dust_contract_ok.and.snrt_dust_contract_version==4.and. &
+                  snrt_dust_contract_scattering_enabled
+          endif
+       endif
        dust_contract_checked = .true.
        if (myid == 1 .and. .not. dust_contract_ok) then
-          write(*,'(A)') ' SNRT DUST_LIVE disabled: dust contract does not match the canonical nine-group runtime'
+          write(*,'(A)') ' SNRT DUST_LIVE disabled: dust contract does not match the selected group profile'
        endif
     endif
-    if (.not. dust_contract_ok) then
+    if (.not. dust_contract_ok.and..not.candidate_profile_selected) then
        call clean_stop
        return
     endif
@@ -448,10 +483,80 @@ contains
     if (.not. spectral_contract_resolved) then
        call snrt_spectral_contract_load_from_environment(spectral_status)
        spectral_contract_resolved = .true.
+       diagnostic_candidate_local=0
+       if(candidate_profile_selected.and.candidate_opt_in)then
+          candidate_restart_checkpoint=snrt_spectral_candidate_25g_diagnostic_checkpoint_requested()
+          candidate_fixture_valid=enabled.and.spectral_status==0.and.snrt_spectral_contract_loaded.and. &
+               trim(snrt_spectral_contract_status)==snrt_spectral_status_candidate .and. &
+               trim(snrt_spectral_contract_fraction_semantics)=='escaped' .and. &
+               .not.snrt_spectral_contract_runtime_allowed .and. &
+               (nrestart==0.or.(nrestart==1.and.candidate_restart_checkpoint)).and. &
+               snrt_state_is_moment().and.trim(snrt_transport_model)=='tensor_mn'.and. &
+               snrt_moment_order==5.and.sink.and.sink_AGN.and.nsink>0.and.snrt_agn_reference_active().and. &
+               snrt_chimes_band_enabled().and. &
+               snrt_chimes_candidate_d03_absorption_selected().and.snrt_d03_band_enabled().and. &
+               .not.snrt_fe_band_enabled()
+          env_value=''
+          call get_environment_variable('SNRT_REQUIRE_25G_STELLAR_AGN',env_value,length=env_length,status=env_status)
+          candidate_stellar_required=.false.
+          if(env_status==0.and.env_length==1.and.env_value(1:1)=='1')then
+             candidate_stellar_required=.true.
+          else if(env_status==0.and.env_length==1.and.env_value(1:1)=='0')then
+             candidate_stellar_required=.false.
+          else if(env_status==1.or.(env_status==0.and.env_length==0))then
+             candidate_stellar_required=.false.
+          else
+             candidate_fixture_valid=.false.
+          endif
+          if(candidate_stellar_required)then
+             candidate_fixture_valid=candidate_fixture_valid.and.stellar_sed_enabled.and. &
+                  stellar_sed_candidate_25g_diagnostic_loaded()
+          else
+             candidate_fixture_valid=candidate_fixture_valid.and..not.stellar_sed_enabled
+          endif
+          env_value=''
+          call get_environment_variable('SNRT_HYDRO_ENTRY_STOP',env_value,length=env_length,status=env_status)
+          if(candidate_restart_checkpoint)then
+             candidate_fixture_valid=candidate_fixture_valid.and. &
+                  (env_status==1.or.(env_status==0.and.env_length==0))
+          else
+             candidate_fixture_valid=candidate_fixture_valid.and.env_status==0.and. &
+                  env_length==1.and.env_value(1:1)=='2'
+          endif
+#ifdef DUST_LIVE
+          candidate_fixture_valid=candidate_fixture_valid.and.dust_contract_ok.and. &
+               snrt_dust_contract_loaded.and. &
+               snrt_dust_contract_runtime_allowed.and.snrt_dust_contract_reference_control.and. &
+               snrt_dust_contract_version==4.and.snrt_dust_contract_number_ir>0.and. &
+               .not.snrt_dust_contract_scattering_enabled.and..not.snrt_dust_contract_exchange_enabled.and. &
+               dust_two_size_enabled().and.dust_optics_enabled().and.dust_material_composition_enabled().and. &
+               .not.dust_iron_enabled().and..not.dust_pah_enabled().and..not.dust_dynamics_enabled().and. &
+               .not.dust_sublimation_enabled().and..not.dust_sublimation_rt_enabled().and. &
+               all(dust_condensation==0).and..not.dust_growth.and..not.dust_sputtering.and. &
+               .not.dust_sn_shocks.and..not.dust_coagulation.and..not.dust_shattering
+#else
+          candidate_fixture_valid=.false.
+#endif
+          if(candidate_fixture_valid)diagnostic_candidate_local=1
+       endif
+#ifndef WITHOUTMPI
+       call MPI_ALLREDUCE(diagnostic_candidate_local,diagnostic_candidate_all,1,MPI_INTEGER,MPI_MIN, &
+            MPI_COMM_WORLD,diagnostic_mpi_status)
+       if(diagnostic_mpi_status/=0)diagnostic_candidate_all=0
+#else
+       diagnostic_candidate_all=diagnostic_candidate_local
+#endif
+       call snrt_spectral_contract_set_diagnostic_fixture_validated(diagnostic_candidate_all==1)
+       if(candidate_profile_selected.and.diagnostic_candidate_all/=1)then
+          if(myid==1)write(*,'(A)')' SNRT restricted 25-group diagnostic rejected: fixture gates disagree or are incomplete'
+          call clean_stop
+          return
+       endif
        spectral_contract_ok = spectral_status == 0 .and. &
             snrt_spectral_contract_loaded .and. &
-            snrt_spectral_contract_runtime_allowed
-       if(snrt_agn_reference_active())spectral_contract_ok=spectral_contract_ok.and. &
+            (snrt_spectral_contract_runtime_allowed.or.snrt_spectral_contract_diagnostic_allowed)
+       if(snrt_agn_reference_active().and..not.snrt_spectral_contract_diagnostic_allowed) &
+            spectral_contract_ok=spectral_contract_ok.and. &
             trim(snrt_spectral_contract_status)=='reference_control'
        if (myid == 1) then
           if (spectral_contract_ok) then
@@ -614,22 +719,35 @@ contains
     end if
 
     if(snrt_state_is_moment())then
+       candidate_source_pending=.false.
+       if(candidate_profile_selected.and.nsink>0)then
+          if(allocated(agn_pending_erg))then
+             if(size(agn_pending_erg)>=nsink)candidate_source_pending=any(agn_pending_erg(1:nsink)>0d0)
+          endif
+       endif
        call mn_ramses_advance(ilevel,reduced_c,transaction_config,ierr,step_start_proper)
        if(ierr/=0)then
           if(myid==1)write(*,*)'ERROR: M_N level transaction rejected; no source receipt consumed; code=',ierr
           call clean_stop
        endif
-       ! Bounded M5-L8 test mode: value 2 stops only after the selected
-       ! level-8 M5 transaction has returned successfully.  This gives one
-       ! coupled transition without allowing the run to continue into a
-       ! production trajectory.  Value 1 is handled by diag_check_eint before
-       ! M5; neither mode changes the physical state or receiver semantics.
-       if(ilevel==levelmin+1)then
+       ! Bounded test mode: ordinary profiles stop after the selected
+       ! levelmin+1 transaction. The 25-group candidate waits until an
+       ! actual pending AGN energy packet enters M5, so the smoke exercises
+       ! source transport and material capture instead of a zero-source call.
+       ! Value 1 is handled by diag_check_eint before M5.
+       if((ilevel==levelmin+1.and..not.candidate_profile_selected).or. &
+            (candidate_profile_selected.and.ilevel>=levelmin.and.candidate_source_pending))then
           env_value=''
           call get_environment_variable('SNRT_HYDRO_ENTRY_STOP',env_value, &
                length=env_length,status=env_status)
           if(env_status==0 .and. env_length==1 .and. env_value(1:1)=='2')then
-             if(myid==1)write(*,*)'SNRT bounded M5 level-8 transaction completed; stopping before later level work'
+             if(myid==1)then
+                if(candidate_profile_selected)then
+                   write(*,*)'SNRT bounded 25-group candidate source-bearing M5 transaction completed; stopping before later level work'
+                else
+                   write(*,*)'SNRT bounded M5 levelmin+1 transaction completed; stopping before later level work'
+                endif
+             endif
              call clean_stop
           endif
        endif
@@ -844,11 +962,16 @@ contains
                 call d03_cell_weights(uold(icell,idust_bins:idust_bins+3),dust_weights(:,i),ierr)
              endif
              if(ierr/=0)hydro_state_invalid=.true.
-             dust_primary_sigma(:,i)=matmul(d03_pa(:,1:dust_nb),dust_weights(:,i))
+             dust_primary_sigma(:,i)=0d0
+             dust_primary_sigma(1:d03_ng,i)=matmul(d03_pa(:,1:dust_nb),dust_weights(:,i))
              ! UV Fe owns its bulk+detachment photon debit after CHIMES.
              ! Retain the all-material normalization and scattering/IR.
-             if(dust_fe_uv_enabled())dust_primary_sigma(:,i)=matmul(d03_pa(:,1:4),dust_weights(1:4,i))
-             dust_scatter_sigma(:,i)=matmul(d03_ps(:,1:dust_nb)-d03_pg(:,1:dust_nb),dust_weights(:,i))
+             if(dust_fe_uv_enabled())then
+                dust_primary_sigma(1:d03_ng,i)=matmul(d03_pa(:,1:4),dust_weights(1:4,i))
+             endif
+             dust_scatter_sigma(:,i)=0d0
+             dust_scatter_sigma(1:d03_ng,i)= &
+                  matmul(d03_ps(:,1:dust_nb)-d03_pg(:,1:dust_nb),dust_weights(:,i))
           endif
           if(dust_iron_enabled())then
              call iron_compare_curve(snrt_dust_contract_temperature_k(1:snrt_dust_contract_number_temperature), &
@@ -1448,8 +1571,8 @@ contains
                integer::b,g,k
                sigma=0;fractions=0;tau=0
                do b=1,dust_nb
-                  sigma(:,b)=d03_pa(:,b)*phase_mass(b,i)/snrt_dust_contract_mass_per_h_g
-                  tau(b,:)=(d03_ps(:,b)-d03_pg(:,b))*phase_mass(b,i)/ &
+                  sigma(1:d03_ng,b)=d03_pa(:,b)*phase_mass(b,i)/snrt_dust_contract_mass_per_h_g
+                  tau(b,1:d03_ng)=(d03_ps(:,b)-d03_pg(:,b))*phase_mass(b,i)/ &
                        snrt_dust_contract_mass_per_h_g*snrt_c_cgs*reduced_c*dt_s
                enddo
                if(dust_pah_enabled())sigma(:,ndust_phase)=sum(pah_number(:,i))*pah_primary_sigma
@@ -1568,14 +1691,16 @@ contains
 !$omp reduction(+:t_cold_worker,t_scatter_worker,t_photo_worker,t_dark_worker)
           do i=1,nleaf
              block
-               real(dp)::rn(snrt_ndirection,9),re(snrt_ndirection,9),nn(snrt_ndirection,9),ne(snrt_ndirection,9)
-               real(dp)::ledger(11),gn(9),ge(9),nh_code,he_code,events(2)
+               real(dp)::rn(snrt_ndirection,snrt_ngroups),re(snrt_ndirection,snrt_ngroups), &
+                    nn(snrt_ndirection,snrt_ngroups),ne(snrt_ndirection,snrt_ngroups)
+               real(dp)::ledger(11),gn(snrt_ngroups),ge(snrt_ngroups),nh_code,he_code,events(2)
                real(dp)::worker_start
-               real(dp)::phase_e(9,4),phase_p(3,4),kick(3),velocity(3),work(4),heat(9),ke_change,ep,wp
+               real(dp)::phase_e(snrt_ngroups,4),phase_p(3,4),kick(3),velocity(3),work(4), &
+                    heat(snrt_ngroups),ke_change,ep,wp
                integer::b,k
                icell=leaf_cell(i)
                rn=real(trial_intensity(:,:,i),dp)*scale_nH
-               do igroup=1,9
+               do igroup=1,snrt_ngroups
                   re(:,igroup)=(snrt_group_mean_energy_ev(igroup)*real(trial_intensity(:,igroup,i),dp)+ &
                        trial_energy_shift(:,igroup,i))*scale_nH
                enddo
@@ -1637,7 +1762,7 @@ contains
                   local_transaction_failure=snrt_failure_chemistry;cycle
                endif
                trial_intensity(:,:,i)=real(nn/scale_nH,c_float)
-               do igroup=1,9
+               do igroup=1,snrt_ngroups
                   trial_energy_shift(:,igroup,i)=ne(:,igroup)/scale_nH- &
                        snrt_group_mean_energy_ev(igroup)*real(trial_intensity(:,igroup,i),dp)
                enddo
@@ -2042,12 +2167,14 @@ contains
 !$omp reduction(max:local_transaction_failure)
        do i=1,nleaf
           block
-            real(dp)::photons(9),next_photons(9),area,nh_code,he_code,fraction,actual(snrt_ndirection),delta_heat
-            real(dp)::ray_number(snrt_ndirection,9),ray_energy(snrt_ndirection,9)
-            real(dp)::next_number(snrt_ndirection,9),next_energy(snrt_ndirection,9),photo_ledger(9)
-            real(dp)::fe_ledger(8),fe_solid,fe_before(9)
+            real(dp)::photons(snrt_ngroups),next_photons(snrt_ngroups),area,nh_code,he_code,fraction, &
+                 actual(snrt_ndirection),delta_heat
+            real(dp)::ray_number(snrt_ndirection,snrt_ngroups),ray_energy(snrt_ndirection,snrt_ngroups)
+            real(dp)::next_number(snrt_ndirection,snrt_ngroups),next_energy(snrt_ndirection,snrt_ngroups), &
+                 photo_ledger(9)
+            real(dp)::fe_ledger(8),fe_solid,fe_before(snrt_ngroups)
             icell=leaf_cell(i)
-            do igroup=1,9
+            do igroup=1,snrt_ngroups
                ! Source/transport stores direction-INTEGRATED counts, not I.
                ! Applying quadrature weights again loses photons here.
                photons(igroup)=sum(real(trial_intensity(:,igroup,i),dp))*scale_nH
@@ -2065,7 +2192,7 @@ contains
             endif
             if(snrt_chimes_band_enabled())then
             ray_number=real(trial_intensity(:,:,i),dp)*scale_nH
-            do igroup=1,9
+            do igroup=1,snrt_ngroups
                ray_energy(:,igroup)=(snrt_group_mean_energy_ev(igroup)*real(trial_intensity(:,igroup,i),dp)+ &
                     trial_energy_shift(:,igroup,i))*scale_nH
             enddo
@@ -2123,13 +2250,13 @@ contains
                ! Transported N is FP32; store the actual outgoing FP64 E,
                ! rebased to the rounded N, not a uniform group attenuation.
                trial_intensity(:,:,i)=real(next_number/scale_nH,c_float)
-               do igroup=1,9
+               do igroup=1,snrt_ngroups
                   trial_energy_shift(:,igroup,i)=next_energy(:,igroup)/scale_nH- &
                        snrt_group_mean_energy_ev(igroup)*real(trial_intensity(:,igroup,i),dp)
                enddo
                chemical_absorbed_ev=chemical_absorbed_ev+photo_ledger(7)*cell_volume_code*scale_l**3
             else
-            do igroup=1,9
+            do igroup=1,snrt_ngroups
                if(dust_relative_motion.and.photons(igroup)>0)then
                   fraction=next_photons(igroup)/photons(igroup)
                   actual=snrt_group_mean_energy_ev(igroup)*real(trial_intensity(:,igroup,i),dp)+ &

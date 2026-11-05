@@ -5,18 +5,26 @@ module dust_iron_photons
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use dust_mass_physics, only: dust_fe_trace_charge,dust_fe_trace_energy,dust_fe_relax_ratio, &
        dust_fe_max_temperature
-  use dust_iron_optics, only: fe_radius_cm,fe_density,fe_primary_ev,fe_electric_basis,fe_nir
+  use dust_iron_optics, only: fe_radius_cm,fe_density,fe_primary_ev,fe_electric_basis,fe_nir,fe_ng
+  use snrt_group_profile, only: snrt_ngroups,snrt_group_edges_ev
   implicit none
   private
   public :: fe_uv_step,fe_uv_photo,fe_oml,fe_charge_energy,fe_photon_data_identity,fe_photon_data_identity_n
+  public :: fe_uv_group_count
   public :: fe_gas_ip_ev
-  integer,parameter :: fe_photon_data_identity_n=95
+  integer,parameter :: fe_photon_data_identity_n=68+3*snrt_ngroups
   real(real64),parameter :: ev=1.602176634d-12,kb=1.380649d-16,mp=1.67262192369d-24
   real(real64),parameter :: pi=3.14159265358979323846d0,e2=14.3996454784255d0
   integer,parameter :: zlo(2)=[-110,-8604],zhi(2)=[63,632],ns=157
   ! Pinned CHIMES157, Fortran indices. Other ions/molecules are unchanged.
   integer,parameter :: ie=1,ih=2,ihp=3,ihe=5,ihep=6,ihepp=7,ic=8,icp=9
+#ifdef SNRT_GROUP_PROFILE_AGN12_G7LOG4_V1
+#include "snrt_agn12_g7log4_v1_dust_fe_photon_data.inc"
+#elif defined(SNRT_GROUP_PROFILE_AGN25_JOINT_DIAG_20261102_V1)
+#include "snrt_agn25_joint_diag_20261102_v1_dust_fe_photon_data.inc"
+#else
   include 'dust_fe_photon_data.inc'
+#endif
   real(real64),parameter :: kjmol_ev=1000d0/(6.02214076d23*1.602176634d-19)
   ! H/C use the SAME ATcT ground-state reference as CHIMES atomization.
   ! Helium is unchanged and retains the existing CHIMES secondary convention.
@@ -48,9 +56,23 @@ module dust_iron_photons
      end subroutine
   end interface
 contains
+  integer function fe_uv_group_count() result(nuv)
+    integer::g
+    nuv=0
+    do g=1,fe_ng
+       if(snrt_group_edges_ev(g+1)>uv_max_ev.or.fe_primary_ev(g)>uv_max_ev)exit
+       nuv=g
+    enddo
+  end function
+
   function fe_photon_data_identity() result(v)
     real(real64)::v(fe_photon_data_identity_n)
-    v=[2d0,e2,hd_work,hd_escape_length,fe_primary_ev,reshape(fe_photon_attenuation_cm,[18]), &
+    real(real64)::profile_primary(snrt_ngroups),profile_attenuation(snrt_ngroups,2)
+    profile_primary=0;profile_attenuation=0
+    profile_primary(:min(snrt_ngroups,fe_ng))=fe_primary_ev(:min(snrt_ngroups,fe_ng))
+    profile_attenuation(:min(snrt_ngroups,fe_ng),:)= &
+         fe_photon_attenuation_cm(:min(snrt_ngroups,fe_ng),:)
+    v=[2d0,e2,hd_work,hd_escape_length,profile_primary,reshape(profile_attenuation,[2*snrt_ngroups]), &
          step_fraction,tail_bound,gas_tmax,real(step_cap,real64),real(zlo,real64),real(zhi,real64), &
          hd_work,hd_ip_positive,hd_ip_negative,hd_bulk,hd_bulk_denom,hd_bulk_power,hd_escape_length, &
          hd_barrier_coeff,hd_barrier_radius_power,hd_barrier_charge_power, &
@@ -144,11 +166,11 @@ contains
 
   subroutine distribution(b,t,ne,nhp,ncp,flux,cross,p,up,down,rh,rc,ke,ki,y,pd,lo,hi,ip,ierr)
     integer,intent(in)::b
-    real(real64),intent(in)::t,ne,nhp,ncp,flux(9),cross(9)
+    real(real64),intent(in)::t,ne,nhp,ncp,flux(snrt_ngroups),cross(snrt_ngroups)
     real(real64),intent(out)::p(zlo(b):zhi(b)),up(zlo(b):zhi(b)),down(zlo(b):zhi(b))
     real(real64),intent(out)::rh(zlo(b):zhi(b)),rc(zlo(b):zhi(b)),ke(zlo(b):zhi(b)),ki(zlo(b):zhi(b))
-    real(real64),intent(out)::y(4,zlo(b):zhi(b)),pd(4,zlo(b):zhi(b)),lo(4,zlo(b):zhi(b))
-    real(real64),intent(out)::hi(4,zlo(b):zhi(b)),ip(zlo(b):zhi(b))
+    real(real64),intent(out)::y(:,zlo(b):),pd(:,zlo(b):),lo(:,zlo(b):)
+    real(real64),intent(out)::hi(:,zlo(b):),ip(zlo(b):zhi(b))
     integer,intent(out)::ierr
     integer::z,g,mode,status
     real(real64)::a,k,s,area,total
@@ -161,7 +183,7 @@ contains
        if(status/=0)return
        rh(z)=nhp*k;rc(z)=ncp*k/sqrt(oml_c_mass)
        up(z)=rh(z)+rc(z)
-       do g=1,4
+       do g=1,fe_uv_group_count()
           call fe_uv_photo(z,a,fe_primary_ev(g),fe_photon_attenuation_cm(g,b), &
                y(g,z),pd(g,z),lo(g,z),hi(g,z),ip(z),status)
           if(status/=0)return
@@ -231,15 +253,22 @@ contains
   end subroutine
 
   subroutine uv_rates(masses,number,abund,t,td,nh,chat,secondary,dn,ds,gas,solid,exc,qbound,fbound,relax,ierr)
-    real(real64),intent(in)::masses(2),number(9),abund(ns),t,td,nh,chat
+    real(real64),intent(in)::masses(2),number(snrt_ngroups),abund(ns),t,td,nh,chat
     procedure(fe_secondary_callback)::secondary
-    real(real64),intent(out)::dn(9),ds(ns),gas,solid,exc,qbound,fbound,relax
+    real(real64),intent(out)::dn(snrt_ngroups),ds(ns),gas,solid,exc,qbound,fbound,relax
     integer,intent(out)::ierr
     real(real64),allocatable::p(:),up(:),down(:),rh(:),rc(:),ke(:),ki(:),y(:,:),pd(:,:),lo(:,:),hi(:,:),ip(:)
-    real(real64)::ng,area,flux(9),cap,pe,det,cycles,h,c,parts(5),f(5),rate,total,variance,mean,ktout,ion
-    real(real64)::cross(9,2),pa(9,2),ps(9,2),pg(9,2),ia(fe_nir,2),isc(fe_nir,2),ig(fe_nir,2)
-    integer::b,z,g,n,status
+    real(real64)::ng,area,flux(snrt_ngroups),cap,pe,det,cycles,h,c,parts(5),f(5),rate,total,variance,mean,ktout,ion
+    real(real64)::cross(snrt_ngroups,2),pa(snrt_ngroups,2),ps(snrt_ngroups,2),pg(snrt_ngroups,2), &
+         ia(fe_nir,2),isc(fe_nir,2),ig(fe_nir,2)
+    integer::b,z,g,n,status,nuv
     dn=0;ds=0;gas=0;solid=0;exc=0;qbound=0;fbound=0;relax=0;ierr=1
+    ! Fe UV photoelectric rates use the selected profile's photon-weighted
+    ! group means. Process the contiguous groups whose means are <=13.6 eV;
+    ! reject mismatched profile extents and leave harder-photon physics closed.
+    if(snrt_ngroups/=fe_ng)return
+    nuv=fe_uv_group_count()
+    if(nuv<1)return
     call fe_electric_basis(1d0,pa,ps,pg,ia,isc,ig,status)
     if(status/=0)return
     do b=1,2
@@ -251,8 +280,8 @@ contains
        area=pi*fe_radius_cm(b)**2;ng=masses(b)/(4*pi/3*fe_density(1)*fe_radius_cm(b)**3)
        n=zhi(b)-zlo(b)+1
        allocate(p(zlo(b):zhi(b)),up(zlo(b):zhi(b)),down(zlo(b):zhi(b)),rh(zlo(b):zhi(b)), &
-            rc(zlo(b):zhi(b)),ke(zlo(b):zhi(b)),ki(zlo(b):zhi(b)),y(4,zlo(b):zhi(b)), &
-            pd(4,zlo(b):zhi(b)),lo(4,zlo(b):zhi(b)),hi(4,zlo(b):zhi(b)),ip(zlo(b):zhi(b)))
+            rc(zlo(b):zhi(b)),ke(zlo(b):zhi(b)),ki(zlo(b):zhi(b)),y(nuv,zlo(b):zhi(b)), &
+            pd(nuv,zlo(b):zhi(b)),lo(nuv,zlo(b):zhi(b)),hi(nuv,zlo(b):zhi(b)),ip(zlo(b):zhi(b)))
        call distribution(b,t,abund(ie)*nh,abund(ihp)*nh,abund(icp)*nh,flux,cross(:,b), &
             p,up,down,rh,rc,ke,ki,y,pd,lo,hi,ip,status)
        if(status/=0)return
@@ -271,7 +300,7 @@ contains
        ! Charge diffusion relaxation ESTIMATE, not a certified spectral gap.
        ! Narrow populations use at least one elementary charging time.
        relax=max(relax,relax_factor*max(variance,variance_floor)/total)
-       do g=1,4
+       do g=1,nuv
           cap=ng*flux(g)*cross(g,b)
           dn(g)=dn(g)-cap;solid=solid+cap*fe_primary_ev(g)
        enddo
@@ -283,7 +312,7 @@ contains
           ds(ie)=ds(ie)-ion/nh
           gas=gas+ion*(ktout-ki(z)-ke(z+1))
           solid=solid+ion*(ki(z)+ke(z+1)-ktout)+h*fe_gas_ip_ev(1)+c*fe_gas_ip_ev(4)
-          do g=1,4
+          do g=1,nuv
              pe=rate*flux(g)*cross(g,b)*y(g,z)
              det=rate*flux(g)*pd(g,z)
              if(pe+det==0)cycle
@@ -319,12 +348,13 @@ contains
     ! All outputs are untouched on failure, including the ledger.
     ! Input state is abundances/H. E are erg/cm3; number is photons/cm3.
     real(real64),intent(in)::dt,chat,nh,td,bins(6)
-    real(real64),intent(inout)::number(9),state(ns),gas_energy,solid_energy,ledger(8)
+    real(real64),intent(inout)::number(snrt_ngroups),state(ns),gas_energy,solid_energy,ledger(8)
     procedure(fe_secondary_callback)::secondary
     integer,intent(out)::ierr
-    real(real64)::n(9),s(ns),dn(9),ds(ns),ug,ud,gd,dd,xd,qb,fb,relax,t
+    real(real64)::n(snrt_ngroups),s(ns),dn(snrt_ngroups),ds(ns),primary_ev(snrt_ngroups)
+    real(real64)::ug,ud,gd,dd,xd,qb,fb,relax,t
     real(real64)::elapsed,h,force,initial,charge0,charge1,chem0,chem1,balance,excit,captured,trial(8),scale
-    integer::iteration,j,status
+    integer::iteration,j,status,nuv
     ierr=1
     if(.not.all(ieee_is_finite([dt,chat,nh,td,bins,number,state,gas_energy,solid_energy])))return
     if(dt<0.or.chat<=0.or.chat>light_speed.or.nh<=0.or.any(bins<0).or.any(number<0).or.any(state<0))return
@@ -333,9 +363,13 @@ contains
     if(sum(bins(5:6))==0.or.dt==0)then
        ledger=0;ierr=0;return
     endif
-    if(any(number(5:9)>0))then
+    nuv=fe_uv_group_count()
+    if(nuv<1)return
+    if(any(number(nuv+1:snrt_ngroups)>0))then
        ierr=2;return
     endif
+    primary_ev=0d0
+    primary_ev(:min(snrt_ngroups,fe_ng))=fe_primary_ev(:min(snrt_ngroups,fe_ng))
     n=number;s=state;ug=gas_energy/ev;ud=solid_energy/ev;elapsed=0;excit=0;trial=0
     initial=ug+ud;charge0=charge(s);chem0=chemical(s)*nh
     do iteration=1,step_cap
@@ -355,7 +389,7 @@ contains
        endif
        ! Omitted-charge relaxation must beat both dt and actual forcing.
        force=dt
-       do j=1,9
+       do j=1,snrt_ngroups
           if(dn(j)<0)force=min(force,n(j)/(-dn(j)))
        enddo
        do j=1,ns
@@ -371,7 +405,7 @@ contains
           ierr=7;return
        endif
        n=n+h*dn;s=s+h*ds;ug=ug+h*gd;ud=ud+h*dd;excit=excit+h*xd
-       trial(1)=trial(1)-h*dot_product(dn,fe_primary_ev)
+       trial(1)=trial(1)-h*dot_product(dn,primary_ev)
        trial(2)=trial(2)+h*gd;trial(3)=trial(3)+h*dd
        trial(5)=max(trial(5),qb/(s(ie)*nh));trial(6)=max(trial(6),fb/(ug+ud))
        trial(7)=max(trial(7),relax/force)
@@ -397,7 +431,7 @@ contains
        ierr=5;return
     endif
     force=dt
-    do j=1,9
+    do j=1,snrt_ngroups
        if(dn(j)<0)force=min(force,n(j)/(-dn(j)))
     enddo
     do j=1,ns
@@ -410,7 +444,7 @@ contains
     endif
     trial(5)=max(trial(5),qb/(s(ie)*nh));trial(6)=max(trial(6),fb/(ug+ud))
     trial(7)=max(trial(7),relax/force)
-    captured=dot_product(number-n,fe_primary_ev);chem1=chemical(s)*nh;charge1=charge(s)
+    captured=dot_product(number-n,primary_ev);chem1=chemical(s)*nh;charge1=charge(s)
     balance=(ug+ud-initial)+(chem1-chem0)+excit-captured
     scale=max(initial,abs(captured),abs(chem1-chem0),tiny(1d0))
     if(abs(balance)>energy_tolerance*scale.or.abs(charge1-charge0)>nuclear_tolerance*max(sum(state),tiny(1d0)))then

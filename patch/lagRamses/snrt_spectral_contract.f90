@@ -3,32 +3,36 @@
 ! The photon state is indexed by group number, so changing the group table
 ! without changing the state checkpoint and source closure together would
 ! silently change the physical meaning of an existing run.  This module owns
-! the canonical nine-group dimensions and loads all source-dependent moments
+! the selected generated group dimensions and loads all source-dependent moments
 ! from an explicit Fortran namelist.  It deliberately does not parse JSON in
 ! the RAMSES process; the JSON ledger remains the review/provenance sidecar.
 !
-! A reference-control contract may be used for wiring tests, but it requires
-! the explicit SNRT_ALLOW_REFERENCE_CONTROL=1 opt-in at runtime. Candidate
-! physical SEDs are readable for inspection but are not runtime-admissible.
-! Only an explicitly approved production contract or the explicitly enabled
-! reference control can pass the runtime gate.
+! The group count, edges and profile identity come from the selected generated
+! build profile; every runtime input must match that compiled profile.
+! A reference-control contract requires the explicit
+! SNRT_ALLOW_REFERENCE_CONTROL=1 opt-in. Candidate SEDs remain
+! runtime-inadmissible; one fixed 25-group candidate may enter a separate
+! bounded diagnostic only after the driver validates its complete fresh M5
+! fixture collectively on every rank.
 module snrt_spectral_contract
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use amr_parameters, only: dp
+  use snrt_group_profile, only: snrt_ngroups,snrt_nedges,snrt_group_edges_ev, &
+       snrt_group_set_id,snrt_group_edges_sha256,snrt_group_profile_runtime_admissible, &
+       snrt_group_source_binding_required,snrt_group_expected_source_id, &
+       snrt_group_expected_source_sha256,snrt_group_expected_source_commit_binding, &
+       snrt_group_expected_source_approval_id,snrt_group_expected_source_status, &
+       snrt_group_expected_fraction_semantics,snrt_group_expected_mean_energy_ev, &
+       snrt_group_expected_energy_fraction,snrt_group_chimes_atomic_bank_sha256, &
+       snrt_group_chimes_molecular_bank_sha256
   implicit none
 
   private
 
-  integer, parameter, public :: snrt_ngroups = 9
-  integer, parameter, public :: snrt_nedges = snrt_ngroups + 1
-
-  real(dp), parameter, public :: snrt_group_edges_ev(snrt_nedges) = &
-       (/ 0.01d0, 1.0d0, 5.6d0, 11.2d0, 13.6d0, 24.59d0, &
-          54.42d0, 500.0d0, 2000.0d0, 10000.0d0 /)
+  public :: snrt_ngroups,snrt_nedges,snrt_group_edges_ev,snrt_group_set_id,snrt_group_edges_sha256
+  public :: snrt_group_profile_runtime_admissible
   character(len=*), parameter, public :: snrt_group_interval_convention = &
        'left_closed_right_open_except_final_closed'
-  character(len=*), parameter, public :: snrt_group_edges_sha256 = &
-       'd28f78f1703730c6c0b9a7d183edfe0c5e6337979e737ce002a572b66fc53ff1'
 
   integer, parameter, public :: snrt_spectral_contract_ok = 0
   integer, parameter, public :: snrt_spectral_contract_err_missing = 1
@@ -64,11 +68,16 @@ module snrt_spectral_contract
 
   logical, save, public :: snrt_spectral_contract_loaded = .false.
   logical, save, public :: snrt_spectral_contract_runtime_allowed = .false.
+  ! A restricted candidate fixture may execute transport without becoming a
+  ! production-admissible profile. Checkpoint/source-production paths continue
+  ! to consult runtime_allowed, which deliberately stays false for candidates.
+  logical, save, public :: snrt_spectral_contract_diagnostic_allowed = .false.
   character(len=64), save, public :: snrt_spectral_contract_status = ''
   character(len=128), save, public :: snrt_spectral_contract_source_id = ''
   character(len=128), save, public :: snrt_spectral_contract_source_sha256 = ''
   character(len=128), save, public :: snrt_spectral_contract_source_commit_binding = ''
   character(len=128), save, public :: snrt_spectral_contract_approval_id = ''
+  character(len=64), save, public :: snrt_spectral_contract_group_set_id = ''
   character(len=128), save, public :: snrt_spectral_contract_group_edges_sha256 = ''
   character(len=128), save, public :: snrt_spectral_contract_interval_convention = ''
   character(len=64), save, public :: snrt_spectral_contract_fraction_semantics = ''
@@ -77,19 +86,26 @@ module snrt_spectral_contract
   public :: snrt_spectral_contract_load
   public :: snrt_spectral_contract_load_from_environment
   public :: snrt_spectral_contract_validate_values
+  public :: snrt_spectral_contract_source_identity_matches
   public :: snrt_spectral_contract_error_name
   public :: snrt_spectral_contract_checkpoint_identity_matches
+  public :: snrt_spectral_contract_execution_allowed
+  public :: snrt_spectral_candidate_25g_diagnostic_requested
+  public :: snrt_spectral_candidate_25g_diagnostic_checkpoint_requested
+  public :: snrt_spectral_contract_set_diagnostic_fixture_validated
   public :: snrt_band_enabled,snrt_node_secondaries_enabled,snrt_band_kind,snrt_d03_band_enabled
   public :: snrt_fe_band_enabled,snrt_grain_band_bins
   public :: snrt_chimes_band_enabled
   public :: snrt_chimes_cold_enabled
   public :: snrt_chimes_transition_enabled
+  public :: snrt_chimes_d03_absorption_enabled
+  public :: snrt_chimes_candidate_d03_absorption_selected
   character(len=*),parameter,public :: snrt_chimes_atomization_sha256 = &
        '0bfa808eda56b7ea41b1a9e083e5379106caa2960f4b8a242f6e2e902606a045'
   character(len=*),parameter,public :: snrt_chimes_molecular_sha256 = &
-       'c313497b68633b5f2909eb02aa14160baf98dbdde1784b73f5dd50f3d9fdad0b'
+       snrt_group_chimes_molecular_bank_sha256
   character(len=*),parameter,public :: snrt_chimes_bank_sha256 = &
-       '998970ed5bb4cfeda01913a72cc3fc62af8ce2fdb55dc924f2704e3abb5391de'
+       snrt_group_chimes_atomic_bank_sha256
   character(len=64),save,public :: snrt_band_model='hhe_maxent64_v1'
   logical,save :: node_secondaries=.false.
   logical,save :: d03_band=.false.
@@ -97,6 +113,7 @@ module snrt_spectral_contract
   logical,save :: chimes_band=.false.
   logical,save :: chimes_cold=.false.
   logical,save :: chimes_transition=.false.
+  logical,save :: chimes_d03_absorption=.false.
 
 contains
 
@@ -124,6 +141,11 @@ contains
              selected=.true.;node_secondaries=.true.;d03_band=.true.;fe_band=.true.;snrt_band_model=trim(value)
           case('chimes_hot_atomic_maxent128_fs2010_v1')
              selected=.true.;chimes_band=.true.;snrt_band_model=trim(value)
+          case('chimes_hot_atomic_d03_absorption_diag_v1')
+             if(trim(snrt_group_set_id)/='snrt_agn25_joint_diag_20261102_v1') &
+                  error stop 'D03+atomic diagnostic receiver requires the exact 25-group candidate profile'
+             selected=.true.;chimes_band=.true.;d03_band=.true.;chimes_d03_absorption=.true.
+             snrt_band_model=trim(value)
           case('chimes_cold_d03_maxent128_fs2010_v1')
              selected=.true.;chimes_band=.true.;chimes_cold=.true.;d03_band=.true.;snrt_band_model=trim(value)
              node_secondaries=.true.
@@ -178,6 +200,22 @@ contains
     enabled=band.and.chimes_transition
   end function
 
+  logical function snrt_chimes_d03_absorption_enabled() result(enabled)
+    logical::band
+    band=snrt_band_enabled()
+    enabled=band.and.chimes_d03_absorption
+  end function
+
+  logical function snrt_chimes_candidate_d03_absorption_selected() result(enabled)
+    ! Restricted 25-group D03 receiver: either the hot atomic diagnostic or
+    ! the existing cold/transition CHIMES receiver.  This selector never
+    ! grants runtime admission; the driver separately validates the exact
+    ! source-bound diagnostic contract before enabling the transaction.
+    enabled=snrt_spectral_candidate_25g_diagnostic_requested().and. &
+         snrt_chimes_band_enabled().and.snrt_d03_band_enabled().and. &
+         (snrt_chimes_d03_absorption_enabled().or.snrt_chimes_transition_enabled())
+  end function
+
   logical function snrt_chimes_cold_enabled() result(enabled)
     logical::band
     band=snrt_band_enabled()
@@ -211,6 +249,7 @@ contains
     character(len=64) :: contract_status
     character(len=128) :: source_id, source_sha256, source_commit_binding
     character(len=128) :: approval_id
+    character(len=64) :: group_set_id
     character(len=128) :: edges_sha256, interval_convention
     character(len=64) :: fraction_semantics
     real(dp) :: edges_input(snrt_nedges)
@@ -221,7 +260,7 @@ contains
     real(dp) :: excess_heii_input(snrt_ngroups)
 
     namelist /snrt_group_contract/ contract_version, contract_status, source_id, &
-         source_sha256, source_commit_binding, approval_id, edges_sha256, &
+         source_sha256, source_commit_binding, approval_id, group_set_id, edges_sha256, &
          interval_convention, fraction_semantics, edges_input, &
          mean_input, fraction_input, hi_input, hei_input, heii_input, &
          excess_hi_input, excess_hei_input, excess_heii_input
@@ -233,13 +272,13 @@ contains
        snrt_spectral_contract_error_message = 'contract path is empty'
        return
     end if
-
     contract_version = 0
     contract_status = ''
     source_id = ''
     source_sha256 = ''
     source_commit_binding = ''
     approval_id = ''
+    group_set_id = ''
     edges_sha256 = ''
     interval_convention = ''
     fraction_semantics = ''
@@ -286,6 +325,28 @@ contains
             'source/hash/commit/approval identity is incomplete or malformed'
        return
     end if
+    if (snrt_group_source_binding_required) then
+       if (.not. snrt_spectral_contract_source_identity_matches(source_id, source_sha256, &
+            source_commit_binding, approval_id, contract_status, fraction_semantics)) then
+          ierr = snrt_spectral_contract_err_identity
+          snrt_spectral_contract_error_message = &
+               'source identity does not match the source contract compiled for this SNRT profile'
+          return
+       end if
+    end if
+    if (len_trim(group_set_id) == 0) then
+       if (trim(snrt_group_set_id) /= 'snrt_agn9_v1') then
+          ierr = snrt_spectral_contract_err_identity
+          snrt_spectral_contract_error_message = &
+               'legacy group contract is admissible only with compiled snrt_agn9_v1'
+          return
+       end if
+    else if (trim(group_set_id) /= trim(snrt_group_set_id)) then
+       ierr = snrt_spectral_contract_err_identity
+       snrt_spectral_contract_error_message = &
+            'group_set_id does not match the compiled SNRT group profile'
+       return
+    end if
     if (.not. snrt_spectral_fraction_semantics_is_known(fraction_semantics)) then
        ierr = snrt_spectral_contract_err_fraction_semantics
        snrt_spectral_contract_error_message = &
@@ -296,7 +357,7 @@ contains
          trim(interval_convention) /= trim(snrt_group_interval_convention)) then
        ierr = snrt_spectral_contract_err_edges
        snrt_spectral_contract_error_message = &
-            'edge digest or interval convention does not match canonical ledger'
+            'edge digest or interval convention does not match compiled group profile'
        return
     end if
     call snrt_spectral_contract_validate_values(edges_input, mean_input, fraction_input, &
@@ -306,6 +367,20 @@ contains
        snrt_spectral_contract_error_message = &
             trim(snrt_spectral_contract_error_name(ierr))
        return
+    end if
+    if (snrt_group_source_binding_required) then
+       ! Source identity alone cannot stop a stale or edited namelist from
+       ! reusing the right hashes with different spectral moments. Bind the
+       ! actual source N/E data to the verified moments ledger at load time.
+       if (any(abs(mean_input - snrt_group_expected_mean_energy_ev) > &
+            64.0d0*epsilon(1.0d0)*max(abs(snrt_group_expected_mean_energy_ev),1.0d0)) .or. &
+            any(abs(fraction_input - snrt_group_expected_energy_fraction) > &
+            64.0d0*epsilon(1.0d0)*max(abs(snrt_group_expected_energy_fraction),1.0d0))) then
+          ierr = snrt_spectral_contract_err_identity
+          snrt_spectral_contract_error_message = &
+               'runtime source means/fractions do not match the bound source moments ledger'
+          return
+       end if
     end if
 
     snrt_group_mean_energy_ev = mean_input
@@ -324,12 +399,17 @@ contains
     snrt_spectral_contract_source_sha256 = trim(source_sha256)
     snrt_spectral_contract_source_commit_binding = trim(source_commit_binding)
     snrt_spectral_contract_approval_id = trim(approval_id)
+    snrt_spectral_contract_group_set_id = trim(snrt_group_set_id)
     snrt_spectral_contract_group_edges_sha256 = trim(edges_sha256)
     snrt_spectral_contract_interval_convention = trim(interval_convention)
     snrt_spectral_contract_fraction_semantics = trim(fraction_semantics)
     snrt_spectral_contract_loaded = .true.
-    snrt_spectral_contract_runtime_allowed = runtime_status_allowed(contract_status) .and. &
-         trim(fraction_semantics) == 'escaped'
+    snrt_spectral_contract_runtime_allowed = snrt_group_profile_runtime_admissible .and. &
+         runtime_status_allowed(contract_status) .and. trim(fraction_semantics) == 'escaped'
+    ! The exact opt-in is necessary but not sufficient. The driver latches
+    ! this permission only after validating the complete fresh M5 fixture on
+    ! every MPI rank.
+    snrt_spectral_contract_diagnostic_allowed = .false.
     if (runtime_status_allowed(contract_status) .and. &
          trim(fraction_semantics) /= 'escaped') then
        snrt_spectral_contract_error_message = &
@@ -368,11 +448,13 @@ contains
     snrt_group_unrepresented_energy_fraction = 1.0d0
     snrt_spectral_contract_loaded = .false.
     snrt_spectral_contract_runtime_allowed = .false.
+    snrt_spectral_contract_diagnostic_allowed = .false.
     snrt_spectral_contract_status = ''
     snrt_spectral_contract_source_id = ''
     snrt_spectral_contract_source_sha256 = ''
     snrt_spectral_contract_source_commit_binding = ''
     snrt_spectral_contract_approval_id = ''
+    snrt_spectral_contract_group_set_id = ''
     snrt_spectral_contract_group_edges_sha256 = ''
     snrt_spectral_contract_interval_convention = ''
     snrt_spectral_contract_fraction_semantics = ''
@@ -387,6 +469,7 @@ contains
     integer :: igroup
     real(dp), parameter :: relative_tolerance = 1.0d-12
     real(dp), parameter :: absolute_tolerance = 1.0d-14
+    logical :: candidate_chimes_owns_hhe
 
     ierr = snrt_spectral_contract_ok
     if (size(edges) /= snrt_nedges .or. size(mean_energy) /= snrt_ngroups .or. &
@@ -437,11 +520,30 @@ contains
        return
     end if
 
-    call validate_species_table(edges, hi, excess_hi, 13.6d0, ierr)
-    if (ierr /= snrt_spectral_contract_ok) return
-    call validate_species_table(edges, hei, excess_hei, 24.59d0, ierr)
-    if (ierr /= snrt_spectral_contract_ok) return
-    call validate_species_table(edges, heii, excess_heii, 54.42d0, ierr)
+    candidate_chimes_owns_hhe = trim(snrt_group_set_id) == &
+         'snrt_agn25_joint_diag_20261102_v1' .and. &
+         .not. snrt_group_profile_runtime_admissible .and. &
+         snrt_group_source_binding_required .and. &
+         trim(snrt_group_expected_source_id) == &
+         'snrt_agn25_joint_diag_20261102_v1_su_m8_mdotm1_fesc1' .and. &
+         trim(snrt_group_expected_source_status) == snrt_spectral_status_candidate .and. &
+         snrt_chimes_candidate_d03_absorption_selected()
+    if (candidate_chimes_owns_hhe) then
+       ! In this exact candidate receiver, CHIMES atomic shells own H/He
+       ! absorption and D03 is applied competitively at the same nodes.  The
+       ! legacy grey tables must therefore be identically zero; accepting
+       ! populated arrays here would invite a double sink.
+       if (any(hi /= 0.0d0) .or. any(hei /= 0.0d0) .or. any(heii /= 0.0d0) .or. &
+            any(excess_hi /= 0.0d0) .or. any(excess_hei /= 0.0d0) .or. &
+            any(excess_heii /= 0.0d0)) ierr = snrt_spectral_contract_err_values
+       if (ierr /= snrt_spectral_contract_ok) return
+    else
+       call validate_species_table(edges, hi, excess_hi, 13.6d0, ierr)
+       if (ierr /= snrt_spectral_contract_ok) return
+       call validate_species_table(edges, hei, excess_hei, 24.59d0, ierr)
+       if (ierr /= snrt_spectral_contract_ok) return
+       call validate_species_table(edges, heii, excess_heii, 54.42d0, ierr)
+    end if
   end subroutine snrt_spectral_contract_validate_values
 
   subroutine validate_species_table(edges, cross_section, excess_energy, &
@@ -501,6 +603,20 @@ contains
          is_hex(source_commit_binding, 40) .and. is_hex(edges_sha256, 64)
   end function valid_identity
 
+  logical function snrt_spectral_contract_source_identity_matches(source_id, source_sha256, &
+       source_commit_binding, approval_id, contract_status, fraction_semantics)
+    character(len=*), intent(in) :: source_id, source_sha256, source_commit_binding
+    character(len=*), intent(in) :: approval_id, contract_status, fraction_semantics
+
+    snrt_spectral_contract_source_identity_matches = snrt_group_source_binding_required .and. &
+         trim(source_id) == trim(snrt_group_expected_source_id) .and. &
+         trim(source_sha256) == trim(snrt_group_expected_source_sha256) .and. &
+         trim(source_commit_binding) == trim(snrt_group_expected_source_commit_binding) .and. &
+         trim(approval_id) == trim(snrt_group_expected_source_approval_id) .and. &
+         trim(contract_status) == trim(snrt_group_expected_source_status) .and. &
+         trim(fraction_semantics) == trim(snrt_group_expected_fraction_semantics)
+  end function snrt_spectral_contract_source_identity_matches
+
   logical function is_hex(value, required_length)
     character(len=*), intent(in) :: value
     integer, intent(in) :: required_length
@@ -549,6 +665,63 @@ contains
          opt_in_length > len(opt_in)) return
     runtime_status_allowed = trim(opt_in(1:opt_in_length)) == '1'
   end function runtime_status_allowed
+
+  logical function snrt_spectral_candidate_25g_diagnostic_requested()
+    character(len=8) :: opt_in
+    integer :: opt_in_length, opt_in_status
+
+    snrt_spectral_candidate_25g_diagnostic_requested = .false.
+    if (snrt_group_profile_runtime_admissible .or. &
+         trim(snrt_group_set_id) /= 'snrt_agn25_joint_diag_20261102_v1') return
+    if (.not. snrt_group_source_binding_required) return
+    if (trim(snrt_group_expected_source_id) /= &
+         'snrt_agn25_joint_diag_20261102_v1_su_m8_mdotm1_fesc1' .or. &
+         trim(snrt_group_expected_source_sha256) /= &
+         '658583a70de61273c05b8bac039366cec3c351ed4baafb52e120dd6aefa8ba70' .or. &
+         trim(snrt_group_expected_source_commit_binding) /= &
+         '200dbbf4e606bbf4a7d6d72c7883951940c8f57a' .or. &
+         trim(snrt_group_expected_source_approval_id) /= &
+         'candidate_bounded_source_contract_2026-11-02' .or. &
+         trim(snrt_group_expected_source_status) /= snrt_spectral_status_candidate .or. &
+         trim(snrt_group_expected_fraction_semantics) /= 'escaped') return
+
+    opt_in = ''
+    opt_in_length = 0
+    call get_environment_variable('SNRT_ALLOW_25G_AGN_DIAGNOSTIC', opt_in, &
+         length=opt_in_length, status=opt_in_status)
+    if (opt_in_status /= 0 .or. opt_in_length /= 1) return
+    snrt_spectral_candidate_25g_diagnostic_requested = opt_in(1:1) == '1'
+  end function snrt_spectral_candidate_25g_diagnostic_requested
+
+  logical function snrt_spectral_candidate_25g_diagnostic_checkpoint_requested()
+    character(len=8) :: opt_in
+    integer :: opt_in_length, opt_in_status
+
+    snrt_spectral_candidate_25g_diagnostic_checkpoint_requested = .false.
+    if (.not. snrt_spectral_candidate_25g_diagnostic_requested()) return
+    opt_in = ''
+    opt_in_length = 0
+    call get_environment_variable('SNRT_ALLOW_25G_AGN_DIAGNOSTIC_RESTART', opt_in, &
+         length=opt_in_length, status=opt_in_status)
+    if (opt_in_status /= 0 .or. opt_in_length /= 1) return
+    snrt_spectral_candidate_25g_diagnostic_checkpoint_requested = opt_in(1:1) == '1'
+  end function snrt_spectral_candidate_25g_diagnostic_checkpoint_requested
+
+  logical function snrt_spectral_contract_execution_allowed()
+    snrt_spectral_contract_execution_allowed = snrt_spectral_contract_runtime_allowed .or. &
+         snrt_spectral_contract_diagnostic_allowed
+  end function snrt_spectral_contract_execution_allowed
+
+  subroutine snrt_spectral_contract_set_diagnostic_fixture_validated(validated)
+    logical,intent(in)::validated
+    snrt_spectral_contract_diagnostic_allowed=.false.
+    if(.not.validated.or..not.snrt_spectral_contract_loaded)return
+    if(.not.snrt_spectral_candidate_25g_diagnostic_requested())return
+    if(trim(snrt_spectral_contract_status)/=snrt_spectral_status_candidate)return
+    if(trim(snrt_spectral_contract_fraction_semantics)/='escaped')return
+    if(trim(snrt_spectral_contract_group_set_id)/='snrt_agn25_joint_diag_20261102_v1')return
+    snrt_spectral_contract_diagnostic_allowed=.true.
+  end subroutine snrt_spectral_contract_set_diagnostic_fixture_validated
 
   logical function snrt_spectral_contract_checkpoint_identity_matches(source_id, &
        source_sha256, source_commit_binding, approval_id, edges_sha256, &

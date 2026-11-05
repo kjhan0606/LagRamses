@@ -16,7 +16,7 @@ module snrt_dark_matter_runtime
   use dust_composition_optics, only: d03_cell_weights
   use snrt_chimes_runtime, only: chimes_live_initialize,chimes_live_capacity, &
        chimes_live_stage,chimes_live_band_stage,chimes_live_cold_stage
-  use snrt_chimes, only: chimes_ns
+  use snrt_chimes, only: chimes_ns,chimes_ng
   use snrt_spectral_contract, only: snrt_chimes_band_enabled,snrt_chimes_cold_enabled
   use snrt_atomic_cooling, only: atomic_mh
   use snrt_agn_source, only: snrt_c_cgs
@@ -64,8 +64,8 @@ contains
     integer(c_int),pointer::cells(:),status(:)
     real(c_double),pointer::chemical(:,:),gas_total(:),hydrogen(:),td(:)
     integer::j,k,cell,ierr
-    real(dp)::row(nvar_all),state(chimes_ns),energy,number(1,9),radiation(1,9)
-    real(dp)::next_n(1,9),next_e(1,9),ledger(11),grain_n(9),grain_e(9),cell_td,cell_density
+    real(dp)::row(nvar_all),state(chimes_ns),energy,number(1,chimes_ng),radiation(1,chimes_ng)
+    real(dp)::next_n(1,chimes_ng),next_e(1,chimes_ng),ledger(11),grain_n(chimes_ng),grain_e(chimes_ng),cell_td,cell_density
     real(dp)::cell_curve(snrt_dust_contract_number_temperature)
     call c_f_pointer(context,work)
     call c_f_pointer(work%cells,cells,[work%count])
@@ -118,7 +118,8 @@ contains
     real(dp),allocatable::incoming(:,:,:),ir_trial(:,:,:)
     real(dp)::sl,st,sd,sv,snh,st2,dt,dx,volume,energy_unit,chat,physical_cmb
     real(dp)::row(nvar_all),next_state(chimes_ns),nhydrogen
-    real(dp)::zero_n(1,9),zero_e(1,9),next_n(1,9),next_e(1,9),ledger(11),grain_n(9),grain_e(9)
+    real(dp)::zero_n(1,chimes_ng),zero_e(1,chimes_ng),next_n(1,chimes_ng),next_e(1,chimes_ng),ledger(11), &
+         grain_n(chimes_ng),grain_e(chimes_ng)
     real(dp)::gas_code,nonthermal,td,gas_delta,local_budget(4),global_budget(4),local_balance,global_balance
     real(dp)::chimes_wall,dust_wall,tile_chimes_start,tile_dust_start,tile_chimes_wall,tile_dust_wall
     real(dp)::global_chimes_wall,global_dust_wall

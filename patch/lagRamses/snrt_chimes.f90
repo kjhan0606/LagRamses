@@ -2,13 +2,14 @@
 ! the no-CHIMES production baseline never needs this external dependency.
 module snrt_chimes
   use iso_c_binding
-  use omp_lib, only: omp_get_wtime
+  use omp_lib, only: omp_get_thread_num,omp_get_wtime
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use snrt_spectral_contract, only: chimes_ng => snrt_ngroups
   use snrt_thermochemistry, only: snrt_secondary_fractions,snrt_secondary_tables_loaded, &
        snrt_secondary_energy_slice,snrt_secondary_raw_grid,snrt_secondary_nenergy
   implicit none
   private
-  integer,parameter,public::chimes_ns=157,chimes_ng=9
+  integer,parameter,public::chimes_ns=157
   ! Last local split timings; thread-private, never part of the physical state.
   real(c_double),public,save::chimes_last_split_wall(2)=0
 !$omp threadprivate(chimes_last_split_wall)
@@ -18,15 +19,18 @@ module snrt_chimes
   public::chimes_initialize,chimes_neutral,chimes_budget,chimes_cell
   public::chimes_reconcile,chimes_locked,chimes_identity
   public::chimes_boltzmann
+  public::chimes_ng
   public::chimes_set_expansion,chimes_cmb_temperature
   public::chimes_nuclear_sums
   public::chimes_group_binding
   public::chimes_secondary_partition
-  public::chimes_reconcile_charged,chimes_cell_charged
+  public::chimes_reconcile_charged,chimes_reconcile_transported,chimes_cell_charged
   public::chimes_charge_supported
   public::chimes_band_load,chimes_band_free,chimes_band_reactions,chimes_band_moments
   public::chimes_band_photo_step
   public::chimes_band_photo_dust_step
+  public::chimes_band_photo_dust_groups
+  public::chimes_photo_debug_context
   public::chimes_molecular_load,chimes_molecular_free,chimes_band_photo_molecular_step
   public::chimes_molecular_factors,chimes_cell_band_cold_molecular
   public::chimes_molecular_temperature_max
@@ -47,12 +51,16 @@ module snrt_chimes
        import c_long_long
        integer(c_long_long),intent(out)::out(3)
      end subroutine
+     subroutine chimes_photo_debug_context(rank,cell,thread) bind(C,name='snrt_chimes_photo_debug_context')
+       import c_int
+       integer(c_int),value::rank,cell,thread
+     end subroutine
      integer(c_int) function chimes_band_nodes(handle,nd,number,energy,nn,ne) bind(C,name='snrt_chimes_band_nodes')
        import
        type(c_ptr),value::handle
        integer(c_int),value::nd
-       real(c_double),intent(in)::number(nd,9),energy(nd,9)
-       real(c_double),intent(inout)::nn(nd,128,9),ne(nd,128,9)
+       real(c_double),intent(in)::number(nd,chimes_ng),energy(nd,chimes_ng)
+       real(c_double),intent(inout)::nn(nd,128,chimes_ng),ne(nd,128,chimes_ng)
      end function
      integer(c_int) function chimes_band_photo_molecular_phases(handle,mol,nd,nh,dt,chat,alpha,shield, &
           pumping,old,number,energy,new,next_number,next_energy,ledger,grain_number,grain_energy, &
@@ -61,10 +69,10 @@ module snrt_chimes
        type(c_ptr),value::handle,mol
        integer(c_int),value::nd
        real(c_double),value::nh,dt,chat,pumping
-       real(c_double),intent(in)::alpha(128,9),shield(2),old(chimes_ns),number(nd,9),energy(nd,9)
-       real(c_double),intent(in)::phase_alpha(128,9,4),directions(3,nd)
-       real(c_double),intent(inout)::new(chimes_ns),next_number(nd,9),next_energy(nd,9),ledger(10)
-       real(c_double),intent(inout)::grain_number(9),grain_energy(9),phase_energy(9,4),phase_moment(3,4)
+       real(c_double),intent(in)::alpha(128,chimes_ng),shield(2),old(chimes_ns),number(nd,chimes_ng),energy(nd,chimes_ng)
+       real(c_double),intent(in)::phase_alpha(128,chimes_ng,4),directions(3,nd)
+       real(c_double),intent(inout)::new(chimes_ns),next_number(nd,chimes_ng),next_energy(nd,chimes_ng),ledger(10)
+       real(c_double),intent(inout)::grain_number(chimes_ng),grain_energy(chimes_ng),phase_energy(chimes_ng,4),phase_moment(3,4)
      end function
      integer(c_int) function chimes_transition_supported() bind(C,name='snrt_chimes_transition_supported')
        import
@@ -75,11 +83,13 @@ module snrt_chimes
        real(c_double),intent(in)::old(chimes_ns)
        real(c_double),intent(inout)::new(chimes_ns),tnext,cost
      end function
-     integer(c_int) function chimes_cell_transition_dark(controls,elements,old,atomic,t,new,elapsed) &
+     integer(c_int) function chimes_cell_transition_dark(controls,elements,old,atomic,nd,number,energy,solid_charge,t,new,elapsed) &
           bind(C,name='snrt_chimes_cell_transition_dark')
        import
        real(c_double),intent(in)::controls(9),elements(11),old(chimes_ns)
-       integer(c_int),value::atomic
+       integer(c_int),value::atomic,nd
+       real(c_double),intent(in)::number(nd,chimes_ng),energy(nd,chimes_ng)
+       real(c_double),value::solid_charge
        real(c_double),intent(out)::t,new(chimes_ns),elapsed
      end function
      real(c_double) function chimes_molecular_temperature_max() bind(C,name='snrt_chimes_molecular_temperature_max')
@@ -92,9 +102,9 @@ module snrt_chimes
        type(c_ptr),value::handle,mol
        integer(c_int),value::nd
        real(c_double),value::nh,dt,chat,pumping
-       real(c_double),intent(in)::alpha(128,9),shield(2),old(chimes_ns),number(nd,9),energy(nd,9)
-       real(c_double),intent(inout)::new(chimes_ns),next_number(nd,9),next_energy(nd,9),ledger(10)
-       real(c_double),intent(inout)::grain_number(9),grain_energy(9)
+       real(c_double),intent(in)::alpha(128,chimes_ng),shield(2),old(chimes_ns),number(nd,chimes_ng),energy(nd,chimes_ng)
+       real(c_double),intent(inout)::new(chimes_ns),next_number(nd,chimes_ng),next_energy(nd,chimes_ng),ledger(10)
+       real(c_double),intent(inout)::grain_number(chimes_ng),grain_energy(chimes_ng)
      end function
      integer(c_int) function chimes_cell_cold_dark(controls,elements,old,t,new) bind(C,name='snrt_chimes_cell_cold_dark')
        import
@@ -123,8 +133,8 @@ module snrt_chimes
        type(c_ptr),value::handle,mol
        integer(c_int),value::nd
        real(c_double),value::nh,dt,chat,pumping
-       real(c_double),intent(in)::alpha(128,9),shield(2),old(chimes_ns),number(nd,9),energy(nd,9)
-       real(c_double),intent(inout)::new(chimes_ns),next_number(nd,9),next_energy(nd,9),ledger(10)
+       real(c_double),intent(in)::alpha(128,chimes_ng),shield(2),old(chimes_ns),number(nd,chimes_ng),energy(nd,chimes_ng)
+       real(c_double),intent(inout)::new(chimes_ns),next_number(nd,chimes_ng),next_energy(nd,chimes_ng),ledger(10)
      end function
      integer(c_int) function chimes_band_photo_dust_step(handle,nd,nh,dt,chat,alpha,old,number,energy,new, &
           next_number,next_energy,ledger) bind(C,name='snrt_chimes_band_photo_dust_step')
@@ -132,8 +142,18 @@ module snrt_chimes
        type(c_ptr),value::handle
        integer(c_int),value::nd
        real(c_double),value::nh,dt,chat
-       real(c_double),intent(in)::alpha(128,9),old(chimes_ns),number(nd,9),energy(nd,9)
-       real(c_double),intent(inout)::new(chimes_ns),next_number(nd,9),next_energy(nd,9),ledger(10)
+       real(c_double),intent(in)::alpha(128,chimes_ng),old(chimes_ns),number(nd,chimes_ng),energy(nd,chimes_ng)
+       real(c_double),intent(inout)::new(chimes_ns),next_number(nd,chimes_ng),next_energy(nd,chimes_ng),ledger(10)
+     end function
+     integer(c_int) function chimes_band_photo_dust_groups(handle,nd,nh,dt,chat,alpha,old,number,energy,new, &
+          next_number,next_energy,ledger,grain_number,grain_energy) bind(C,name='snrt_chimes_band_photo_dust_groups')
+       import
+       type(c_ptr),value::handle
+       integer(c_int),value::nd
+       real(c_double),value::nh,dt,chat
+       real(c_double),intent(in)::alpha(128,chimes_ng),old(chimes_ns),number(nd,chimes_ng),energy(nd,chimes_ng)
+       real(c_double),intent(inout)::new(chimes_ns),next_number(nd,chimes_ng),next_energy(nd,chimes_ng)
+       real(c_double),intent(inout)::ledger(10),grain_number(chimes_ng),grain_energy(chimes_ng)
      end function
      integer(c_int) function chimes_band_photo_step(handle,nd,nh,dt,chat,old,number,energy,new, &
           next_number,next_energy,ledger) bind(C,name='snrt_chimes_band_photo_step')
@@ -141,8 +161,8 @@ module snrt_chimes
        type(c_ptr),value::handle
        integer(c_int),value::nd
        real(c_double),value::nh,dt,chat
-       real(c_double),intent(in)::old(chimes_ns),number(nd,9),energy(nd,9)
-       real(c_double),intent(inout)::new(chimes_ns),next_number(nd,9),next_energy(nd,9),ledger(8)
+       real(c_double),intent(in)::old(chimes_ns),number(nd,chimes_ng),energy(nd,chimes_ng)
+       real(c_double),intent(inout)::new(chimes_ns),next_number(nd,chimes_ng),next_energy(nd,chimes_ng),ledger(8)
      end function
      ! Atomic spectral building block only; this does not enable the live
      ! CHIMES+N/E receiver. Load/free outside threaded cell loops.
@@ -168,9 +188,9 @@ module snrt_chimes
        import
        type(c_ptr),value::handle
        integer(c_int),value::nd,nr
-       real(c_double),intent(in)::number(nd,9),energy(nd,9)
+       real(c_double),intent(in)::number(nd,chimes_ng),energy(nd,chimes_ng)
        ! N*sigma, N*sigma*E, N*sigma*(E-binding); not accepted photons.
-       real(c_double),intent(inout)::moments(nr,3,9)
+       real(c_double),intent(inout)::moments(nr,3,chimes_ng)
      end function
      integer(c_int) function chimes_charge_supported() bind(C,name='snrt_chimes_charge_supported')
        import
@@ -185,11 +205,26 @@ module snrt_chimes
        real(c_double),value::solid_charge
        real(c_double),intent(out)::new(chimes_ns)
      end function
+     integer(c_int) function chimes_reconcile_transported(elements,total_element_scale,old,solid_charge,new) &
+          bind(C,name='snrt_chimes_reconcile_transported')
+       import
+       real(c_double),intent(in)::elements(11),total_element_scale(11),old(chimes_ns)
+       real(c_double),value::solid_charge
+       real(c_double),intent(out)::new(chimes_ns)
+     end function
      integer(c_int) function chimes_cell_charged(controls,elements,old,solid_charge,photons,t,new,next_photons) &
           bind(C,name='snrt_chimes_cell_charged')
        import
        real(c_double),intent(in)::controls(9),elements(11),old(chimes_ns),photons(chimes_ng)
        real(c_double),value::solid_charge
+       real(c_double),intent(out)::t,new(chimes_ns),next_photons(chimes_ng)
+     end function
+     integer(c_int) function chimes_cell_charged_unilluminated(controls,elements,old,solid_charge,photons, &
+          zero_incident,t,new,next_photons) bind(C,name='snrt_chimes_cell_charged_unilluminated')
+       import
+       real(c_double),intent(in)::controls(9),elements(11),old(chimes_ns),photons(chimes_ng)
+       real(c_double),value::solid_charge
+       integer(c_int),value::zero_incident
        real(c_double),intent(out)::t,new(chimes_ns),next_photons(chimes_ng)
      end function
      integer(c_int) function chimes_secondary_partition(energy,state,fractions) &
@@ -277,25 +312,29 @@ contains
 
   integer function chimes_cell_band_cold_molecular(handle,mol,nd,controls,elements,old,alpha,number,energy, &
        temperature,new,next_number,next_energy,ledger,grain_number,grain_energy,transition,event_info, &
-       phase_alpha,directions,phase_energy,phase_moment) result(status)
+       phase_alpha,directions,phase_energy,phase_moment,debug_cell,debug_rank,solid_charge) result(status)
     ! Cold split, optionally extended by the explicit energy-aware transition.
     ! Molecular carriers convert only through the budgeted atomization helper;
     ! this is NOT permission to extrapolate molecular rates or raise Tmol_K.
     ! Shielding/pump factors are frozen at entry (first-order coefficient split).
     type(c_ptr),intent(in)::handle,mol
     integer,intent(in)::nd
-    real(c_double),intent(in)::controls(9),elements(11),old(chimes_ns),alpha(128,9),number(nd,9),energy(nd,9)
-    real(c_double),intent(inout)::temperature,new(chimes_ns),next_number(nd,9),next_energy(nd,9),ledger(11)
-    real(c_double),optional,intent(inout)::grain_number(9),grain_energy(9)
+    real(c_double),intent(in)::controls(9),elements(11),old(chimes_ns),alpha(128,chimes_ng),number(nd,chimes_ng),energy(nd,chimes_ng)
+    real(c_double),intent(inout)::temperature,new(chimes_ns),next_number(nd,chimes_ng),next_energy(nd,chimes_ng),ledger(11)
+    real(c_double),optional,intent(inout)::grain_number(chimes_ng),grain_energy(chimes_ng)
     logical,optional,intent(in)::transition
     real(c_double),optional,intent(inout)::event_info(2) ! event count, cost eV/cm3
-    real(c_double),optional,intent(in)::phase_alpha(128,9,4),directions(3,nd)
-    real(c_double),optional,intent(inout)::phase_energy(9,4),phase_moment(3,4)
-    real(c_double)::phase_e(9,4),phase_p(3,4)
-    real(c_double)::photo(chimes_ns),chem(chimes_ns),pn(nd,9),pe(nd,9),budget(11),ctl(9),factors(3)
-    real(c_double)::measured(11),charge,temp,gn(9),ge(9),post_photo,tmax
+    real(c_double),optional,intent(in)::phase_alpha(128,chimes_ng,4),directions(3,nd)
+    real(c_double),optional,intent(inout)::phase_energy(chimes_ng,4),phase_moment(3,4)
+    integer,optional,intent(in)::debug_cell
+    integer,optional,intent(in)::debug_rank
+    real(c_double),optional,intent(in)::solid_charge
+    real(c_double)::phase_e(chimes_ng,4),phase_p(3,4)
+    real(c_double)::photo(chimes_ns),chem(chimes_ns),pn(nd,chimes_ng),pe(nd,chimes_ng),budget(11),ctl(9),factors(3)
+    real(c_double)::measured(11),charge,temp,solid_q,gn(chimes_ng),ge(chimes_ng),post_photo,tmax
     real(c_double)::incoming(chimes_ns),projected(chimes_ns),tin,elapsed,root_time,cost,entry_cost,events(2)
     logical::general,atomic_remainder,zero_incident
+    integer::photo_debug_rank,photo_debug_cell
     real(c_double)::split_start
     real(c_double),parameter::ev_erg=1.602176634d-12
     status=2
@@ -312,10 +351,13 @@ contains
     if(controls(2)<10.or.controls(2)>merge(1d9,tmax,general).or.controls(3)<1.or.controls(3)>1d4)return
     if(controls(9)<=0.or.controls(9)>1.or.any(.not.ieee_is_finite(elements)).or.any(elements<0))return
     if(2.99792458d10*controls(9)*controls(4)>controls(5)*(1+1d-12))return
+    solid_q=0d0
+    if(present(solid_charge))solid_q=solid_charge
+    if(.not.ieee_is_finite(solid_q))return
     status=chimes_budget(old,measured,charge)
     if(status/=0)return
     status=2
-    if(any(abs(measured-elements)>1d-8*max(elements,1d-20)).or.abs(charge)>1d-10)return
+    if(any(abs(measured-elements)>1d-8*max(elements,1d-20)).or.abs(charge+solid_q)>1d-10)return
     incoming=old;tin=controls(2);entry_cost=0;events=0;atomic_remainder=.false.
     if(general.and.tin>=tmax.and.controls(4)>0)then
        status=chimes_atomize(tin,incoming,projected,temp,cost)
@@ -323,7 +365,8 @@ contains
        events=[merge(1d0,0d0,any(incoming(138:157)>0)),cost*controls(1)]
        incoming=projected;tin=temp;entry_cost=cost*controls(1);atomic_remainder=.true.
     endif
-    zero_incident=all(number==0d0).and.all(energy==0d0)
+    zero_incident=all(ieee_is_finite(number)).and.all(ieee_is_finite(energy))
+    if(zero_incident)zero_incident=all(number==0d0).and.all(energy==0d0)
     if(atomic_remainder.or.(general.and.tin>=tmax).or.zero_incident)then
        ! Shielding/pumping factors affect only photo-rates. Keep the native
        ! photo adapter call below so it still validates the zero field and
@@ -337,6 +380,11 @@ contains
        return
     endif
     split_start=omp_get_wtime()
+    photo_debug_rank=-1;photo_debug_cell=-1
+    if(present(debug_rank))photo_debug_rank=debug_rank
+    if(present(debug_cell))photo_debug_cell=debug_cell
+    call chimes_photo_debug_context(int(photo_debug_rank,c_int),int(photo_debug_cell,c_int), &
+         int(omp_get_thread_num(),c_int))
     if(present(phase_alpha))then
        status=chimes_band_photo_molecular_phases(handle,mol,nd,controls(1),controls(4),2.99792458d10*controls(9), &
             alpha,factors(1:2),factors(3),incoming,number,energy,photo,pn,pe,budget(1:10),gn,ge, &
@@ -345,6 +393,7 @@ contains
        status=chimes_band_photo_molecular_groups(handle,mol,nd,controls(1),controls(4),2.99792458d10*controls(9), &
             alpha,factors(1:2),factors(3),incoming,number,energy,photo,pn,pe,budget(1:10),gn,ge)
     endif
+    call chimes_photo_debug_context(-1_c_int,-1_c_int,-1_c_int)
     call chimes_photo_solver_stats(chimes_last_photo_solver)
     if(status/=0)then
        write(*,*)'CHIMES cold-stage rejection at spectral photo receiver status=',status
@@ -374,7 +423,8 @@ contains
           events=events+[merge(1d0,0d0,any(photo(138:157)>0)),cost*controls(1)]
           photo=projected;ctl(2)=temp;atomic_remainder=.true.
        endif
-       status=chimes_cell_transition_dark(ctl,elements,photo,merge(1,0,atomic_remainder),temp,chem,elapsed)
+       status=chimes_cell_transition_dark(ctl,elements,photo,merge(1,0,atomic_remainder), &
+            nd,number,energy,solid_q,temp,chem,elapsed)
        if(status==51)then
           ! A CVODE root, not a failed Newton trial or bisection on status50.
           status=8
@@ -384,7 +434,8 @@ contains
           if(status/=0)return
           events=events+[merge(1d0,0d0,any(chem(138:157)>0)),cost*controls(1)]
           ctl(2)=tin;ctl(4)=max(0d0,ctl(4)-root_time)
-          status=chimes_cell_transition_dark(ctl,elements,projected,1,temp,chem,elapsed)
+          status=chimes_cell_transition_dark(ctl,elements,projected,1,nd,number,energy, &
+               solid_q,temp,chem,elapsed)
        endif
     else
        status=chimes_cell_cold_dark(ctl,elements,photo,temp,chem)
@@ -408,19 +459,25 @@ contains
   end function
 
   integer function chimes_cell_band_hot_atomic(handle,nd,controls,elements,old,solid_q,number,energy, &
-       temperature,new,next_number,next_energy,ledger) result(status)
+       temperature,new,next_number,next_energy,ledger,dust_alpha,grain_number,grain_energy) result(status)
     ! First-order photo -> nonradiative chemistry split on the existing
     ! CHIMES hot atomic network. NOT a live cold/molecular/dust receiver.
     ! ledger(9) is signed dark-step gas thermal change, not escaped radiation.
     type(c_ptr),intent(in)::handle
     integer,intent(in)::nd
-    real(c_double),intent(in)::controls(9),elements(11),old(chimes_ns),solid_q,number(nd,9),energy(nd,9)
-    real(c_double),intent(inout)::temperature,new(chimes_ns),next_number(nd,9),next_energy(nd,9),ledger(9)
-    real(c_double)::photo(chimes_ns),chem(chimes_ns),pn(nd,9),pe(nd,9),budget(9),ctl(9)
-    real(c_double)::measured(11),charge,zero_photons(9),dark_photons(9),before,after,temp,post_photo_energy
+    real(c_double),intent(in)::controls(9),elements(11),old(chimes_ns),solid_q,number(nd,chimes_ng),energy(nd,chimes_ng)
+    real(c_double),intent(inout)::temperature,new(chimes_ns),next_number(nd,chimes_ng),next_energy(nd,chimes_ng),ledger(9)
+    real(c_double),optional,intent(in)::dust_alpha(128,chimes_ng)
+    real(c_double),optional,intent(out)::grain_number(chimes_ng),grain_energy(chimes_ng)
+    real(c_double)::photo(chimes_ns),chem(chimes_ns),pn(nd,chimes_ng),pe(nd,chimes_ng),budget(9),ctl(9)
+    real(c_double)::photo_budget(10),dust_n(chimes_ng),dust_e(chimes_ng)
+    real(c_double)::measured(11),charge,zero_photons(chimes_ng),dark_photons(chimes_ng),before,after,temp,post_photo_energy
+    integer(c_int)::zero_incident
     real(c_double),parameter::ev_erg=1.602176634d-12,tmol=1d5
     status=2
     if(nd<1.or.nd>720.or..not.c_associated(handle))return
+    if((present(dust_alpha).neqv.present(grain_number)).or. &
+         (present(dust_alpha).neqv.present(grain_energy)))return
     if(any(.not.ieee_is_finite(controls)).or.any(controls<0).or.controls(1)<=0)return
     if(.not.ieee_is_finite(solid_q).or.any(.not.ieee_is_finite(elements)))return
     if(any(elements<0).or.controls(3)<1.or.controls(3)>1d4.or.controls(9)<=0.or.controls(9)>1)return
@@ -432,11 +489,20 @@ contains
     if(status/=0)return
     status=2
     if(any(abs(measured-elements)>1d-8*max(elements,1d-20)).or.abs(charge)>1d-10)return
-    status=chimes_band_photo_step(handle,nd,controls(1),controls(4),2.99792458d10*controls(9), &
-         old,number,energy,photo,pn,pe,budget(1:8))
+    if(present(dust_alpha))then
+       status=chimes_band_photo_dust_groups(handle,nd,controls(1),controls(4),2.99792458d10*controls(9), &
+            dust_alpha,old,number,energy,photo,pn,pe,photo_budget,dust_n,dust_e)
+       budget(1:8)=photo_budget(1:8)
+    else
+       status=chimes_band_photo_step(handle,nd,controls(1),controls(4),2.99792458d10*controls(9), &
+            old,number,energy,photo,pn,pe,budget(1:8))
+    endif
     if(status/=0)return
     if(controls(4)==0)then
        temperature=controls(2);new=old;next_number=number;next_energy=energy;ledger=0
+       if(present(dust_alpha))then
+          grain_number=0;grain_energy=0
+       endif
        return
     endif
     before=sum(old);after=sum(photo)
@@ -448,13 +514,23 @@ contains
     if(any(photo(138:157)/=0))return
     post_photo_energy=1.5d0*chimes_boltzmann()*controls(1)*after*ctl(2)
     zero_photons=0
-    status=chimes_cell_charged(ctl,elements,photo,solid_q,zero_photons,temp,chem,dark_photons)
+    ! The second operator is dark by construction; carry the original N/E
+    ! state separately so roundoff repair cannot mistake it for no incident light.
+    zero_incident=0_c_int
+    if(all(ieee_is_finite(number)).and.all(ieee_is_finite(energy)))then
+       if(all(number==0).and.all(energy==0))zero_incident=1_c_int
+    endif
+    status=chimes_cell_charged_unilluminated(ctl,elements,photo,solid_q,zero_photons, &
+         zero_incident,temp,chem,dark_photons)
     if(status/=0)return
     status=8
     if(temp<=tmol.or.any(chem(138:157)/=0).or.any(dark_photons/=0))return
     budget(9)=(1.5d0*chimes_boltzmann()*controls(1)*sum(chem)*temp-post_photo_energy)/ev_erg
     if(.not.ieee_is_finite(budget(9)))return
     temperature=temp;new=chem;next_number=pn;next_energy=pe;ledger=budget;status=0
+    if(present(dust_alpha))then
+       grain_number=dust_n;grain_energy=dust_e
+    endif
   end function
 
   integer(c_int) function fs_grid(n,energies,xi,values) bind(C,name='snrt_chimes_fs_grid')

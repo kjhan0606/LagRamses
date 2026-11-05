@@ -40,7 +40,7 @@ module snrt_state
   integer, parameter, public :: snrt_nmu = 8*(snrt_angular_level+1)
   integer, parameter, public :: snrt_nphi = 10*(snrt_angular_level+1)
   integer, parameter, public :: snrt_ndirection = snrt_nmu*snrt_nphi
-  ! The spectral module owns the canonical nine-group dimensions.  Keep this
+  ! The selected build profile owns the group dimensions.  Keep this
   ! local public alias so existing transport code retains its state-facing
   ! interface while all source-dependent moments come from the loaded
   ! contract rather than from a second hard-coded table.
