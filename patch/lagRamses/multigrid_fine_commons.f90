@@ -1545,6 +1545,7 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    use amr_commons
    use poisson_commons
    use ksection
+   use morton_hash, only: grid_level
    use omp_lib, only: omp_lock_kind, omp_init_lock, omp_destroy_lock, &
         omp_set_lock, omp_unset_lock
 #ifdef FDMDEBUG
@@ -1566,7 +1567,8 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    integer :: icoarselevel
    integer :: ngrids, cur_grid, cur_cpu, cur_cell, newgrids
    integer :: i, nbatch, ind, icpu, istart, info, ilock, islot
-   integer :: ierr_nbor, invalid_nbor
+   integer :: ierr_nbor, invalid_nbor, invalid_level
+   integer :: source_grid, source_level, source_level0, parent_mode, parent_mode0
    integer, parameter :: nbuild_locks=256
    integer(omp_lock_kind), allocatable :: build_locks(:)
 
@@ -1631,19 +1633,72 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    ! Loop over the AMR active communicator first
    ngrids = active_f_comm%ngrid
    invalid_nbor=0
-!$omp parallel do private(istart,nbatch,i,ind,cur_grid,cur_cpu,ilock,islot,ierr_nbor) &
+!$omp parallel do private(istart,nbatch,i,ind,cur_grid,cur_cpu,ilock,islot, &
+!$omp& source_grid,source_level,source_level0,parent_mode,parent_mode0,invalid_level,ierr_nbor) &
 !$omp& reduction(max:invalid_nbor) schedule(dynamic,128)
    do istart=1,ngrids,nvector
       nbatch=min(nvector,ngrids-istart+1)
-      ! Gather grid indices and retrieve parent cells
+      ! Gather grid indices and parent cells. MG communicator levels can
+      ! differ from the AMR level of the referenced grids. The father-cell
+      ! index encoding determines which get3cubefather path is required:
+      ! coarse cells are <= ncoarse; refined cells are > ncoarse.
+      source_level0=0
+      parent_mode0=0
+      invalid_level=0
       do i=1,nbatch
-         ind_cell_father(i)=father( active_f_comm%igrid(istart+i-1) )
+         source_grid=active_f_comm%igrid(istart+i-1)
+         if(source_grid<1.or.source_grid>ngridmax)then
+            invalid_level=1
+            if(i==1)source_level0=-1
+            cycle
+         end if
+         source_level=grid_level(source_grid)
+         parent_mode=2
+         if(father(source_grid)<=ncoarse)parent_mode=1
+         if(i==1)then
+            source_level0=source_level
+            parent_mode0=parent_mode
+         else if(parent_mode/=parent_mode0)then
+            invalid_level=1
+            !$omp critical(mg_parent_level_diagnostic)
+            write(*,*)'FATAL: mixed father-cell encodings in MG stage=1', &
+                 & ' rank=',myid,' array_level=',ifinelevel, &
+                 & ' first_source_level=',source_level0, &
+                 & ' source_grid=',source_grid,' source_level=',source_level, &
+                 & ' parent_mode=',parent_mode,' father=',father(source_grid)
+            flush(6)
+            !$omp end critical(mg_parent_level_diagnostic)
+         end if
+         if(father(source_grid)<1.or. &
+              & ((source_level==1).neqv.(father(source_grid)<=ncoarse)))then
+            invalid_level=1
+            !$omp critical(mg_parent_level_diagnostic)
+            write(*,*)'FATAL: inconsistent source-grid/father relation in MG stage=1', &
+                 & ' rank=',myid,' array_level=',ifinelevel, &
+                 & ' source_grid=',source_grid,' source_level=',source_level, &
+                 & ' father=',father(source_grid),' ncoarse=',ncoarse
+            flush(6)
+            !$omp end critical(mg_parent_level_diagnostic)
+         end if
+         ind_cell_father(i)=father(source_grid)
       end do
+      if(invalid_level/=0)then
+         invalid_nbor=1
+         cycle
+      end if
+      if(istart==1.and.source_level0/=ifinelevel)then
+         !$omp critical(mg_parent_level_diagnostic)
+         write(*,*)'MG source-level mapping stage=1 rank=',myid, &
+              & ' array_level=',ifinelevel,' source_level=',source_level0, &
+              & ' father_mode=',parent_mode0
+         flush(6)
+         !$omp end critical(mg_parent_level_diagnostic)
+      end if
 
       ! Compute neighbouring father cells and grids
       ierr_nbor=0
       call get3cubefather_status(ind_cell_father,nbors_father_cells, &
-         & nbors_father_grids,nbatch,ifinelevel,ierr_nbor)
+         & nbors_father_grids,nbatch,parent_mode0,ierr_nbor)
       if(ierr_nbor/=0)then
          invalid_nbor=1
          cycle
@@ -1819,19 +1874,71 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    nreq2 = 0
    nreq_tot2 = 0
    invalid_nbor=0
-!$omp parallel do private(istart,nbatch,i,ind,cur_cell,cur_cpu,cur_grid,ilock,islot,ierr_nbor) &
+!$omp parallel do private(istart,nbatch,i,ind,cur_cell,cur_cpu,cur_grid,ilock,islot, &
+!$omp& source_grid,source_level,source_level0,parent_mode,parent_mode0,invalid_level,ierr_nbor) &
 !$omp& reduction(max:invalid_nbor) schedule(dynamic,128)
    do istart=1,ngrids,nvector
       nbatch=min(nvector,ngrids-istart+1)
-      ! Gather grid indices and retrieve parent cells
+      ! active_mg is indexed by MG level, not necessarily by the AMR level
+      ! of each referenced grid. Select the coarse/refined father-cell
+      ! decoder from the cell-index encoding, and verify it against grid_level.
+      source_level0=0
+      parent_mode0=0
+      invalid_level=0
       do i=1,nbatch
-         ind_cell_father(i)=father( active_mg(myid,icoarselevel)%igrid(istart+i-1) )
+         source_grid=active_mg(myid,icoarselevel)%igrid(istart+i-1)
+         if(source_grid<1.or.source_grid>ngridmax)then
+            invalid_level=1
+            if(i==1)source_level0=-1
+            cycle
+         end if
+         source_level=grid_level(source_grid)
+         parent_mode=2
+         if(father(source_grid)<=ncoarse)parent_mode=1
+         if(i==1)then
+            source_level0=source_level
+            parent_mode0=parent_mode
+         else if(parent_mode/=parent_mode0)then
+            invalid_level=1
+            !$omp critical(mg_parent_level_diagnostic)
+            write(*,*)'FATAL: mixed father-cell encodings in MG stage=4', &
+                 & ' rank=',myid,' array_level=',icoarselevel, &
+                 & ' first_source_level=',source_level0, &
+                 & ' source_grid=',source_grid,' source_level=',source_level, &
+                 & ' parent_mode=',parent_mode,' father=',father(source_grid)
+            flush(6)
+            !$omp end critical(mg_parent_level_diagnostic)
+         end if
+         if(father(source_grid)<1.or. &
+              & ((source_level==1).neqv.(father(source_grid)<=ncoarse)))then
+            invalid_level=1
+            !$omp critical(mg_parent_level_diagnostic)
+            write(*,*)'FATAL: inconsistent source-grid/father relation in MG stage=4', &
+                 & ' rank=',myid,' array_level=',icoarselevel, &
+                 & ' source_grid=',source_grid,' source_level=',source_level, &
+                 & ' father=',father(source_grid),' ncoarse=',ncoarse
+            flush(6)
+            !$omp end critical(mg_parent_level_diagnostic)
+         end if
+         ind_cell_father(i)=father(source_grid)
       end do
+      if(invalid_level/=0)then
+         invalid_nbor=1
+         cycle
+      end if
+      if(istart==1.and.source_level0/=icoarselevel)then
+         !$omp critical(mg_parent_level_diagnostic)
+         write(*,*)'MG source-level mapping stage=4 rank=',myid, &
+              & ' array_level=',icoarselevel,' source_level=',source_level0, &
+              & ' father_mode=',parent_mode0
+         flush(6)
+         !$omp end critical(mg_parent_level_diagnostic)
+      end if
 
       ! Compute neighbouring father cells
       ierr_nbor=0
       call get3cubefather_status(ind_cell_father,nbors_father_cells, &
-           & nbors_father_grids,nbatch,icoarselevel,ierr_nbor)
+           & nbors_father_grids,nbatch,parent_mode0,ierr_nbor)
       if(ierr_nbor/=0)then
          invalid_nbor=1
          cycle
