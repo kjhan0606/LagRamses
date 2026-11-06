@@ -1566,6 +1566,7 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
 
    integer :: icoarselevel
    integer :: ngrids, cur_grid, cur_cpu, cur_cell, newgrids
+   integer :: cur_father
    integer :: i, nbatch, ind, icpu, istart, info, ilock, islot
    integer :: ierr_nbor, invalid_nbor, invalid_level
    integer :: source_grid, source_level, source_level0, parent_mode, parent_mode0
@@ -1633,7 +1634,7 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    ! Loop over the AMR active communicator first
    ngrids = active_f_comm%ngrid
    invalid_nbor=0
-!$omp parallel do private(istart,nbatch,i,ind,cur_grid,cur_cpu,ilock,islot, &
+!$omp parallel do private(istart,nbatch,i,ind,cur_grid,cur_cpu,cur_father,ilock,islot, &
 !$omp& source_grid,source_level,source_level0,parent_mode,parent_mode0,invalid_level,ierr_nbor) &
 !$omp& reduction(max:invalid_nbor) schedule(dynamic,128)
    do istart=1,ngrids,nvector
@@ -1708,9 +1709,43 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
       do ind=1,twotondim
          do i=1,nbatch
             cur_grid = nbors_father_grids(i,ind)
+            ! Missing same-level neighbor grids are represented by zero by
+            ! get3cubefather_status.  They are not MG candidates; never index
+            ! lookup_mg/father/cpu_map with that sentinel.
+            if(cur_grid==0) cycle
+            if(cur_grid<1.or.cur_grid>ngridmax)then
+               invalid_nbor=1
+               !$omp critical(mg_parent_level_diagnostic)
+               write(*,*)'FATAL: invalid MG stage=1 neighbor index', &
+                    & ' rank=',myid,' fine_level=',ifinelevel, &
+                    & ' source_grid=',active_f_comm%igrid(istart+i-1), &
+                    & ' source_level=',grid_level(active_f_comm%igrid(istart+i-1)), &
+                    & ' parent_cell=',ind_cell_father(i), &
+                    & ' neighbor_slot=',ind,' neighbor_grid=',cur_grid
+               flush(6)
+               !$omp end critical(mg_parent_level_diagnostic)
+               cycle
+            end if
+            cur_father=father(cur_grid)
+            if(grid_level(cur_grid)<=0.or.cur_father<1.or. &
+                 & cur_father>ncoarse+ngridmax*twotondim)then
+               invalid_nbor=1
+               !$omp critical(mg_parent_level_diagnostic)
+               write(*,*)'FATAL: stale MG stage=1 neighbor grid', &
+                    & ' rank=',myid,' fine_level=',ifinelevel, &
+                    & ' source_grid=',active_f_comm%igrid(istart+i-1), &
+                    & ' source_level=',grid_level(active_f_comm%igrid(istart+i-1)), &
+                    & ' parent_cell=',ind_cell_father(i), &
+                    & ' neighbor_slot=',ind,' neighbor_grid=',cur_grid, &
+                    & ' neighbor_level=',grid_level(cur_grid), &
+                    & ' neighbor_father=',cur_father
+               flush(6)
+               !$omp end critical(mg_parent_level_diagnostic)
+               cycle
+            end if
             if(lookup_mg(cur_grid)>0) cycle ! Grid already active (pre-check)
 
-            cur_cpu=cpu_map(father(cur_grid))
+            cur_cpu=cpu_map(cur_father)
             if(cur_cpu==0) cycle
 
             ilock=mod(cur_grid,nbuild_locks)
@@ -1837,6 +1872,23 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
       if(ngrids>0) then
          do i=1,ngrids
             cur_grid=comm_receive(icpu)%igrid(i) ! Local AMR index
+            if(cur_grid<1.or.cur_grid>ngridmax)then
+               write(*,*)'FATAL: invalid MG stage=2 received grid', &
+                    & ' rank=',myid,' sender=',icpu,' grid=',cur_grid
+               flush(6)
+               call MPI_ABORT(MPI_COMM_WORLD,1,info)
+               stop 1
+            end if
+            cur_father=father(cur_grid)
+            if(grid_level(cur_grid)<=0.or.cur_father<1.or. &
+                 & cur_father>ncoarse+ngridmax*twotondim)then
+               write(*,*)'FATAL: stale MG stage=2 received grid', &
+                    & ' rank=',myid,' sender=',icpu,' grid=',cur_grid, &
+                    & ' level=',grid_level(cur_grid),' father=',cur_father
+               flush(6)
+               call MPI_ABORT(MPI_COMM_WORLD,1,info)
+               stop 1
+            end if
             if(lookup_mg(cur_grid)>0) cycle      ! Already active: cycle
             ! Activate grid
             nact_tot=nact_tot+1
@@ -1874,7 +1926,7 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    nreq2 = 0
    nreq_tot2 = 0
    invalid_nbor=0
-!$omp parallel do private(istart,nbatch,i,ind,cur_cell,cur_cpu,cur_grid,ilock,islot, &
+!$omp parallel do private(istart,nbatch,i,ind,cur_cell,cur_cpu,cur_grid,cur_father,ilock,islot, &
 !$omp& source_grid,source_level,source_level0,parent_mode,parent_mode0,invalid_level,ierr_nbor) &
 !$omp& reduction(max:invalid_nbor) schedule(dynamic,128)
    do istart=1,ngrids,nvector
@@ -1948,9 +2000,54 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
       do ind=1,threetondim
          do i=1,nbatch
             cur_cell = nbors_father_cells(i,ind)
+            ! An absent neighboring father grid is encoded as cell index 0.
+            ! Skip it before touching cpu_map(0) or son(0).
+            if(cur_cell==0) cycle
+            if(cur_cell<1.or.cur_cell>ncoarse+ngridmax*twotondim)then
+               invalid_nbor=1
+               !$omp critical(mg_parent_level_diagnostic)
+               write(*,*)'FATAL: invalid MG stage=4 neighbor cell', &
+                    & ' rank=',myid,' fine_level=',ifinelevel, &
+                    & ' source_grid=',active_mg(myid,icoarselevel)%igrid(istart+i-1), &
+                    & ' source_level=',grid_level(active_mg(myid,icoarselevel)%igrid(istart+i-1)), &
+                    & ' neighbor_slot=',ind,' neighbor_cell=',cur_cell
+               flush(6)
+               !$omp end critical(mg_parent_level_diagnostic)
+               cycle
+            end if
             cur_cpu  = cpu_map(cur_cell)
             if(cur_cpu==0) cycle
             cur_grid = son(cur_cell)
+            if(cur_grid<0.or.cur_grid>ngridmax)then
+               invalid_nbor=1
+               !$omp critical(mg_parent_level_diagnostic)
+               write(*,*)'FATAL: invalid MG stage=4 son grid', &
+                    & ' rank=',myid,' fine_level=',ifinelevel, &
+                    & ' source_grid=',active_mg(myid,icoarselevel)%igrid(istart+i-1), &
+                    & ' source_level=',grid_level(active_mg(myid,icoarselevel)%igrid(istart+i-1)), &
+                    & ' neighbor_slot=',ind,' neighbor_cell=',cur_cell, &
+                    & ' neighbor_cpu=',cur_cpu,' son_grid=',cur_grid
+               flush(6)
+               !$omp end critical(mg_parent_level_diagnostic)
+               cycle
+            end if
+            if(cur_grid>0)then
+               cur_father=father(cur_grid)
+               if(grid_level(cur_grid)<=0.or.cur_father/=cur_cell)then
+                  invalid_nbor=1
+                  !$omp critical(mg_parent_level_diagnostic)
+                  write(*,*)'FATAL: stale MG stage=4 son grid', &
+                       & ' rank=',myid,' fine_level=',ifinelevel, &
+                       & ' source_grid=',active_mg(myid,icoarselevel)%igrid(istart+i-1), &
+                       & ' source_level=',grid_level(active_mg(myid,icoarselevel)%igrid(istart+i-1)), &
+                       & ' neighbor_slot=',ind,' neighbor_cell=',cur_cell, &
+                       & ' neighbor_cpu=',cur_cpu,' son_grid=',cur_grid, &
+                       & ' son_level=',grid_level(cur_grid),' son_father=',cur_father
+                  flush(6)
+                  !$omp end critical(mg_parent_level_diagnostic)
+                  cycle
+               end if
+            end if
             if(cur_cpu/=myid) then
                ! Neighbor cell is not managed by current CPU
                if (cur_grid==0) cycle              ! No grid there
