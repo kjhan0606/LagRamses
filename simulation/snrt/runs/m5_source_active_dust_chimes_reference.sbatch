@@ -38,6 +38,7 @@ readonly AGN_DONOR_SNAPSHOT=${M5_25G_AGN_DONOR_SNAPSHOT:-0}
 readonly AGN_DONOR_OCT=${M5_25G_AGN_DONOR_OCT:-}
 readonly AGN_LEVEL_ENTRY_TRACE=${M5_25G_AGN_LEVEL_ENTRY_TRACE:-0}
 readonly EFFECTIVE_AGN_IC_MODE=${M5_EFFECTIVE_AGN_IC_MODE:-small_bh_control}
+readonly EFFECTIVE_AGN_ENABLED=${M5_EFFECTIVE_AGN_ENABLED:-1}
 readonly VERIFY_RESTART=${M5_VERIFY_RESTART:-0}
 readonly AMR_INTERFACE=${M5_AMR_INTERFACE_CHECK:-0}
 readonly REQUESTED_STELLAR_PACKAGE=${M5_STELLAR_PACKAGE:-}
@@ -78,6 +79,15 @@ case "$EFFECTIVE_AGN_IC_MODE" in
   small_bh_control|thermal_seed_reference|agn25_m8_candidate) ;;
   *) echo 'M5_EFFECTIVE_AGN_IC_MODE must be small_bh_control, thermal_seed_reference, or agn25_m8_candidate' >&2; exit 2 ;;
 esac
+case "$EFFECTIVE_AGN_ENABLED" in
+  0|1) ;;
+  *) echo 'M5_EFFECTIVE_AGN_ENABLED must be 0 or 1' >&2; exit 2 ;;
+esac
+if [[ "$EFFECTIVE_AGN_ENABLED" == 0 && \
+      ( "$PROFILE" != effective_population || "$CANDIDATE_25G_DIAGNOSTIC" == 1 ) ]]; then
+  echo 'M5_EFFECTIVE_AGN_ENABLED=0 is limited to the effective_population reference profile' >&2
+  exit 2
+fi
 case "$CANDIDATE_25G_STELLAR_AGN" in
   0|1) ;;
   *) echo 'M5_25G_STELLAR_AGN_DIAGNOSTIC must be 0 or 1' >&2; exit 2 ;;
@@ -1014,6 +1024,27 @@ if [[ "$AMR_INTERFACE" == 1 ]]; then
   grep -Eq '^[[:space:]]*levelmax=3$' "$WORK/effective.nml"
   grep -Fq 'void_refine=.true., void_refine_min_level=3' "$WORK/effective.nml"
 fi
+if [[ "$PROFILE" == effective_population && "$EFFECTIVE_AGN_ENABLED" == 0 ]]; then
+  agn_true_count=$(grep -Eic '^[[:space:]]*agn[[:space:]]*=[[:space:]]*\.true\.' \
+    "$WORK/effective.nml" || true)
+  sink_agn_true_count=$(grep -Eic '^[[:space:]]*sink_AGN[[:space:]]*=[[:space:]]*\.true\.' \
+    "$WORK/effective.nml" || true)
+  if ((agn_true_count == 0 || sink_agn_true_count == 0)); then
+    echo 'Cannot construct AGN-off effective_population input: expected AGN flags are missing' >&2
+    exit 2
+  fi
+  sed -i -E \
+    -e 's/^([[:space:]]*agn[[:space:]]*=[[:space:]]*)\.true\./\1.false./I' \
+    -e 's/^([[:space:]]*sink_AGN[[:space:]]*=[[:space:]]*)\.true\./\1.false./I' \
+    "$WORK/effective.nml"
+  if grep -Eiq '^[[:space:]]*(agn|sink_AGN)[[:space:]]*=[[:space:]]*\.true\.' \
+       "$WORK/effective.nml" || \
+     [[ $(grep -Eic '^[[:space:]]*agn[[:space:]]*=[[:space:]]*\.false\.' "$WORK/effective.nml" || true) -eq 0 ]] || \
+     [[ $(grep -Eic '^[[:space:]]*sink_AGN[[:space:]]*=[[:space:]]*\.false\.' "$WORK/effective.nml" || true) -eq 0 ]]; then
+    echo 'Failed to disable both AGN and sink_AGN namelist flags' >&2
+    exit 2
+  fi
+fi
 sha256sum "$TEMPLATE" "$WORK/effective.nml" "$WORK/ic_sink" "$WORK/rank-bind.sh" \
   "$ROOT/simulation/snrt/runs/m5_source_active_dust_chimes_reference.sbatch" "$BINARY" \
   "$CHIMES_REPORTER_SOURCE" "$CHIMES_REPORTER" \
@@ -1124,6 +1155,7 @@ if [[ "$PROFILE" == effective_population ]]; then
 fi
 
 printf 'PROFILE=%s_M5_live_dust_CHIMES_%s_NONPRODUCTION\n' "$PROFILE" "$CHIMES_LIBRARY_MODE" | tee -a "$WORK/launch.txt"
+printf 'EFFECTIVE_AGN_ENABLED=%s\n' "$EFFECTIVE_AGN_ENABLED" | tee -a "$WORK/launch.txt"
 if [[ "$PROFILE" == effective_population ]]; then
   printf 'EFFECTIVE_AGN_IC_MODE=%s\nEFFECTIVE_AGN_IC_SHA256=%s\n' \
     "$EFFECTIVE_AGN_IC_MODE" "$(sha256sum "$SOURCE_IC" | awk '{print $1}')" \
