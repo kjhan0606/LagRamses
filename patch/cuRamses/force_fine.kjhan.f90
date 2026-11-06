@@ -638,7 +638,7 @@ subroutine apply_mond_force(ilevel)
 end subroutine apply_mond_force
 !#########################################################
 !#########################################################
-subroutine compute_mond_phantom_density(ilevel, is_aqual)
+subroutine compute_mond_phantom_density(ilevel, is_aqual, diag_rho_newtonian_out)
   use amr_commons
   use poisson_commons
   use morton_hash
@@ -647,6 +647,7 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
   implicit none
   integer,intent(in)::ilevel
   logical,intent(in)::is_aqual
+  real(dp),allocatable,optional,intent(out)::diag_rho_newtonian_out(:,:)
   !-------------------------------------------------------
   ! Compute phantom density and add to rho() in-place.
   !
@@ -872,6 +873,9 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
            end do
         end do
      end do
+     write(*,'(A,I0,A,I0,A)') &
+          ' [QUMOND_SOURCE_DIAG] stage=pre_second_poisson step=', &
+          nstep_coarse,' level=',ilevel,' active-cell source'
      write(*,'(A,I0,A,I0,A,ES18.10,A,ES18.10)') &
           ' [QUMOND_SOURCE_DIAG] step=',nstep_coarse,' level=',ilevel, &
           ' a0_code=',a0_code,' fourpi=',fourpi
@@ -903,10 +907,64 @@ subroutine compute_mond_phantom_density(ilevel, is_aqual)
              ' [QUMOND_SOURCE_DIAG] sample=',diag_sample,' xyz=',diag_x, &
              ' rho_N/ph/rho_sum=',diag_old,diag_new-diag_old,diag_new
      end do
-     deallocate(diag_rho_before)
+     if(present(diag_rho_newtonian_out)) then
+        call move_alloc(diag_rho_before,diag_rho_newtonian_out)
+     else
+        deallocate(diag_rho_before)
+     end if
   end if
 
 end subroutine compute_mond_phantom_density
+!#########################################################
+!#########################################################
+subroutine qumond_source_diag_after_p2(ilevel,ncache,rho_newtonian_before)
+  use amr_commons
+  use poisson_commons
+#include "amr_index.h"
+  implicit none
+  integer,intent(in)::ilevel,ncache
+  real(dp),intent(in)::rho_newtonian_before(ncache,twotondim)
+  integer::diag_i,diag_igrid,diag_ind,diag_field
+  integer(kind=8)::diag_ncell
+  real(dp)::diag_sum(3),diag_sum2(3),diag_min(3),diag_max(3),diag_vals(3)
+  real(dp)::diag_newtonian,diag_combined
+  character(len=32)::diag_name
+
+  diag_ncell=int(ncache,8)*int(twotondim,8)
+  if(diag_ncell<=0_8) return
+  diag_sum=0d0
+  diag_sum2=0d0
+  diag_min=huge(1d0)
+  diag_max=-huge(1d0)
+  do diag_i=1,ncache
+     diag_igrid=active(ilevel)%igrid(diag_i)
+     do diag_ind=1,twotondim
+        diag_newtonian=rho_newtonian_before(diag_i,diag_ind)
+        diag_combined=rho(ICELL_OF(diag_igrid,diag_ind))
+        diag_vals=(/diag_newtonian,diag_combined-diag_newtonian,diag_combined/)
+        diag_sum=diag_sum+diag_vals
+        diag_sum2=diag_sum2+diag_vals**2
+        diag_min=min(diag_min,diag_vals)
+        diag_max=max(diag_max,diag_vals)
+     end do
+  end do
+
+  write(*,'(A,I0,A,I0,A,I0)') &
+       ' [QUMOND_P2_SOURCE_DIAG] stage=post_second_poisson step=', &
+       nstep_coarse,' level=',ilevel,' active_cells=',diag_ncell
+  do diag_field=1,3
+     select case(diag_field)
+     case(1); diag_name='newtonian_pre_source'
+     case(2); diag_name='phantom_residual_source'
+     case(3); diag_name='combined_post_source'
+     end select
+     write(*,'(A,A,A,4(1X,ES18.10))') &
+          ' [QUMOND_P2_SOURCE_DIAG] ',trim(diag_name),' mean rms min max=', &
+          diag_sum(diag_field)/dble(diag_ncell), &
+          sqrt(diag_sum2(diag_field)/dble(diag_ncell)), &
+          diag_min(diag_field),diag_max(diag_field)
+  end do
+end subroutine qumond_source_diag_after_p2
 !#########################################################
 !#########################################################
 subroutine get_mond_nu_minus1(x, mu_type, num1)
@@ -960,6 +1018,14 @@ subroutine aqual_iterate(ilevel, icount)
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
+  interface
+     subroutine compute_mond_phantom_density(ilevel,is_aqual,diag_rho_newtonian_out)
+       use amr_parameters, only: dp
+       integer,intent(in)::ilevel
+       logical,intent(in)::is_aqual
+       real(dp),allocatable,optional,intent(out)::diag_rho_newtonian_out(:,:)
+     end subroutine compute_mond_phantom_density
+  end interface
   integer, intent(in) :: ilevel, icount
   !-------------------------------------------------------
   ! AQUAL Phase 2: iterative fixed-point solver

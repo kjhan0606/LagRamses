@@ -19,6 +19,14 @@ recursive subroutine amr_step(ilevel,icount)
 #ifndef WITHOUTMPI
   include 'mpif.h'
 #endif
+  interface
+     subroutine compute_mond_phantom_density(ilevel,is_aqual,diag_rho_newtonian_out)
+       use amr_parameters, only: dp
+       integer,intent(in)::ilevel
+       logical,intent(in)::is_aqual
+       real(dp),allocatable,optional,intent(out)::diag_rho_newtonian_out(:,:)
+     end subroutine compute_mond_phantom_density
+  end interface
   integer::ilevel,icount
   !-------------------------------------------------------------------!
   ! This routine is the adaptive-mesh/adaptive-time-step main driver. !
@@ -31,6 +39,7 @@ recursive subroutine amr_step(ilevel,icount)
 !!$  logical::ok_defrag
   logical,save::first_step=.true.
   integer:: info
+  real(dp),allocatable::rho_newtonian_diag(:,:)
 
   real(kind=4):: real_mem, real_mem_tot
   real(kind=8):: t_lb_level_start, t_lb_level_end
@@ -560,7 +569,7 @@ recursive subroutine amr_step(ilevel,icount)
 
         if(mond_type == 1) then
            ! Phase 1: QUMOND single-pass
-           call compute_mond_phantom_density(ilevel, .false.)
+           call compute_mond_phantom_density(ilevel, .false.,rho_newtonian_diag)
            call make_virtual_fine_dp(rho(1),ilevel)
 
            if(ilevel>levelmin)then
@@ -571,6 +580,12 @@ recursive subroutine amr_step(ilevel,icount)
               end if
            else
               call multigrid_fine(levelmin,icount)
+           end if
+
+           if(allocated(rho_newtonian_diag)) then
+              call qumond_source_diag_after_p2(ilevel,active(ilevel)%ngrid, &
+                   rho_newtonian_diag)
+              deallocate(rho_newtonian_diag)
            end if
 
            call force_fine(ilevel,icount)
