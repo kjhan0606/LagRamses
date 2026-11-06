@@ -1570,6 +1570,7 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    integer :: i, nbatch, ind, icpu, istart, info, ilock, islot
    integer :: ierr_nbor, invalid_nbor, invalid_level
    integer :: source_grid, source_level, source_level0, parent_mode, parent_mode0
+   integer, dimension(1:nvector) :: parent_modes
    integer, parameter :: nbuild_locks=256
    integer(omp_lock_kind), allocatable :: build_locks(:)
 
@@ -1635,14 +1636,13 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    ngrids = active_f_comm%ngrid
    invalid_nbor=0
 !$omp parallel do private(istart,nbatch,i,ind,cur_grid,cur_cpu,cur_father,ilock,islot, &
-!$omp& source_grid,source_level,source_level0,parent_mode,parent_mode0,invalid_level,ierr_nbor) &
+!$omp& source_grid,source_level,source_level0,parent_mode,parent_mode0,parent_modes,invalid_level,ierr_nbor) &
 !$omp& reduction(max:invalid_nbor) schedule(dynamic,128)
    do istart=1,ngrids,nvector
       nbatch=min(nvector,ngrids-istart+1)
-      ! Gather grid indices and parent cells. MG communicator levels can
-      ! differ from the AMR level of the referenced grids. The father-cell
-      ! index encoding determines which get3cubefather path is required:
-      ! coarse cells are <= ncoarse; refined cells are > ncoarse.
+      ! Gather parent cells. MG communicator levels can mix AMR levels, so
+      ! one batch can contain both coarse-cell and refined-cell father indices.
+      ! The mixed-mode helper groups those cells before neighbor lookup.
       source_level0=0
       parent_mode0=0
       invalid_level=0
@@ -1656,19 +1656,10 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
          source_level=grid_level(source_grid)
          parent_mode=2
          if(father(source_grid)<=ncoarse)parent_mode=1
+         parent_modes(i)=parent_mode
          if(i==1)then
             source_level0=source_level
             parent_mode0=parent_mode
-         else if(parent_mode/=parent_mode0)then
-            invalid_level=1
-            !$omp critical(mg_parent_level_diagnostic)
-            write(*,*)'FATAL: mixed father-cell encodings in MG stage=1', &
-                 & ' rank=',myid,' array_level=',ifinelevel, &
-                 & ' first_source_level=',source_level0, &
-                 & ' source_grid=',source_grid,' source_level=',source_level, &
-                 & ' parent_mode=',parent_mode,' father=',father(source_grid)
-            flush(6)
-            !$omp end critical(mg_parent_level_diagnostic)
          end if
          if(father(source_grid)<1.or. &
               & ((source_level==1).neqv.(father(source_grid)<=ncoarse)))then
@@ -1698,8 +1689,8 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
 
       ! Compute neighbouring father cells and grids
       ierr_nbor=0
-      call get3cubefather_status(ind_cell_father,nbors_father_cells, &
-         & nbors_father_grids,nbatch,parent_mode0,ierr_nbor)
+      call get3cubefather_mixed_status(ind_cell_father,parent_modes, &
+         & nbors_father_cells,nbors_father_grids,nbatch,ierr_nbor)
       if(ierr_nbor/=0)then
          invalid_nbor=1
          cycle
@@ -1927,13 +1918,12 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
    nreq_tot2 = 0
    invalid_nbor=0
 !$omp parallel do private(istart,nbatch,i,ind,cur_cell,cur_cpu,cur_grid,cur_father,ilock,islot, &
-!$omp& source_grid,source_level,source_level0,parent_mode,parent_mode0,invalid_level,ierr_nbor) &
+!$omp& source_grid,source_level,source_level0,parent_mode,parent_mode0,parent_modes,invalid_level,ierr_nbor) &
 !$omp& reduction(max:invalid_nbor) schedule(dynamic,128)
    do istart=1,ngrids,nvector
       nbatch=min(nvector,ngrids-istart+1)
-      ! active_mg is indexed by MG level, not necessarily by the AMR level
-      ! of each referenced grid. Select the coarse/refined father-cell
-      ! decoder from the cell-index encoding, and verify it against grid_level.
+      ! active_mg is indexed by MG level, not the AMR level of each grid;
+      ! therefore this batch may contain both father-cell encodings.
       source_level0=0
       parent_mode0=0
       invalid_level=0
@@ -1947,19 +1937,10 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
          source_level=grid_level(source_grid)
          parent_mode=2
          if(father(source_grid)<=ncoarse)parent_mode=1
+         parent_modes(i)=parent_mode
          if(i==1)then
             source_level0=source_level
             parent_mode0=parent_mode
-         else if(parent_mode/=parent_mode0)then
-            invalid_level=1
-            !$omp critical(mg_parent_level_diagnostic)
-            write(*,*)'FATAL: mixed father-cell encodings in MG stage=4', &
-                 & ' rank=',myid,' array_level=',icoarselevel, &
-                 & ' first_source_level=',source_level0, &
-                 & ' source_grid=',source_grid,' source_level=',source_level, &
-                 & ' parent_mode=',parent_mode,' father=',father(source_grid)
-            flush(6)
-            !$omp end critical(mg_parent_level_diagnostic)
          end if
          if(father(source_grid)<1.or. &
               & ((source_level==1).neqv.(father(source_grid)<=ncoarse)))then
@@ -1989,8 +1970,8 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
 
       ! Compute neighbouring father cells
       ierr_nbor=0
-      call get3cubefather_status(ind_cell_father,nbors_father_cells, &
-           & nbors_father_grids,nbatch,parent_mode0,ierr_nbor)
+      call get3cubefather_mixed_status(ind_cell_father,parent_modes, &
+           & nbors_father_cells,nbors_father_grids,nbatch,ierr_nbor)
       if(ierr_nbor/=0)then
          invalid_nbor=1
          cycle
@@ -2302,6 +2283,68 @@ subroutine build_parent_comms_mg(active_f_comm, ifinelevel)
 #endif
 
 end subroutine build_parent_comms_mg
+
+! ########################################################################
+! Father cells at a single MG communicator level can still use different
+! encodings because their source AMR grids need not share a level. Group the
+! cells by decoder mode, call the existing uniform-mode neighbor routine,
+! then restore results to the original source order.
+recursive subroutine get3cubefather_mixed_status(ind_cell_father,parent_modes, &
+     & nbors_father_cells,nbors_father_grids,ncell,ierr)
+   use amr_commons
+   implicit none
+
+   integer, intent(in) :: ncell
+   integer, dimension(1:nvector), intent(in) :: ind_cell_father,parent_modes
+   integer, dimension(1:nvector,1:threetondim), intent(out) :: nbors_father_cells
+   integer, dimension(1:nvector,1:twotondim), intent(out) :: nbors_father_grids
+   integer, intent(out) :: ierr
+
+   integer :: parent_mode,nmode,i,j,ierr_mode
+   integer, dimension(1:nvector) :: mode_index,mode_cells
+   integer, dimension(1:nvector,1:threetondim) :: mode_nbors_father_cells
+   integer, dimension(1:nvector,1:twotondim) :: mode_nbors_father_grids
+
+   ierr=0
+   nbors_father_cells=0
+   nbors_father_grids=0
+   do i=1,ncell
+      if(parent_modes(i)<1.or.parent_modes(i)>2)then
+         ierr=1
+         return
+      end if
+   end do
+
+   do parent_mode=1,2
+      nmode=0
+      do i=1,ncell
+         if(parent_modes(i)==parent_mode)then
+            nmode=nmode+1
+            mode_index(nmode)=i
+            mode_cells(nmode)=ind_cell_father(i)
+         end if
+      end do
+      if(nmode==0)cycle
+
+      ierr_mode=0
+      call get3cubefather_status(mode_cells,mode_nbors_father_cells, &
+           & mode_nbors_father_grids,nmode,parent_mode,ierr_mode)
+      if(ierr_mode/=0)then
+         ierr=ierr_mode
+         nbors_father_cells=0
+         nbors_father_grids=0
+         return
+      end if
+
+      do j=1,nmode
+         i=mode_index(j)
+         nbors_father_cells(i,1:threetondim)= &
+              & mode_nbors_father_cells(j,1:threetondim)
+         nbors_father_grids(i,1:twotondim)= &
+              & mode_nbors_father_grids(j,1:twotondim)
+      end do
+   end do
+end subroutine get3cubefather_mixed_status
 
 
 ! ########################################################################
