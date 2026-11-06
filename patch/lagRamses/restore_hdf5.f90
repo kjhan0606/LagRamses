@@ -109,6 +109,7 @@ subroutine restore_amr_hdf5()
   call hdf5_open_group('/header', grp_id)
   call cosmic_ray_hdf5_identity(grp_id,.false.)
   call dust_mass_hdf5_identity(grp_id,.false.)
+  call bimond_hdf5_identity(grp_id,.false.)
   call hdf5_read_attr_int_checked(grp_id, 'ncpu', ncpu_file, hdf5_attr_status)
   call MPI_Allreduce(hdf5_attr_status, hdf5_attr_status_all, 1, MPI_INTEGER, &
        MPI_MAX, MPI_COMM_WORLD, info)
@@ -187,6 +188,10 @@ subroutine restore_amr_hdf5()
   ! Step 2: Check ncpu_file vs ncpu
   !=====================================================
   if(ncpu_file /= ncpu .or. trim(ordering_file) /= trim(ordering)) then
+     if(bimond_twin_matter)then
+        if(myid==1)write(*,'(A)') 'ERROR: twin BIMOND restart requires unchanged MPI size and ordering'
+        call hdf5_restart_abort
+     endif
      ! Variable-ncpu, ksection, or cross-ordering: use distributed varcpu path
      ! (the same-ncpu path replicates ALL grids on every rank, requiring
      !  ngridmax >= total_grids, which is prohibitively expensive)
@@ -2107,6 +2112,13 @@ subroutine restore_part_hdf5()
           stellar_state_read_status
      call hdf5_restart_abort
   end if
+  if(bimond_twin_matter)then
+     ! Validate before narrowing to int1, so corrupt tags cannot wrap to 30.
+     if(any(ibuf(1:npart_loc)/=int(PTYPE_STAR).and.ibuf(1:npart_loc)/=int(PTYPE_TWIN)))then
+        write(*,'(A)') 'ERROR: unsupported BIMOND particle tag in checkpoint'
+        call hdf5_restart_abort
+     endif
+  endif
   ptypep(1:npart_loc) = int(ibuf(1:npart_loc), kind=1)
 
   ! Read birth epoch and metallicity if star/sink

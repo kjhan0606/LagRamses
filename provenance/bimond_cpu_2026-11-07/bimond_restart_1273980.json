@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "final_step": 4,
+  "time": 0.05685227074194323,
+  "ordinary_count": 4096,
+  "twin_count": 4096,
+  "state_max_absolute_errors": {
+    "x_1": 0.0,
+    "x_2": 0.0,
+    "x_3": 0.0,
+    "v_1": 0.0,
+    "v_2": 0.0,
+    "v_3": 0.0
+  },
+  "field_normalized_rms_errors": {
+    "bimond_f_twin_1": 0.0,
+    "bimond_f_twin_2": 0.0,
+    "bimond_f_twin_3": 0.0,
+    "bimond_phi_difference": 0.0,
+    "bimond_phi_twin": 0.0,
+    "bimond_rho_ordinary": 0.0,
+    "bimond_rho_phantom": 0.0,
+    "bimond_rho_twin": 0.0,
+    "f_1": 0.0,
+    "f_2": 0.0,
+    "f_3": 0.0,
+    "phi": 0.0
+  },
+  "scope": "same-rank uniform periodic CPU restart; both recomputed sector forces and particle state"
+}

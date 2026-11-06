@@ -69,7 +69,7 @@ def prepare(root, template, cases=None):
                         "gravity_type=-1": "gravity_type=0", "nparttot=1": "nparttot=1000000",
                         "levelmin=6": f"levelmin={level}", "levelmax=6": f"levelmax={level}",
                         "&AMR_PARAMS": "&AMR_PARAMS\n ngridmax_auto=.false.",
-                        "&INIT_PARAMS": "&INIT_PARAMS\n initfile(1)='.'", 
+                        "&INIT_PARAMS": "&INIT_PARAMS\n initfile(1)='.'",
                         "&MOND_PARAMS": "&MOND_PARAMS\n use_bimond=.true.\n bimond_twin_matter=.true.\n bimond_output_fields=.true."}
         # read_params shifts the input list from slot 1 to levelmin.
         for old, new in replacements.items():

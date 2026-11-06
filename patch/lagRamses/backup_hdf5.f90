@@ -477,6 +477,64 @@ subroutine cosmic_ray_hdf5_identity(grp,writing)
   endif
 end subroutine cosmic_ray_hdf5_identity
 
+subroutine bimond_hdf5_identity(grp,writing)
+  use amr_commons
+  use ramses_hdf5_io
+  implicit none
+  include 'mpif.h'
+  integer(HID_T),intent(in)::grp
+  logical,intent(in)::writing
+  integer::enabled,stored,status,schema,twins,info,bad,all_bad
+  logical::exists
+  real(dp)::values(10),saved(10)
+  enabled=merge(1,0,use_bimond)
+  bad=0
+  exists=.false.
+  schema=0
+  twins=0
+  if(writing)then
+     call hdf5_write_attr_int(grp,'bimond_enabled',enabled)
+  else
+     call h5aexists_f(grp,'bimond_enabled',exists,status)
+     if(status/=0)bad=1
+     stored=0
+     if(exists.and.status==0)then
+        call hdf5_read_attr_int_checked(grp,'bimond_enabled',stored,status)
+        if(status/=0)bad=1
+     endif
+     if(stored/=enabled)bad=1
+     call require_identity
+  endif
+  if(enabled==0)return
+  values=[a0_mond,dble(mond_mu_type),dble(mond_type), &
+       units_length,units_density,units_time,boxlen,g_ext_mond]
+  if(writing)then
+     call hdf5_write_attr_int(grp,'bimond_nr_schema',1)
+     call hdf5_write_attr_int(grp,'bimond_twin_matter',merge(1,0,bimond_twin_matter))
+     call hdf5_write_attr_1d_dp(grp,'bimond_nr_values',values,size(values))
+  else
+     call hdf5_read_attr_int_checked(grp,'bimond_nr_schema',schema,status)
+     if(status/=0.or.schema/=1)bad=1
+     call hdf5_read_attr_int_checked(grp,'bimond_twin_matter',twins,status)
+     if(status/=0.or.twins/=merge(1,0,bimond_twin_matter))bad=1
+     call hdf5_read_attr_1d_dp_checked(grp,'bimond_nr_values',saved,size(saved),status)
+     if(status/=0)bad=1
+     if(status==0)then
+        if(any(saved/=values))bad=1
+     endif
+     call require_identity
+     if(myid==1)write(*,'(A)') ' BIMOND_RESTART_IDENTITY_PASS'
+  endif
+contains
+  subroutine require_identity
+    call MPI_ALLREDUCE(bad,all_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,info)
+    if(all_bad/=0.or.info/=0)then
+       if(myid==1)write(*,'(A)') 'ERROR: BIMOND checkpoint model identity missing or mismatched'
+       call hdf5_restart_abort
+    endif
+  end subroutine require_identity
+end subroutine bimond_hdf5_identity
+
 subroutine backup_header_hdf5()
   use amr_commons
   use hydro_commons
@@ -495,6 +553,7 @@ subroutine backup_header_hdf5()
   call hdf5_create_group('/header', grp_id)
   call cosmic_ray_hdf5_identity(grp_id,.true.)
   call dust_mass_hdf5_identity(grp_id,.true.)
+  call bimond_hdf5_identity(grp_id,.true.)
 
   ! Grid parameters
   call hdf5_write_attr_int(grp_id, 'ncpu', ncpu)

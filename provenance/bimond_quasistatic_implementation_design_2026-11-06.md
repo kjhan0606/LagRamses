@@ -1,8 +1,8 @@
 # BIMOND quasi-static implementation design for lagRamses
 
-**Status:** uniform CPU two-sector field and short particle-evolution paths validated  
-**Date:** 2026-11-06  
-**Revision:** 2026-11-07 after user-authorized Astra plan review  
+**Status:** uniform CPU two-sector field and short particle-evolution paths validated
+**Date:** 2026-11-06
+**Revision:** 2026-11-07 after user-authorized Astra plan review
 **Project:** RAR comparison of standard Lambda CDM, QUMOND, and later FDM
 
 ## Q-GOAL
@@ -138,7 +138,21 @@ Example gravity selection for an otherwise admitted uniform CPU setup follows. A
 /
 ```
 
-Restart, GPU parity, evolving MPI migration, AMR boundaries, high-acceleration limits for both interpolation functions, and coupled hydro remain unvalidated. The startup restrictions remain in place. The verified CPU module is a nonrelativistic two-sector gravity implementation and does not supply a relativistic BIMOND background or initial transfer functions.
+GPU parity, evolving MPI migration, AMR boundaries, high-acceleration limits for both interpolation functions, and coupled hydro remain unvalidated. The corresponding startup restrictions remain in place. The verified CPU module is a nonrelativistic two-sector gravity implementation and does not supply a relativistic BIMOND background or initial transfer functions.
+
+### HDF5 restart continuation
+
+The restart extension stores a versioned BIMOND identity in the HDF5 header. The identity preserves the model selection, twin-sector flag, interpolation function, acceleration scale, external field, physical units, and box length. A mismatch or missing identity rejects the restart. Legacy checkpoints remain readable when BIMOND is disabled. Particle tags are checked before conversion to one-byte storage, preventing an invalid value such as 286 from wrapping to twin type 30.
+
+Both sector fields are recomputed from restored particle positions before the first resumed kick. The checkpoint stores particle velocities at the native leapfrog phase and retains the previous timestep. The transient twin force arrays begin empty. The first normal gravity update reconstructs the differential potential, shared phantom density, and sector accelerations. Optional twin diagnostic fields are therefore unavailable in any immediate pre-solve output after restart. The first evolved output contains the reconstructed fields.
+
+The first admitted restart uses HDF5, unchanged MPI size, and unchanged ordering on the existing uniform periodic CPU branch. A change in MPI size or ordering is rejected until the redistribution path is validated. The hydro, AMR, GPU, and cosmological restrictions remain unchanged.
+
+Grammar build `1273975` completed in 2 min 9 s from commit `b289ba6accac98ccd6910c1e418a93c9adbeddb4` plus patch SHA-256 `d5e2b97ce35da247f2e26594bd6abc24ddb9ea90eae0ac66dc1319909154d3e8`. The isolated source is `build/bimond_restart_20261107` under the RAR root. Trial `1273979` stopped because the test generator placed `informat` in RUN_PARAMS instead of OUTPUT_PARAMS. The corrected verification `1273980` completed with exit `0:0`.
+
+The test evolved 4096 ordinary and 4096 twin particles for four steps on a `16^3` grid. A continuation from the second checkpoint reproduced the final time, particle identities, species, masses, positions, velocities, ordinary force, twin force, and stored potentials and density fields exactly. Changed acceleration scale, missing model identity, and a wrapped particle tag each caused the intended rejection before any new output. The input-checkpoint checksums remained unchanged.
+
+The [restart report](bimond_cpu_2026-11-07/bimond_restart_1273980.json) records the measured errors. Complete inputs, logs, checkpoints, and manifests remain under `/gpfs/kjhan/RAR_QUMOND/runs/bimond_restart_1273980`. The root RAR project retains compact copies in `reports/bimond_restart_1273980`. The standalone checker is [tests/bimond/verify_restart.py](../tests/bimond/verify_restart.py). The test validates a same-rank Hilbert restart, not evolving MPI redistribution or long-time convergence.
 
 ## Required equation-level acceptance conditions
 

@@ -1567,9 +1567,13 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
              'ERROR: twin BIMOND requires uniform periodic noncosmological FFTW particle gravity with CIC'
         call clean_stop
      endif
-     if(hydro.or.star.or.sink.or.tracer.or.use_pbh.or.nrestart>0.or.nremap/=0.or.ngridmax_auto)then
+     if(hydro.or.star.or.sink.or.tracer.or.use_pbh.or.nremap/=0.or.ngridmax_auto)then
         if(myid==1)write(*,'(A)') &
-             'ERROR: twin BIMOND first CPU path excludes hydro, stellar/sink/PBH evolution, restart, remap and grid growth'
+             'ERROR: twin BIMOND first CPU path excludes hydro, stellar/sink/PBH evolution, remap and grid growth'
+        call clean_stop
+     endif
+     if(nrestart>0.and.trim(informat)/='hdf5')then
+        if(myid==1)write(*,'(A)') 'ERROR: twin BIMOND restart requires a model-tagged HDF5 checkpoint'
         call clean_stop
      endif
      if(any(g_ext_mond/=0d0))then

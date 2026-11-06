@@ -3,7 +3,8 @@
 The two-sector checks exercise the `alpha=-1, beta=1` nonrelativistic
 equations using tagged ordinary and twin particles. The implementation
 currently requires a uniform periodic CPU FFTW grid with CIC assignment.
-Restart, AMR, GPU, and coupled hydro are not yet admitted.
+HDF5 restart requires the same MPI size and ordering. AMR, GPU, and coupled
+hydro are not yet admitted.
 
 Build the lagRamses patch with `NDIM=3`, `USE_FFTW=1`, `HDF5=1`,
 `USE_CUDA=0`, and `SNRT=0`. Python analysis requires NumPy and h5py.
@@ -49,3 +50,19 @@ Measured results are retained in
 The source revisions, cluster jobs, limitations, and remaining acceptance
 conditions are recorded in the
 [implementation document](../../provenance/bimond_quasistatic_implementation_design_2026-11-06.md).
+
+## Restart check
+
+`verify_restart.py prepare RUN --template tests/bimond/source_template.nml`
+generates a four-step displaced-particle run in `RUN/full`. After running
+the executable in that directory, `verify_restart.py resume RUN` copies
+the second checkpoint into a new `RUN/resume` directory and prepares
+three invalid restart cases. Run the continuation in `RUN/resume`, then
+use `verify_restart.py assess RUN` to compare final particle states and
+both sector fields by identity and physical cell coordinates.
+
+The `wrong_a0` and `missing_identity` cases must report a BIMOND model
+identity error. The `wrapped_tag` case must reject particle type 286
+before conversion to the one-byte representation. Each invalid case
+must stop before writing a new snapshot. The source checkpoints are
+copied, never modified in place.
