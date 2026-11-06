@@ -852,3 +852,40 @@ remaining molecular/metal network. Separate Fe, H2/CO competition, PAH
 temperature fluctuations and grain drift remain explicit physical extensions,
 not blockers fabricated from unrelated infrastructure. The driver continues
 the approved physics scope; there is no pending audit or approval request.
+
+## SN reverse-shock dust-yield candidate (2026-11-06; comparison-only)
+
+Otaki et al. 2026 provide initial and post-reverse-shock yields for seven
+grain species, built on the Limongi–Chieffi/Marassi SN grid. The models assume
+fixed explosion energy 1.2e51 erg and uniform ambient densities 0.05, 0.5 and
+5 cm^-3; mass, metallicity, rotation and density coverage is non-rectangular.
+For one illustrative solar-metallicity, non-rotating 25 Msun model at
+n_ISM=0.5 cm^-3, the listed dust mass changes from 1.195 Msun before the
+reverse shock to 4.532e-4 Msun after it. This is source-model evidence, not a
+prediction for the current RAMSES run.
+
+Driver evaluation, after Astra consultation: worthwhile as one bounded
+dust-only comparison; not a full stellar-source admission and not a resolution
+of the 40–120 Msun fate seam. The fixed-energy explosion assumption and
+missing model rows must remain explicit. Do not apply a second reverse-shock
+survival factor to these effective yields.
+
+The current runtime dust mapping stores carbon and one fixed MgFeSiO4
+silicate composition; the stellar element vector has no Al field. Therefore
+the seven published solids cannot yet be mapped into the current source
+transaction while conserving every listed element. In particular, Al2O3,
+Fe3O4, MgSiO3, Mg2SiO4 and SiO2 cannot all be relabelled as the existing
+olivine without changing elemental ownership. The matching event's total
+elemental ejecta and energy/fate source row are also absent from this checkout,
+so the stoichiometric budget has not been evaluated and no table is admitted.
+
+The paper is CC BY 4.0, but the authors' data repository has no separate
+LICENSE file and the CDS ReadMe states no data-specific redistribution terms.
+Keep the table review-only pending a release-rights decision. The next useful
+action is a single matched-event comparison against the existing LC18 elemental
+ejecta row, after the source bytes and table-use terms are established. No
+loader, namelist option, test suite, or new audit gate is added here.
+
+Sources: [Otaki et al. 2026 paper](https://arxiv.org/html/2506.11931v1),
+[CDS tables](https://cdsarc.cds.unistra.fr/viz-bin/ReadMe/J/A%2BA/708/A136?format=html&tex=true),
+[authors' data repository](https://github.com/K-Otaki/effective-supernova-dust-yields).
