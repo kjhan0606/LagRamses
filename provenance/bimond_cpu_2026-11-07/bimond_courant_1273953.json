@@ -1,0 +1,63 @@
+{
+  "equal_evolution": [
+    {
+      "time": 0.0714394941442332,
+      "dt": 0.0714394941442332,
+      "velocity_mass_weighted_rms": 0.0,
+      "position_max": 0.0,
+      "signed_momentum_relative": 0.0
+    },
+    {
+      "time": 0.14284438259256482,
+      "dt": 0.07140488844833161,
+      "velocity_mass_weighted_rms": 1.0425924775799281e-16,
+      "position_max": 0.0,
+      "signed_momentum_relative": 0.0
+    },
+    {
+      "time": 0.2141457860843155,
+      "dt": 0.07130140349175068,
+      "velocity_mass_weighted_rms": 7.268207848361363e-17,
+      "position_max": 0.0,
+      "signed_momentum_relative": 0.0
+    },
+    {
+      "time": 0.285275911615208,
+      "dt": 0.07113012553089249,
+      "velocity_mass_weighted_rms": 7.930922569165465e-17,
+      "position_max": 5.551115123125783e-17,
+      "signed_momentum_relative": 0.0
+    }
+  ],
+  "pair_evolution": [
+    {
+      "time": 0.014232743466121876,
+      "dt": 0.014232743466121876,
+      "velocity_mass_weighted_rms": 0.0,
+      "position_max": 0.0,
+      "signed_momentum_relative": 5.666171579927579e-16
+    },
+    {
+      "time": 0.028467489455259724,
+      "dt": 0.014234745989137846,
+      "velocity_mass_weighted_rms": 9.689277586936808e-17,
+      "position_max": 0.0,
+      "signed_momentum_relative": 2.56201971913443e-06
+    },
+    {
+      "time": 0.042708248301561835,
+      "dt": 0.014240758846302113,
+      "velocity_mass_weighted_rms": 7.902024913767344e-17,
+      "position_max": 0.0,
+      "signed_momentum_relative": 7.705597712438727e-06
+    },
+    {
+      "time": 0.05695530087894051,
+      "dt": 0.014247052577378677,
+      "velocity_mass_weighted_rms": 8.875895624338529e-17,
+      "position_max": 0.0,
+      "signed_momentum_relative": 1.5469925368162987e-05
+    }
+  ],
+  "passed": true
+}

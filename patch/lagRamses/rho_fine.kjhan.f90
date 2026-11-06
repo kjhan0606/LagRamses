@@ -37,6 +37,7 @@ subroutine rho_fine(ilevel,icount)
   real(kind=8),dimension(1:ndim+1)::multipole_in,multipole_out
 
   if(.not. poisson)return
+  if(bimond_twin_matter)bimond_rho_twin=0d0
   if(numbtot(1,ilevel)==0)return
   if(verbose)write(*,111)ilevel
 
@@ -149,6 +150,7 @@ subroutine rho_fine(ilevel,icount)
   ! Compute particle contribution to density field
   !---------------------------------------------------------
   ! Compute density due to current level particles
+  if(bimond_twin_matter)bimond_rho_ordinary=rho
   if(pic)then
      call rho_from_current_level(ilevel)
   end if
@@ -310,6 +312,7 @@ subroutine rho_fine(ilevel,icount)
 111 format('   Entering rho_fine for level ',I2)
 #endif
   
+  if(bimond_twin_matter)call bimond_prepare_difference(ilevel)
 end subroutine rho_fine
 !##############################################################################
 !##############################################################################
@@ -1261,6 +1264,17 @@ subroutine cic_amr(ind_cell,ind_part,ind_grid_part,x0,ng,np,ilevel)
 !$omp atomic update
 #endif
           rho(indp(j,ind))=rho(indp(j,ind))+vol2(j)
+          if(bimond_twin_matter.and.pt_arr(j)==PTYPE_TWIN)then
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
+             bimond_rho_twin(indp(j,ind))=bimond_rho_twin(indp(j,ind))+vol2(j)
+          else if(bimond_twin_matter)then
+#ifdef CIC_ATOMIC_SCATTER
+!$omp atomic update
+#endif
+             bimond_rho_ordinary(indp(j,ind))=bimond_rho_ordinary(indp(j,ind))+vol2(j)
+          endif
        end if
     end do
      else if(ilevel>cic_levelmax)then

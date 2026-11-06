@@ -7,6 +7,9 @@ module poisson_commons
   real(dp),allocatable,dimension(:)  ::rho               ! Density
   real(dp),allocatable,dimension(:)  ::rho_star          ! Star density
   real(dp),allocatable,dimension(:,:)::f                 ! 3-force
+  ! Shared particle-kick interface. cuRamses rejects twin mode at startup.
+  real(dp),allocatable :: bimond_f_twin(:,:)
+  real(dp),allocatable :: bimond_phi_difference(:)
 
   real(dp),allocatable,dimension(:)  ::rho_top   ! Density at last CIC level                                 
 

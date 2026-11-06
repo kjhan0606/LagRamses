@@ -388,6 +388,12 @@ module amr_parameters
 
   ! MOND (Modified Newtonian Dynamics) parameters
   logical ::use_mond=.false.             ! Enable QUMOND acceleration correction
+  ! Select the alpha+beta=0, beta=1 BIMOND branch in its zero-twin-matter
+  ! limit. This is explicitly the QUMOND-equivalent branch; the two-sector
+  ! twin-matter solver is not implemented yet.
+  logical ::use_bimond=.false.
+  logical ::bimond_twin_matter=.false. ! Explicit collisionless twin sector
+  logical ::bimond_output_fields=.false. ! Extra source/sector fields in HDF5
   real(dp)::a0_mond=1.2d-8              ! MOND critical acceleration [cm/s^2]
   integer ::mond_mu_type=1               ! 1=simple mu, 2=standard mu
   integer ::mond_type=0                  ! 0=algebraic, 1=full QUMOND (phantom density), 2=AQUAL iterative

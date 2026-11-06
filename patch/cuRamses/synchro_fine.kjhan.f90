@@ -541,7 +541,11 @@ subroutine sync(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
   do ind=1,twotondim
      do idim=1,ndim
         do j=1,np
-           ff(j,idim)=ff(j,idim)+f(indp(j,ind),idim)*vol(j,ind)
+           if(bimond_twin_matter.and.ptypep(ind_part(j))==PTYPE_TWIN)then
+              ff(j,idim)=ff(j,idim)+bimond_f_twin(indp(j,ind),idim)*vol(j,ind)
+           else
+              ff(j,idim)=ff(j,idim)+f(indp(j,ind),idim)*vol(j,ind)
+           endif
         end do
      end do
   end do

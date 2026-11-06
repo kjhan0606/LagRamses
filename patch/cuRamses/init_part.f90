@@ -23,6 +23,7 @@ subroutine init_part
   integer::i1,i2,i3,i1_min,i1_max,i2_min,i2_max,i3_min,i3_max
   integer(kind=8)::byte_pos,hdr_bytes,plane_bytes
   integer::buf_count,indglob,npart_new,nDMloc
+  integer(kind=8)::bimond_nonbaryon_loc,bimond_nonbaryon_all
   integer(i8b)::tmp_long
   real(dp)::dx,xx1,xx2,xx3,vv1,vv2,vv3,mm1,ll1,ll2,ll3
   real(dp)::scale,dx_loc,rr,rmax,dx_min
@@ -1019,6 +1020,35 @@ subroutine init_part
   endif
 
   if(sink .and. .not. allocated(idsink)) call init_sink
+
+  ! The implemented BIMOND branch is the exact zero-twin-matter limit. Do not
+  ! silently treat a gravitating DM-like IC as ordinary baryons; the full
+  ! two-sector solver and PTYPE_TWIN deposition are a separate implementation.
+  if(use_bimond)then
+     bimond_nonbaryon_loc=0_8
+     do ipart=1,npart
+        if(mp(ipart)>0d0.and. &
+             & ptypep(ipart)/=PTYPE_STAR.and.ptypep(ipart)/=PTYPE_SINK)then
+           bimond_nonbaryon_loc=bimond_nonbaryon_loc+1_8
+        endif
+     enddo
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(bimond_nonbaryon_loc,bimond_nonbaryon_all,1, &
+          & MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+     bimond_nonbaryon_all=bimond_nonbaryon_loc
+#endif
+     if(bimond_nonbaryon_all>0_8)then
+        if(myid==1)write(*,'(A,I0)') &
+             'ERROR: no-twin BIMOND limit requires baryon-only gravitating particles; DM-like count=', &
+             bimond_nonbaryon_all
+        if(myid==1)write(*,'(A)') &
+             '       Remove CDM/other dark particles from the IC or disable use_bimond. Twin matter is not implemented.'
+        call clean_stop
+     endif
+     if(myid==1)write(*,'(A)') &
+          ' BIMOND no-twin IC check passed; all massive particles are baryonic stars/sinks.'
+  endif
 
 end subroutine init_part
 

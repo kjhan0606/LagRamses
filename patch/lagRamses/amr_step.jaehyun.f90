@@ -60,6 +60,7 @@ recursive subroutine amr_step(ilevel,icount)
 !!$  logical::ok_defrag
   logical,save::first_step=.true.
   integer:: info
+  real(dp) :: bimond_epot_before
 #ifdef SNRT
   real(dp) :: snrt_step_start_proper
 #endif
@@ -608,7 +609,13 @@ recursive subroutine amr_step(ilevel,icount)
 
      ! Compute gravitational acceleration
 !    call MPI_BARRIER(MPI_COMM_WORLD,mpi_err)
+     if(bimond_twin_matter)bimond_epot_before=epot_tot
      call force_fine(ilevel,icount)
+     if(bimond_twin_matter)then
+        bimond_phi_difference=phi
+        bimond_f_difference=f
+        epot_tot=bimond_epot_before
+     endif
      if(ilevel==levelmin) call diag_check_nan('post_force')
 !############################################################
 !       call getmem(real_mem)
@@ -627,6 +634,7 @@ recursive subroutine amr_step(ilevel,icount)
         if(mond_type == 1) then
            ! Phase 1: QUMOND single-pass
            call compute_mond_phantom_density(ilevel, .false.)
+           if(bimond_twin_matter)call bimond_prepare_ordinary(ilevel)
            call make_virtual_fine_dp(rho(1),ilevel)
 
            if(ilevel>levelmin)then
@@ -640,6 +648,7 @@ recursive subroutine amr_step(ilevel,icount)
            end if
 
            call force_fine(ilevel,icount)
+           if(bimond_twin_matter)call bimond_finish_fields(ilevel)
 
         else if(mond_type == 2) then
            ! Phase 2: AQUAL iterative

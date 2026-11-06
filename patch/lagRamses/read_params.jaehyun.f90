@@ -159,7 +159,8 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
        & pbh_energy_sink,pbh_bkg_warn,pbh_check_provenance, &
        & pbh_mf_model,pbh_spin_model,pbh_hawking_model, &
        & pbh_epsdep_model,pbh_fheat_model,pbh_cr_ivar
-  namelist/mond_params/a0_mond,mond_mu_type,mond_type, &
+  namelist/mond_params/use_bimond,bimond_twin_matter,bimond_output_fields, &
+       & a0_mond,mond_mu_type,mond_type,courant_factor, &
        & n_iter_mond,mond_eps,g_ext_mond
   namelist/cosmo_params/omega_b,omega_m,omega_l,h0
   namelist/output_params/noutput,foutput,fbackup,aout,tout,output_mode &
@@ -456,6 +457,28 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   rewind(1)
   read(1,NML=mond_params,END=75)
 75 continue
+  if(bimond_twin_matter.and..not.use_bimond)then
+     if(myid==1)write(*,'(A)') 'ERROR: bimond_twin_matter requires use_bimond'
+     call clean_stop
+  endif
+  if(use_bimond)then
+     if(mond_type/=0.and.mond_type/=1)then
+        if(myid==1)write(*,'(A)') &
+             'ERROR: use_bimond currently supports only the full QUMOND-equivalent no-twin branch'
+        call clean_stop
+     endif
+     if(ndim/=3.or.gravity_type>0)then
+        if(myid==1)write(*,'(A)') 'ERROR: BIMOND no-twin mode requires NDIM=3 and gravity_type<=0'
+        call clean_stop
+     endif
+     if(use_fdm.or.use_adm.or.sidm.or.sidm_baryon.or.use_neutrino)then
+        if(myid==1)write(*,'(A)') &
+             'ERROR: baryon-only BIMOND mode excludes FDM, ADM, SIDM and neutrino-response sources'
+        call clean_stop
+     endif
+     use_mond=.true.
+     mond_type=1
+  endif
   ! f(R) parameters
   if(use_fR) then
      rewind(1)
@@ -1041,7 +1064,7 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         end if
      end if
      ! Warn if DM particles likely present
-     if(pic) then
+     if(pic.and..not.use_bimond) then
         if(myid==1) then
            write(*,'(A)') ' WARNING: use_mond=T with pic=T (DM particles likely present)'
            write(*,'(A)') '   MOND replaces DM — running both gives excess gravity.'
@@ -1049,7 +1072,17 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         end if
      end if
      if(myid==1) then
-        write(*,'(A)') ' MOND (QUMOND) enabled:'
+        if(use_bimond)then
+           write(*,'(A)') ' BIMOND nonrelativistic branch selected: alpha+beta=0, beta=1'
+           if(bimond_twin_matter)then
+              write(*,'(A)') '   Two collisionless sectors on a uniform periodic CPU grid.'
+              write(*,'(A)') '   ASCII ic_part requires x y z vx vy vz mass ptype; ordinary=1, twin=30.'
+           else
+              write(*,'(A)') '   rho_twin=0; this exact limit uses the full QUMOND solver.'
+           endif
+        else
+           write(*,'(A)') ' MOND (QUMOND) enabled:'
+        endif
         write(*,'(A,ES12.4,A)') '   a0 = ', a0_mond, ' cm/s^2'
         if(mond_mu_type==1) then
            write(*,'(A)') '   mu-function: simple [mu=x/(1+x)]'
@@ -1059,7 +1092,15 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
         if(mond_type==0) then
            write(*,'(A)') '   mode: algebraic QUMOND (Phase 0)'
         else if(mond_type==1) then
-           write(*,'(A)') '   mode: full QUMOND with phantom density (Phase 1)'
+           if(use_bimond)then
+              if(bimond_twin_matter)then
+                 write(*,'(A)') '   mode: BIMOND signed differential solve plus shared phantom source'
+              else
+                 write(*,'(A)') '   mode: BIMOND no-twin limit / full QUMOND phantom-density solve'
+              endif
+           else
+              write(*,'(A)') '   mode: full QUMOND with phantom density (Phase 1)'
+           endif
         else
            write(*,'(A,I3,A,ES10.3)') &
                 '   mode: AQUAL iterative (Phase 2), max_iter=', n_iter_mond, &
@@ -1502,6 +1543,40 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   !--------------------------------------------------
   levelmin=MAX(levelmin,1)
   nlevelmax=levelmax
+  if(bimond_twin_matter)then
+     if(courant_factor<=0d0.or.courant_factor>1d0)then
+        if(myid==1)write(*,'(A)') 'ERROR: twin BIMOND requires 0<courant_factor<=1 in MOND_PARAMS'
+        call clean_stop
+     endif
+     if(myid==1)write(*,'(A,ES12.4)') ' BIMOND gravity Courant factor: ',courant_factor
+#ifdef SNRT
+     if(myid==1)write(*,'(A)') 'ERROR: twin BIMOND first CPU path requires SNRT=0'
+     call clean_stop
+#endif
+#ifdef HYDRO_CUDA
+     if(myid==1)write(*,'(A)') 'ERROR: two-sector BIMOND currently requires a CPU build'
+     call clean_stop
+#endif
+#ifdef TSC
+     if(myid==1)write(*,'(A)') 'ERROR: two-sector BIMOND currently requires CIC deposition'
+     call clean_stop
+#endif
+     if(nlevelmax/=levelmin.or.simple_boundary.or.nboundary/=0.or..not.use_fftw.or. &
+          cosmo.or..not.pic.or..not.poisson.or.gravity_type/=0.or.cic_levelmax/=0)then
+        if(myid==1)write(*,'(A)') &
+             'ERROR: twin BIMOND requires uniform periodic noncosmological FFTW particle gravity with CIC'
+        call clean_stop
+     endif
+     if(hydro.or.star.or.sink.or.tracer.or.use_pbh.or.nrestart>0.or.nremap/=0.or.ngridmax_auto)then
+        if(myid==1)write(*,'(A)') &
+             'ERROR: twin BIMOND first CPU path excludes hydro, stellar/sink/PBH evolution, restart, remap and grid growth'
+        call clean_stop
+     endif
+     if(any(g_ext_mond/=0d0))then
+        if(myid==1)write(*,'(A)') 'ERROR: twin BIMOND first CPU path requires zero external field'
+        call clean_stop
+     endif
+  endif
   nml_ok=.true.
   if(levelmin<1)then
      if(myid==1)write(*,*)'Error in the namelist:'

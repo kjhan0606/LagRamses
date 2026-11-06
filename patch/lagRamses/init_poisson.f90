@@ -33,6 +33,17 @@ subroutine init_poisson
   allocate(phi (1:ncell))
   allocate(phi_old (1:ncell))
   allocate(f   (1:ncell,1:3))
+  if(bimond_twin_matter)then
+     allocate(bimond_rho_twin(ncell),bimond_rho_ordinary(ncell),bimond_rho_phantom(ncell))
+     allocate(bimond_phi_difference(ncell),bimond_f_difference(ncell,3),bimond_f_twin(ncell,3))
+     bimond_rho_twin=0d0
+     bimond_rho_ordinary=0d0
+     bimond_rho_phantom=0d0
+     bimond_phi_difference=0d0
+     bimond_f_difference=0d0
+     bimond_f_twin=0d0
+     bimond_fields_ready=.false.
+  endif
   ! rho/phi/f: recomputed every timestep by rho_fine/Poisson solver.
   ! Free-list cells get zero from mmap(MAP_ANONYMOUS) lazy page allocation.
   ! Skip full-array zeroing to avoid paging in ~9 GB at startup.

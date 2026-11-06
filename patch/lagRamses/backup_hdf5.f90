@@ -844,11 +844,13 @@ subroutine backup_poisson_hdf5()
 #endif
   integer :: ilevel, i, igrid, ind, idim, info
   integer :: ngrid_loc
+  integer :: bimond_field, bimond_cell
   integer, allocatable :: ngrid_all(:)
   integer(i8b) :: ncells_total, offset_cells, ngrid_total
   real(dp), allocatable :: pbuf(:)
   integer(HID_T) :: grp_id, lvl_grp_id
   character(len=40) :: grp_name
+  character(len=40) :: bimond_field_name
   character(len=10) :: lvl_str, dim_str
 
   allocate(ngrid_all(ncpu))
@@ -906,6 +908,41 @@ subroutine backup_poisson_hdf5()
         call hdf5_write_dataset_1d_dp(lvl_grp_id, 'f_'//trim(dim_str), &
              pbuf, ngrid_loc * twotondim, offset_cells, ncells_total)
      end do
+
+     ! Optional BIMOND source and twin-field output shares the normal dump
+     ! schedule. Intermediate potentials are reconstructed rather than read
+     ! from checkpoint state in a future admitted restart path.
+     if(bimond_output_fields.and.bimond_fields_ready.and.ilevel==levelmin)then
+        do bimond_field=1,8
+           select case(bimond_field)
+           case(1); bimond_field_name='bimond_rho_ordinary'
+           case(2); bimond_field_name='bimond_rho_twin'
+           case(3); bimond_field_name='bimond_rho_phantom'
+           case(4); bimond_field_name='bimond_phi_difference'
+           case(5); bimond_field_name='bimond_phi_twin'
+           case(6:8)
+              write(dim_str,'(I0)')bimond_field-5
+              bimond_field_name='bimond_f_twin_'//trim(dim_str)
+           end select
+           igrid=headl(myid,ilevel)
+           do i=1,ngrid_loc
+              do ind=1,twotondim
+                 bimond_cell=ICELL_OF(igrid,ind)
+                 select case(bimond_field)
+                 case(1); pbuf((i-1)*twotondim+ind)=bimond_rho_ordinary(bimond_cell)
+                 case(2); pbuf((i-1)*twotondim+ind)=bimond_rho_twin(bimond_cell)
+                 case(3); pbuf((i-1)*twotondim+ind)=bimond_rho_phantom(bimond_cell)
+                 case(4); pbuf((i-1)*twotondim+ind)=bimond_phi_difference(bimond_cell)
+                 case(5); pbuf((i-1)*twotondim+ind)=phi(bimond_cell)-bimond_phi_difference(bimond_cell)
+                 case(6:8); pbuf((i-1)*twotondim+ind)=bimond_f_twin(bimond_cell,bimond_field-5)
+                 end select
+              enddo
+              igrid=next(igrid)
+           enddo
+           call hdf5_write_dataset_1d_dp(lvl_grp_id,trim(bimond_field_name), &
+                pbuf,ngrid_loc*twotondim,offset_cells,ncells_total)
+        enddo
+     endif
 
      ! Modified-gravity scalar field.  scalar_gr_old is deliberately not
      ! stored: all scalar solvers synchronize it with scalar_gr after a

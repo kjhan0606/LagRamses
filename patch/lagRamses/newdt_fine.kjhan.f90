@@ -2,7 +2,7 @@ subroutine newdt_fine(ilevel)
   use pm_commons
   use amr_commons
   use hydro_commons
-  use poisson_commons, ONLY: gravity_type
+  use poisson_commons, ONLY: gravity_type,bimond_acceleration_max
   use fdm_commons, ONLY: hbar_code
 #ifdef RT
   use rt_parameters, ONLY: rt_advect, rt_nsubcycle
@@ -67,6 +67,10 @@ subroutine newdt_fine(ilevel)
      tff=sqrt(threepi2/8./fourpi/rho_max(ilevel))
      dtnew(ilevel)=MIN(dtnew(ilevel),courant_factor*tff)
   end if
+  if(bimond_twin_matter.and.bimond_acceleration_max>0d0)then
+     dx=0.5d0**ilevel*boxlen/dble(icoarse_max-icoarse_min+1)
+     dtnew(ilevel)=min(dtnew(ilevel),courant_factor*sqrt(dx/bimond_acceleration_max))
+  endif
   if(cosmo)then
      dtnew(ilevel)=MIN(dtnew(ilevel),aexp_step_limit/hexp)
   end if
@@ -302,7 +306,7 @@ subroutine sub_newdt_fine(ilevel, igrid, subnump, dt_loc, ekin_loc,dt_all)
   use pm_commons
   use amr_commons
   use hydro_commons
-  use poisson_commons, ONLY: gravity_type
+  use poisson_commons, ONLY: gravity_type,bimond_acceleration_max
 #ifdef RT
   use rt_parameters, ONLY: rt_advect, rt_nsubcycle
 #endif

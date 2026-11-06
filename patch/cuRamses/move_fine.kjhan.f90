@@ -571,15 +571,35 @@ subroutine move1(ind_grid,ind_part,ind_grid_part,ng,np,ilevel)
      end do
   endif
   if(poisson)then
+#ifdef OUTPUT_PARTICLE_POTENTIAL
+     if(bimond_twin_matter)then
+        do j=1,np
+           ptcl_phi(ind_part(j))=0d0
+        enddo
+     endif
+#endif
      do ind=1,twotondim
         do idim=1,ndim
            do j=1,np
-              ff(j,idim)=ff(j,idim)+f(indp(j,ind),idim)*vol(j,ind)
+              if(bimond_twin_matter.and.ptypep(ind_part(j))==PTYPE_TWIN)then
+                 ff(j,idim)=ff(j,idim)+bimond_f_twin(indp(j,ind),idim)*vol(j,ind)
+              else
+                 ff(j,idim)=ff(j,idim)+f(indp(j,ind),idim)*vol(j,ind)
+              endif
            end do
         end do
 #ifdef OUTPUT_PARTICLE_POTENTIAL
         do j=1,np
-           ptcl_phi(ind_part(j)) = phi(indp(j,ind))
+           if(bimond_twin_matter)then
+              if(ptypep(ind_part(j))==PTYPE_TWIN)then
+                 ptcl_phi(ind_part(j))=ptcl_phi(ind_part(j))+ &
+                      (phi(indp(j,ind))-bimond_phi_difference(indp(j,ind)))*vol(j,ind)
+              else
+                 ptcl_phi(ind_part(j))=ptcl_phi(ind_part(j))+phi(indp(j,ind))*vol(j,ind)
+              endif
+           else
+              ptcl_phi(ind_part(j)) = phi(indp(j,ind))
+           endif
         end do
 #endif
      end do

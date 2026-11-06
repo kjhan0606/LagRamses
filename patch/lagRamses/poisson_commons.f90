@@ -7,6 +7,14 @@ module poisson_commons
   real(dp),allocatable,dimension(:)  ::rho_star          ! Star density
   real(dp),allocatable,dimension(:,:)::f                 ! 3-force
 
+  ! Uniform-grid BIMOND fields. Retain the twin force until both particle
+  ! half-kicks have consumed the previous gravity epoch.
+  real(dp),allocatable :: bimond_rho_twin(:),bimond_rho_ordinary(:)
+  real(dp),allocatable :: bimond_rho_phantom(:),bimond_phi_difference(:)
+  real(dp),allocatable :: bimond_f_difference(:,:),bimond_f_twin(:,:)
+  logical :: bimond_fields_ready=.false.
+  real(dp) :: bimond_acceleration_max=0d0
+
   real(dp),allocatable,dimension(:)  ::rho_top   ! Density at last CIC level
 
   ! Multigrid lookup table for amr -> mg index mapping
@@ -86,5 +94,111 @@ module poisson_commons
 
   ! Multipole coefficients
   real(dp),dimension(1:ndim+1)::multipole
+
+contains
+
+  subroutine bimond_source_mean(ilevel)
+#include "amr_index.h"
+#ifndef WITHOUTMPI
+    include 'mpif.h'
+#endif
+    integer,intent(in)::ilevel
+    integer::i,ind,cell,info
+    real(dp)::local_sum(2),global_sum(2)
+    local_sum=0d0
+    do i=1,active(ilevel)%ngrid
+       do ind=1,twotondim
+          cell=ICELL_OF(active(ilevel)%igrid(i),ind)
+          local_sum(1)=local_sum(1)+rho(cell)
+          local_sum(2)=local_sum(2)+1d0
+       enddo
+    enddo
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(local_sum,global_sum,2,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+    global_sum=local_sum
+#endif
+    rho_tot=global_sum(1)/global_sum(2)
+  end subroutine bimond_source_mean
+
+  subroutine bimond_prepare_difference(ilevel)
+#include "amr_index.h"
+    integer,intent(in)::ilevel
+    integer::i,ind,cell
+    call make_virtual_reverse_dp(bimond_rho_twin(1),ilevel)
+    call make_virtual_fine_dp(bimond_rho_twin(1),ilevel)
+    call make_virtual_reverse_dp(bimond_rho_ordinary(1),ilevel)
+    call make_virtual_fine_dp(bimond_rho_ordinary(1),ilevel)
+    do i=1,active(ilevel)%ngrid
+       do ind=1,twotondim
+          cell=ICELL_OF(active(ilevel)%igrid(i),ind)
+          rho(cell)=bimond_rho_ordinary(cell)-bimond_rho_twin(cell)
+       enddo
+    enddo
+    call make_virtual_fine_dp(rho(1),ilevel)
+    call bimond_source_mean(ilevel)
+  end subroutine bimond_prepare_difference
+
+  subroutine bimond_prepare_ordinary(ilevel)
+#include "amr_index.h"
+#ifndef WITHOUTMPI
+    include 'mpif.h'
+#endif
+    integer,intent(in)::ilevel
+    integer::i,ind,cell,info
+    real(dp)::local_sum(2),global_sum(2)
+    local_sum=0d0
+    ! compute_mond_phantom_density has added rho_ph to the signed source.
+    ! The Poisson backends restore their mean-subtracted rho before return.
+    do i=1,active(ilevel)%ngrid
+       do ind=1,twotondim
+          cell=ICELL_OF(active(ilevel)%igrid(i),ind)
+          bimond_rho_phantom(cell)=rho(cell)-(bimond_rho_ordinary(cell)-bimond_rho_twin(cell))
+          local_sum(1)=local_sum(1)+bimond_rho_phantom(cell)
+          local_sum(2)=local_sum(2)+abs(bimond_rho_phantom(cell))
+          rho(cell)=bimond_rho_ordinary(cell)+bimond_rho_phantom(cell)
+       enddo
+    enddo
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(local_sum,global_sum,2,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+    global_sum=local_sum
+#endif
+    if(myid==1)write(*,'(A,2ES24.15)') ' BIMOND phantom source sum, absolute sum: ',global_sum
+    if(abs(global_sum(1))>1d-10*max(global_sum(2),tiny(1d0)))then
+       if(myid==1)write(*,'(A)') 'ERROR: BIMOND periodic phantom source has a nonzero mean'
+       call clean_stop
+    endif
+    call make_virtual_fine_dp(rho(1),ilevel)
+    call bimond_source_mean(ilevel)
+  end subroutine bimond_prepare_ordinary
+
+  subroutine bimond_finish_fields(ilevel)
+#include "amr_index.h"
+#ifndef WITHOUTMPI
+    include 'mpif.h'
+#endif
+    integer,intent(in)::ilevel
+    integer::i,ind,cell,idim,info
+    real(dp)::acc_local,acc_global
+    bimond_f_twin=f-bimond_f_difference
+    do idim=1,ndim
+       call make_virtual_fine_dp(bimond_f_twin(1,idim),ilevel)
+    enddo
+    acc_local=0d0
+    do i=1,active(ilevel)%ngrid
+       do ind=1,twotondim
+          cell=ICELL_OF(active(ilevel)%igrid(i),ind)
+          acc_local=max(acc_local,sqrt(sum(f(cell,:)**2)),sqrt(sum(bimond_f_twin(cell,:)**2)))
+       enddo
+    enddo
+#ifndef WITHOUTMPI
+    call MPI_ALLREDUCE(acc_local,acc_global,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
+#else
+    acc_global=acc_local
+#endif
+    bimond_acceleration_max=acc_global
+    bimond_fields_ready=.true.
+  end subroutine bimond_finish_fields
 
 end module poisson_commons

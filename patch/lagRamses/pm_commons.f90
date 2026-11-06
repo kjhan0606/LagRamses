@@ -65,6 +65,7 @@ module pm_commons
   integer(kind=1),parameter::PTYPE_ISIDM_EX1 = 10_1  ! iSIDM excited state 1
   integer(kind=1),parameter::PTYPE_ISIDM_EX2 = 11_1  ! iSIDM excited state 2 (multi-state)
   integer(kind=1),parameter::PTYPE_ADM       = 20_1  ! atomic DM
+  integer(kind=1),parameter::PTYPE_TWIN      = 30_1  ! BIMOND collisionless twin matter
 
   ! Tree related arrays
   integer ,allocatable,dimension(:)  ::headp    ! Head particle in grid

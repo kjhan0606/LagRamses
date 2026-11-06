@@ -1,0 +1,122 @@
+{
+  "equal_evolution": [
+    {
+      "time": 0.714394941442332,
+      "dt": 0.714394941442332,
+      "velocity_mass_weighted_rms": 0.0,
+      "position_max": 0.0,
+      "signed_momentum_relative": 0.0
+    },
+    {
+      "time": 1.3820422930194258,
+      "dt": 0.667647351577094,
+      "velocity_mass_weighted_rms": 1.1108929462390536e-16,
+      "position_max": 1.1102230246251565e-16,
+      "signed_momentum_relative": 0.0
+    },
+    {
+      "time": 1.9403057305187024,
+      "dt": 0.5582634374992764,
+      "velocity_mass_weighted_rms": 9.21172764537445e-17,
+      "position_max": 1.1102230246251565e-16,
+      "signed_momentum_relative": 0.0
+    },
+    {
+      "time": 2.3718437026981323,
+      "dt": 0.4315379721794301,
+      "velocity_mass_weighted_rms": 7.86326697421658e-17,
+      "position_max": 1.1102230246251565e-16,
+      "signed_momentum_relative": 0.0
+    }
+  ],
+  "pair_evolution": [
+    {
+      "time": 0.14232743466121875,
+      "dt": 0.14232743466121875,
+      "velocity_mass_weighted_rms": 0.0,
+      "position_max": 0.0,
+      "signed_momentum_relative": 7.372025198737586e-16
+    },
+    {
+      "time": 0.2844731204825889,
+      "dt": 0.14214568582137013,
+      "velocity_mass_weighted_rms": 7.266125801634475e-17,
+      "position_max": 1.1102230246251565e-16,
+      "signed_momentum_relative": 0.000279557074045167
+    },
+    {
+      "time": 0.4257083297752494,
+      "dt": 0.1412352092926605,
+      "velocity_mass_weighted_rms": 7.420446322775713e-17,
+      "position_max": 1.1102230246251565e-16,
+      "signed_momentum_relative": 0.0009094014536668263
+    },
+    {
+      "time": 0.523552650494601,
+      "dt": 0.09784432071935158,
+      "velocity_mass_weighted_rms": 8.393160911593254e-17,
+      "position_max": 1.1102230246251565e-16,
+      "signed_momentum_relative": 0.0016031094747448282
+    }
+  ],
+  "shift64": {
+    "grid": 64,
+    "density_rms_errors": [
+      1.0996892838160265e-16,
+      1.1312891455337646e-16
+    ],
+    "force_rms_errors_common_norm": [
+      5.01479488801589e-14,
+      4.9423477104392177e-14
+    ],
+    "phantom_error": 5.0578574263653946e-14,
+    "static_kick_rms_errors": [
+      0.0,
+      0.0
+    ],
+    "net_sector_forces": [
+      [
+        -0.0002804943878828691,
+        -1.9809406238714756e-09,
+        -1.9809406238715534e-09
+      ],
+      [
+        -0.00028049697361348875,
+        1.1442972893753819e-10,
+        1.14429728903646e-10
+      ]
+    ],
+    "signed_force_relative": 7.0105012083944135e-06
+  },
+  "mpi2_pair32": {
+    "grid": 32,
+    "density_rms_errors": [
+      0.0,
+      0.0
+    ],
+    "force_rms_errors_common_norm": [
+      2.640702385669733e-15,
+      2.6489596644650865e-15
+    ],
+    "phantom_error": 8.078837254317658e-15,
+    "static_kick_rms_errors": [
+      0.0,
+      0.0
+    ],
+    "net_sector_forces": [
+      [
+        -0.00028057704243825864,
+        -7.483397364525291e-20,
+        -7.813149270841031e-20
+      ],
+      [
+        -0.00028057704243826233,
+        -8.282747379419503e-20,
+        -7.932516855930088e-20
+      ]
+    ],
+    "signed_force_relative": 6.569133765170514e-15
+  },
+  "shifted_signed_force_decreases": true,
+  "passed": true
+}

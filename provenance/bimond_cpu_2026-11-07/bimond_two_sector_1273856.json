@@ -1,0 +1,121 @@
+{
+  "equal32": {
+    "grid": 32,
+    "density_rms_errors": [
+      0.0,
+      0.0
+    ],
+    "force_rms_errors_common_norm": [
+      1.6752429629083426e-15,
+      1.6752429629083426e-15
+    ],
+    "phantom_error": 0.0,
+    "static_kick_rms_errors": [
+      0.0,
+      0.0
+    ],
+    "net_sector_forces": [
+      [
+        1.7134696358956142e-20,
+        2.9190967349358863e-22,
+        1.9993562083269797e-22
+      ],
+      [
+        1.7134696358956142e-20,
+        2.9190967349358863e-22,
+        1.9993562083269797e-22
+      ]
+    ],
+    "signed_force_relative": 0.0,
+    "equal_sector_cancellation_exact": true
+  },
+  "pair32": {
+    "grid": 32,
+    "density_rms_errors": [
+      0.0,
+      0.0
+    ],
+    "force_rms_errors_common_norm": [
+      2.664256221561529e-15,
+      2.656462217916843e-15
+    ],
+    "phantom_error": 7.781050458274611e-15,
+    "static_kick_rms_errors": [
+      0.0,
+      0.0
+    ],
+    "net_sector_forces": [
+      [
+        -0.0002805770424382587,
+        -7.933905557052765e-20,
+        -8.010353085288499e-20
+      ],
+      [
+        -0.0002805770424382624,
+        -8.026659600300411e-20,
+        -8.02165105134046e-20
+      ]
+    ],
+    "signed_force_relative": 6.569118187363201e-15
+  },
+  "pair64": {
+    "grid": 64,
+    "density_rms_errors": [
+      0.0,
+      0.0
+    ],
+    "force_rms_errors_common_norm": [
+      5.023892198917943e-14,
+      4.945407808356303e-14
+    ],
+    "phantom_error": 4.965175641574165e-14,
+    "static_kick_rms_errors": [
+      0.0,
+      0.0
+    ],
+    "net_sector_forces": [
+      [
+        -0.0002813905666188298,
+        2.555505393027262e-21,
+        -2.3635769246311236e-20
+      ],
+      [
+        -0.00028139056661881357,
+        -1.0758993205958518e-21,
+        -2.1730307031798596e-20
+      ]
+    ],
+    "signed_force_relative": 2.880129066196305e-14
+  },
+  "shift32": {
+    "grid": 32,
+    "density_rms_errors": [
+      1.0721754730431921e-16,
+      1.2044033356876742e-16
+    ],
+    "force_rms_errors_common_norm": [
+      2.6480981714919976e-15,
+      2.650390968963563e-15
+    ],
+    "phantom_error": 7.869485752952455e-15,
+    "static_kick_rms_errors": [
+      0.0,
+      0.0
+    ],
+    "net_sector_forces": [
+      [
+        -0.00027704383552778887,
+        -2.6824967877199624e-09,
+        -2.6824967876974122e-09
+      ],
+      [
+        -0.000277088047904631,
+        1.6771302309529763e-08,
+        1.6771302309535553e-08
+      ]
+    ],
+    "signed_force_relative": 9.397286435174803e-05
+  },
+  "signed_force_resolution_decreases": false,
+  "passed_field_and_static_kick_checks": true
+}

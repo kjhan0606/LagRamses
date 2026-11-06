@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "grid": 64,
+  "weighting": "equal volume, all active cells",
+  "identity": {
+    "rms": 0.0,
+    "maximum": 0.0
+  },
+  "independent_discrete_reference": {
+    "rms": 7.411838191731104e-14,
+    "maximum": 7.011913442362741e-14
+  },
+  "scope": "static uniform one-rank no-twin limit; no twin-sector, AMR, GPU or hydro-evolution validation"
+}

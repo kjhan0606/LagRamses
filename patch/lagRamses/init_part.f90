@@ -1,4 +1,5 @@
 subroutine init_part
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use amr_parameters, ONLY: grafic_nreaders
   use amr_commons
   use pm_commons
@@ -29,6 +30,11 @@ subroutine init_part
   integer::i1,i2,i3,i1_min,i1_max,i2_min,i2_max,i3_min,i3_max
   integer(kind=8)::byte_pos,hdr_bytes,plane_bytes
   integer::buf_count,indglob,npart_new,nDMloc,grafic_io_group_size
+  integer(kind=8)::bimond_nonbaryon_loc,bimond_nonbaryon_all
+  integer(kind=8)::bimond_twin_loc,bimond_twin_all
+  integer::bimond_ptype,bimond_read_status
+  integer,dimension(nvector)::bimond_types
+  character(len=512)::bimond_ic_line
   integer(i8b)::tmp_long
   real(dp)::dx,xx1,xx2,xx3,vv1,vv2,vv3,mm1,ll1,ll2,ll3
   real(dp)::scale,dx_loc,rr,rmax,dx_min
@@ -1246,7 +1252,29 @@ subroutine init_part
            if(myid==1)then
               jpart=0
               do i=1,nvector
-                 read(10,*,end=100)xx1,xx2,xx3,vv1,vv2,vv3,mm1
+                 if(bimond_twin_matter)then
+                    read(10,'(A)',iostat=bimond_read_status)bimond_ic_line
+                    if(bimond_read_status<0)exit
+                    if(bimond_read_status==0) &
+                         read(bimond_ic_line,*,iostat=bimond_read_status)xx1,xx2,xx3,vv1,vv2,vv3,mm1,bimond_ptype
+                    if(bimond_read_status/=0)then
+                       write(*,'(A)') 'ERROR: malformed eight-column BIMOND ASCII particle record'
+                       call clean_stop
+                    endif
+                    if(bimond_read_status/=0.or. &
+                         (bimond_ptype/=int(PTYPE_STAR).and.bimond_ptype/=int(PTYPE_TWIN)).or.mm1<=0d0)then
+                       write(*,'(A)') 'ERROR: twin BIMOND ASCII IC requires positive mass and ptype 1 or 30'
+                       call clean_stop
+                    endif
+                    if(.not.all(ieee_is_finite([xx1,xx2,xx3,vv1,vv2,vv3,mm1])).or. &
+                         any([xx1,xx2,xx3]<-boxlen/2d0).or.any([xx1,xx2,xx3]>=boxlen/2d0))then
+                       write(*,'(A)') 'ERROR: BIMOND particle state must be finite and inside the periodic box'
+                       call clean_stop
+                    endif
+                    bimond_types(i)=bimond_ptype
+                 else
+                    read(10,*,end=100)xx1,xx2,xx3,vv1,vv2,vv3,mm1
+                 endif
                  jpart=jpart+1
                  indglob=indglob+1
                  xx(i,1)=xx1+boxlen/2.0
@@ -1267,6 +1295,8 @@ subroutine init_part
            call MPI_BCAST(vv,buf_count,MPI_DOUBLE_PRECISION,0,MPI_COMM_WORLD,info)
            call MPI_BCAST(mm,nvector  ,MPI_DOUBLE_PRECISION,0,MPI_COMM_WORLD,info)
            call MPI_BCAST(ii,nvector  ,MPI_INTEGER         ,0,MPI_COMM_WORLD,info)
+           if(bimond_twin_matter) &
+                call MPI_BCAST(bimond_types,nvector,MPI_INTEGER,0,MPI_COMM_WORLD,info)
            call MPI_BCAST(eof,1       ,MPI_LOGICAL         ,0,MPI_COMM_WORLD,info)
            call MPI_BCAST(jpart,1     ,MPI_INTEGER         ,0,MPI_COMM_WORLD,info)
            call cmp_cpumap(xx,cc,jpart)
@@ -1292,6 +1322,7 @@ subroutine init_part
                  mp(ipart)    =mm(i)
                  levelp(ipart)=levelmin
                  idp(ipart)   =ii(i)
+                 if(bimond_twin_matter)ptypep(ipart)=int(bimond_types(i),kind=1)
 #ifndef WITHOUTMPI
               endif
 #endif
@@ -1362,6 +1393,47 @@ subroutine init_part
   endif
 
   if(sink .and. .not. allocated(idsink)) call init_sink
+
+  ! Admit ordinary stars/sinks and explicitly selected twin particles only.
+  ! A generic CDM tag must never silently become baryons or twin matter.
+  if(use_bimond)then
+     bimond_nonbaryon_loc=0_8
+     bimond_twin_loc=0_8
+     do ipart=1,npart
+        if(mp(ipart)>0d0.and. &
+             & ptypep(ipart)/=PTYPE_STAR.and.ptypep(ipart)/=PTYPE_SINK)then
+           if(bimond_twin_matter.and.ptypep(ipart)==PTYPE_TWIN)then
+              bimond_twin_loc=bimond_twin_loc+1_8
+           else
+              bimond_nonbaryon_loc=bimond_nonbaryon_loc+1_8
+           endif
+        endif
+     enddo
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(bimond_nonbaryon_loc,bimond_nonbaryon_all,1, &
+          & MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+     bimond_nonbaryon_all=bimond_nonbaryon_loc
+#endif
+#ifndef WITHOUTMPI
+     call MPI_ALLREDUCE(bimond_twin_loc,bimond_twin_all,1,MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+     bimond_twin_all=bimond_twin_loc
+#endif
+     if(bimond_twin_matter.and.bimond_twin_all==0_8)then
+        if(myid==1)write(*,'(A)') 'ERROR: twin BIMOND requested but no positive-mass tagged twin particles loaded'
+        call clean_stop
+     endif
+     if(bimond_nonbaryon_all>0_8)then
+        if(myid==1)write(*,'(A,I0)') &
+             'ERROR: BIMOND rejects unsupported gravitating particle types; count=', &
+             bimond_nonbaryon_all
+        if(myid==1)write(*,'(A)') &
+             '       CDM is not twin matter. Twin ICs require bimond_twin_matter and explicit ptype=30.'
+        call clean_stop
+     endif
+     if(myid==1)write(*,'(A,I0)') ' BIMOND IC check passed; tagged twin count=',bimond_twin_all
+  endif
 
 end subroutine init_part
 !################################################################
