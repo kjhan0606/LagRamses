@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 
 from adapt_g2_candidate_sources import SourceAdapterError
+from stellar_source_paths import contract_root, file_identity, source_child, source_path
 
 DEFAULT_MATRIX = Path(__file__).resolve().parents[1] / "config/g2_source_selection_matrix_v1.json"
 _NUMBER = r"[-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?"
@@ -29,8 +30,19 @@ LIFETIME_SHA256 = '62e7fd40ce1d63d9024c1755f8226bb501ce92db95831c945ef18eaa2f80e
 FISHLOCK_SHA256 = 'b7379ba6eda1018bfeab527ff9bd17fa57fc4da45b2aa5ff845014c31f7eee00'
 
 
+def selected_agb_inputs(matrix_path=DEFAULT_MATRIX, *, source_root=None):
+    """Load only the selected AGB candidate under the explicit source scope."""
+    matrix_path = source_path(matrix_path, root=source_root)
+    matrix = json.loads(matrix_path.read_text())
+    root = contract_root(matrix_path, matrix, root=source_root, default_path=DEFAULT_MATRIX)
+    candidate = next(c for c in matrix['candidates'] if c['candidate_id'] == 'karakas_lugaro2016_agb')
+    base = source_path(candidate['source_asset_path'], root=root)
+    return matrix_path, matrix, candidate, base, root
+
+
 def read_fishlock2014(*, lifetime_model: str, include_one: bool = False,
-                     net_yields: bool = False) -> list[dict]:
+                     net_yields: bool = False, matrix_path: Path = DEFAULT_MATRIX,
+                     source_root: Path | None = None, yield_path: Path | None = None) -> list[dict]:
     """Explicit low-Z comparison: Fishlock yields plus a Padova lifetime fit.
 
     Fishlock 2014 Table 1 does NOT give total stellar lifetimes. Raiteri96
@@ -43,9 +55,11 @@ def read_fishlock2014(*, lifetime_model: str, include_one: bool = False,
     """
     if lifetime_model != 'raiteri96_padova':
         raise SourceAdapterError('Fishlock requires explicit raiteri96_padova lifetime approximation')
-    matrix = json.loads(DEFAULT_MATRIX.read_text())
-    candidate = next(c for c in matrix['candidates'] if c['candidate_id'] == 'karakas_lugaro2016_agb')
-    path = Path(candidate['source_asset_path']) / 'yield_z001.txt'
+    _, _, _, base, root = selected_agb_inputs(matrix_path, source_root=source_root)
+    if yield_path is not None and root is None:
+        raise SourceAdapterError('explicit Fishlock input requires a declared source_root')
+    path = (source_child(base, 'yield_z001.txt', root=root) if yield_path is None
+            else source_path(yield_path, root=root))
     data = path.read_bytes()
     if hashlib.sha256(data).hexdigest() != FISHLOCK_SHA256:
         raise SourceAdapterError('Fishlock source fingerprint mismatch')
@@ -113,7 +127,8 @@ def read_fishlock2014(*, lifetime_model: str, include_one: bool = False,
 FISHLOCK_PULSE_SHA256 = '4711e3662df69c490a697fba5725bdbba1a10271076b1b6383041f0077fa9d93'
 
 
-def attach_fishlock_pulses(records: list[dict]) -> dict:
+def attach_fishlock_pulses(records: list[dict], *, pulse_path: Path | None = None,
+                           source_root: Path | None = None, provenance: dict | None = None) -> dict:
     """Source TP mass-loss shape; explicit Padova terminal-age alignment.
 
     The last tabulated TP is the LEFT limit of the terminal envelope event.
@@ -121,10 +136,16 @@ def attach_fishlock_pulses(records: list[dict]) -> dict:
     Pre-TP loss is uniform; composition and wind speed remain the selected
     integrated means. No new total stellar lifetime is inferred from tip.
     """
-    path = DEFAULT_MATRIX.parents[3] / 'external/g2_candidates/fishlock2014_pulses/table2.dat'
+    if source_root is not None and pulse_path is None:
+        raise SourceAdapterError('scoped Fishlock pulse inputs require an explicit pulse_path')
+    path = source_path(pulse_path if pulse_path is not None else
+                       DEFAULT_MATRIX.parents[3] / 'external/g2_candidates/fishlock2014_pulses/table2.dat',
+                       root=source_root)
     data = path.read_bytes()
     if hashlib.sha256(data).hexdigest() != FISHLOCK_PULSE_SHA256:
         raise SourceAdapterError('Fishlock thermal-pulse fingerprint mismatch')
+    if provenance is not None:
+        provenance.update(path=str(path), bytes=len(data), sha256=FISHLOCK_PULSE_SHA256)
     grid = {}; duplicates = 0
     for line in data.decode().splitlines():
         v = list(map(float, line.split()))
@@ -170,14 +191,18 @@ def attach_fishlock_pulses(records: list[dict]) -> dict:
                 composition='integrated_mean',models=models)
 
 
-def attach_kl16_lifetimes(records: list[dict]) -> None:
+def attach_kl16_lifetimes(records: list[dict], lifetime_path: Path | None = None, *,
+                          source_root: Path | None = None) -> None:
     """Exact M,Z,Y,overshoot match to K14/KL16 Table 1; no lifetime fit.
 
     M_mix is a post-processing nucleosynthesis choice, not a second evolution
     calculation. KL16 section 3.1 explicitly defines absent N_ov as no
     overshoot. Do not transfer an overshoot lifetime to a no-overshoot model.
     """
-    data = LIFETIME_PATH.read_bytes()
+    if source_root is not None and lifetime_path is None:
+        raise SourceAdapterError('scoped KL16 inputs require an explicit lifetime_path')
+    path = source_path(LIFETIME_PATH if lifetime_path is None else lifetime_path, root=source_root)
+    data = path.read_bytes()
     if hashlib.sha256(data).hexdigest() != LIFETIME_SHA256:
         raise SourceAdapterError('KL16 lifetime data fingerprint mismatch')
     grid = {}
@@ -309,22 +334,30 @@ def _blocks(text: str, *, initial: bool) -> list[dict]:
     return blocks
 
 
-def read_karakas_lugaro2016(matrix_path: Path = DEFAULT_MATRIX, *, include_lifetimes: bool = False) -> dict:
-    matrix = json.loads(Path(matrix_path).read_text())
-    candidate = next(c for c in matrix["candidates"] if c["candidate_id"] == "karakas_lugaro2016_agb")
+def read_karakas_lugaro2016(matrix_path: Path = DEFAULT_MATRIX, *, include_lifetimes: bool = False,
+                           source_root: Path | None = None, lifetime_path: Path | None = None) -> dict:
+    matrix_path, matrix, candidate, base, root = selected_agb_inputs(matrix_path, source_root=source_root)
+    if lifetime_path is not None and root is None:
+        raise SourceAdapterError('explicit KL16 lifetime input requires a declared source_root')
+    if include_lifetimes and root is not None and lifetime_path is None:
+        lifetime_path = matrix.get('kl16_lifetime_path')
+        if lifetime_path is None:
+            raise SourceAdapterError('scoped KL16 inputs require an explicit lifetime_path')
     if candidate["approval_id"] is not None:
         raise SourceAdapterError("KL16 review reader does not implement physical approval")
     if candidate.get("selected_gross_normalization_policy") != GROSS_NORMALIZATION_POLICY:
         raise SourceAdapterError("KL16 normalization lacks the matching operator selection")
-    base = Path(candidate["source_asset_path"])
     texts = {}
+    identities = {}
     for suffix in ("007", "014", "030"):
         for prefix in ("yield", "initial", "data"):
             name = f"{prefix}_z{suffix}.txt"
-            data = (base / name).read_bytes()
+            path = source_child(base, name, root=root)
+            data = path.read_bytes()
             if hashlib.sha256(data).hexdigest() != candidate["source_file_sha256"].get(name):
                 raise SourceAdapterError(f"KL16 fingerprint mismatch: {name}")
             texts[name] = data.decode()
+            identities[name] = dict(path=str(path), bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
     records, excluded, initial_records = [], [], []
     for suffix in ("007", "014", "030"):
         initial = _blocks(texts[f"initial_z{suffix}.txt"], initial=True)
@@ -399,7 +432,7 @@ def read_karakas_lugaro2016(matrix_path: Path = DEFAULT_MATRIX, *, include_lifet
         if len(active_masses) != len(set(active_masses)) or set(active_masses) != set(masses):
             raise SourceAdapterError("KL16 active yield and auxiliary mass coordinates disagree")
     if include_lifetimes:
-        attach_kl16_lifetimes(records)
+        attach_kl16_lifetimes(records, lifetime_path, source_root=root)
     return {
         "candidate_id": candidate["candidate_id"], "status": "source_rows_review_only",
         "production_ready": False, "canonical_rows_emitted": 0,
@@ -410,4 +443,11 @@ def read_karakas_lugaro2016(matrix_path: Path = DEFAULT_MATRIX, *, include_lifet
         "initial_composition_records": initial_records,
         "net_diagnostic_definition": "gross - source X0 * labelled mass expelled; only unique exact full-header matches, no physical approval",
         "lifetime_yr": None, "injected_energy_erg": None,
+        "input_provenance": {
+            "source_root": str(root) if root is not None else None,
+            "selection_matrix": file_identity(matrix_path, root=root),
+            "source_files": identities,
+            "lifetimes": file_identity(LIFETIME_PATH if lifetime_path is None else lifetime_path, root=root)
+            if include_lifetimes else None,
+        },
     }

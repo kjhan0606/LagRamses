@@ -13,6 +13,8 @@ import sys
 import tarfile
 from typing import Any, Iterable
 
+from stellar_source_paths import SourcePathError, contract_root, source_child, source_path
+
 
 TOOL_PATH = Path(__file__).resolve()
 SNRT_ROOT = TOOL_PATH.parents[1]
@@ -489,16 +491,26 @@ def _audit_archives(base: Path, contract: dict[str, Any]) -> dict[str, Any]:
 
 
 def audit_sukhbold2016_candidate(
-    *, root: Path = DEFAULT_ROOT, contract_path: Path = DEFAULT_CONTRACT
+    *, root: Path = DEFAULT_ROOT, contract_path: Path = DEFAULT_CONTRACT,
+    source_root: Path | None = None
 ) -> dict[str, Any]:
     root = Path(root).resolve()
     contract_path = Path(contract_path).resolve()
     contract = _load_contract(contract_path)
+    scope = None
+    if source_root is not None or 'source_root' in contract:
+        scope = contract_root(contract_path, contract, root=source_root)
+        source_path(root, root=scope)
     source = contract["source"]
-    base = root / source["release_root_relative_path"]
+    base = source_child(root, source["release_root_relative_path"], root=scope)
+    required = {'INDEX.html', 'ARCHIVE_TERMS.html', 'explosion_results_PHOTB.tar.gz',
+                'nucleosynthesis_yields.tar.gz'}
+    if not required <= source['files'].keys():
+        raise SukhboldAuditError('Sukhbold contract omits a consumed source file')
     fingerprints: dict[str, dict[str, Any]] = {}
     for name, expected in source["files"].items():
-        size, sha256 = _hash(base / name)
+        path = source_child(base, name, root=scope)
+        size, sha256 = _hash(path)
         if size != expected["bytes"] or sha256 != expected["sha256"]:
             raise SukhboldAuditError(f"staged Sukhbold source fingerprint drifted: {name}")
         fingerprints[name] = {"bytes": size, "sha256": sha256}
@@ -668,6 +680,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
+    parser.add_argument("--source-root", type=Path)
     parser.add_argument("--json-out", type=Path)
     return parser
 
@@ -675,8 +688,8 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Iterable[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        report = audit_sukhbold2016_candidate(root=args.root, contract_path=args.contract)
-    except SukhboldAuditError as exc:
+        report = audit_sukhbold2016_candidate(root=args.root, contract_path=args.contract, source_root=args.source_root)
+    except (SukhboldAuditError, SourcePathError) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, indent=2), file=sys.stderr)
         return 2
     payload = json.dumps(report, indent=2, sort_keys=True) + "\n"

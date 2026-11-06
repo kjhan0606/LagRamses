@@ -17,8 +17,9 @@ import numpy as np
 from build_parsec_pair_feedback import Z_GRIDS, source_name, read_ejecta, compress
 from build_parsec_native_sed import Spectrum, check_rates, intervals, MYR
 from read_karakas_lugaro2016 import (read_karakas_lugaro2016, read_fishlock2014,
-    DEFAULT_MATRIX, LIFETIME_PATH, LIFETIME_SHA256, FISHLOCK_SHA256)
+    selected_agb_inputs, DEFAULT_MATRIX, LIFETIME_SHA256, FISHLOCK_SHA256)
 from build_sukhbold_native_lowmass import build_lowmass
+from stellar_source_paths import file_identity, source_child, source_path
 
 MODEL = 'parsec_mixed_lowmass_truncated_v1'
 MSUN = 1.98847e33
@@ -33,16 +34,47 @@ def nearest(items, value, key):
     return min(items, key=lambda r: (abs(key(r)-value), key(r)))
 
 
-def terminal_sources(imf):
-    agb = read_karakas_lugaro2016(include_lifetimes=True)['records']
+def terminal_sources(imf, *, matrix_path=DEFAULT_MATRIX, lifetime_path=None,
+                     fishlock_path=None, sukhbold_root=None, sukhbold_contract=None,
+                     source_root=None, provenance=None):
+    matrix_path, matrix, candidate, base, root = selected_agb_inputs(matrix_path, source_root=source_root)
+    if root is None and any(value is not None for value in
+                            (lifetime_path, fishlock_path, sukhbold_root, sukhbold_contract)):
+        raise ValueError('explicit mixed source inputs require a declared source_root')
+    if root is not None:
+        lifetime_path = lifetime_path if lifetime_path is not None else matrix.get('kl16_lifetime_path')
+        if lifetime_path is None or sukhbold_root is None or sukhbold_contract is None:
+            raise ValueError('scoped mixed inputs require KL16 lifetimes and Sukhbold root/contract')
+    kl16 = read_karakas_lugaro2016(matrix_path, include_lifetimes=True,
+                                 source_root=root, lifetime_path=lifetime_path)
+    agb = kl16['records']
     agb = [r for r in agb if r['coordinate']['initial_mass_msun'] <= 7]
-    agb += read_fishlock2014(lifetime_model='raiteri96_padova', include_one=True)
+    agb += read_fishlock2014(lifetime_model='raiteri96_padova', include_one=True,
+                            matrix_path=matrix_path, source_root=root, yield_path=fishlock_path)
     # Existing explicitly selected stable-segment residual-remnant comparison.
+    sn_provenance = {}
     table, _ = build_lowmass(solar_coordinate=.02, wind_speed_km_s=1000.,
         lifetime_model='raiteri96_padova', remnant_policy='stable_segment_residual',
-        max_remnant_difference_msun=.1, imf_id=imf)
+        max_remnant_difference_msun=.1, imf_id=imf, root=sukhbold_root,
+        contract_path=sukhbold_contract, source_root=root, provenance=sn_provenance)
     selection = json.loads(table.splitlines()[1][2:])
+    if provenance is not None:
+        fishlock = (source_child(base, 'yield_z001.txt', root=root) if fishlock_path is None
+                    else source_path(fishlock_path, root=root))
+        provenance.update(kl16=kl16['input_provenance'], fishlock=file_identity(fishlock, root=root),
+                          sukhbold=sn_provenance, selected_agb_candidate=candidate)
     return agb, selection
+
+
+def merged_source_hashes(*manifests):
+    """Reject incompatible material/radiation provenance instead of overwriting it."""
+    result = {}
+    for manifest in manifests:
+        for name, digest in manifest.items():
+            if name in result and result[name] != digest:
+                raise ValueError(f'conflicting source fingerprints for {name}')
+            result[name] = digest
+    return result
 
 
 def endpoint(m, z, agb, sn):
@@ -189,34 +221,57 @@ def load_upper_sed(path):
 def build(args):
     output = args.output.resolve()
     if output.exists(): raise ValueError('output directory already exists')
-    feedback = json.loads((args.feedback/'manifest.json').read_text())
-    sed = json.loads((args.upper_sed/'manifest.json').read_text())
+    root = getattr(args, 'source_root', None)
+    matrix_path = getattr(args, 'agb_matrix', None)
+    explicit = root is not None or any(getattr(args, name, None) is not None for name in
+        ('kl16_lifetimes', 'fishlock_yields', 'sukhbold_root', 'sukhbold_contract'))
+    if explicit and matrix_path is None:
+        raise ValueError('scoped mixed inputs require an explicit --agb-matrix')
+    matrix_path = DEFAULT_MATRIX if matrix_path is None else matrix_path
+    # Resolve a contract-declared root before touching either upper package.
+    _, _, _, _, root = selected_agb_inputs(matrix_path, source_root=root)
+    args.source_dir = source_path(args.source_dir, root=root)
+    args.feedback = source_path(args.feedback, root=root)
+    args.upper_sed = source_path(args.upper_sed, root=root)
+    feedback_path = source_child(args.feedback, 'manifest.json', root=root)
+    sed_path = source_child(args.upper_sed, 'manifest.json', root=root)
+    feedback = json.loads(feedback_path.read_text())
+    sed = json.loads(sed_path.read_text())
     for name, digest in feedback['output_sha256'].items():
-        if sha(args.feedback/name) != digest: raise ValueError('changed upper material package')
-    if sha(args.upper_sed/'nodes.dat') != sed['source_sha256']:
+        if sha(source_child(args.feedback, name, root=root)) != digest: raise ValueError('changed upper material package')
+    if sha(source_child(args.upper_sed, 'nodes.dat', root=root)) != sed['source_sha256']:
         raise ValueError('changed upper radiation package')
     if sed['feedback_outputs_sha256'] != feedback['output_sha256']:
         raise ValueError('upper radiation/material source mismatch')
-    inputs = dict(feedback['inputs_sha256']); inputs.update(sed['sources_sha256'])
+    inputs = merged_source_hashes(feedback['inputs_sha256'], sed['sources_sha256'])
     for name, digest in inputs.items():
-        if sha(args.source_dir/name) != digest: raise ValueError(f'changed source {name}')
+        if sha(source_child(args.source_dir, name, root=root)) != digest: raise ValueError(f'changed source {name}')
     coordinates = Z_GRIDS[feedback.get('metallicity_grid','solar_pair')]
     if feedback['source_domain']['z'] != [float(z) for z,_ in coordinates]:
         raise ValueError('unexpected upper Z grid')
+    required_inputs = {'all_ejecta.zip'} | {
+        source_name(z, y, kind) for z, y in coordinates for kind in ('tracks', 'photons')}
+    if not required_inputs <= inputs.keys() or 'yields.dat' not in feedback['output_sha256']:
+        raise ValueError('upper manifests omit a consumed source file')
     if not all(np.isfinite(v) and 0 < v < 29979.2458 for v in (args.agb_wind_km_s,args.sn_wind_km_s)):
         raise ValueError('explicit positive nonrelativistic lower wind speeds required')
-    imf = feedback['imf_id']; agb, sn = terminal_sources(imf)
-    upper_model, radiation = load_upper_sed(args.upper_sed/'nodes.dat')
+    provenance = {}
+    imf = feedback['imf_id']
+    agb, sn = terminal_sources(imf, matrix_path=matrix_path, source_root=root,
+        lifetime_path=getattr(args, 'kl16_lifetimes', None), fishlock_path=getattr(args, 'fishlock_yields', None),
+        sukhbold_root=getattr(args, 'sukhbold_root', None),
+        sukhbold_contract=getattr(args, 'sukhbold_contract', None), provenance=provenance)
+    upper_model, radiation = load_upper_sed(source_child(args.upper_sed, 'nodes.dat', root=root))
     if upper_model != feedback['model']: raise ValueError('upper model identity mismatch')
-    upper = np.loadtxt(args.feedback/'yields.dat')
+    upper = np.loadtxt(source_child(args.feedback, 'yields.dat', root=root))
     edges = np.array(sed['group_edges_ev']); spectrum = Spectrum(64)
     material=[]; nodes=[]; spectra={}
-    with zipfile.ZipFile(args.source_dir/'all_ejecta.zip') as ejecta:
+    with zipfile.ZipFile(source_child(args.source_dir, 'all_ejecta.zip', root=root)) as ejecta:
         for zs,ys in coordinates:
             z = float(zs)
             initial,_ = read_ejecta(ejecta,f'ejecta/Z{zs}_Y{ys}_winds_ejecta.dat')
-            with zipfile.ZipFile(args.source_dir/source_name(zs,ys,'tracks')) as tracks, \
-                 zipfile.ZipFile(args.source_dir/source_name(zs,ys,'photons')) as photons:
+            with zipfile.ZipFile(source_child(args.source_dir, source_name(zs,ys,'tracks'), root=root)) as tracks, \
+                 zipfile.ZipFile(source_child(args.source_dir, source_name(zs,ys,'photons'), root=root)) as photons:
                 for m in LOW_MASSES:
                     sm = min(m,12.)
                     track = np.loadtxt(io.BytesIO(tracks.read(source_name(zs,ys,'tracks',sm))),skiprows=3)
@@ -288,7 +343,8 @@ def build(args):
             f" {n['terminal_channel']} {n['remnant_kind']} {n['fate']} {len(v)}")
         lines.extend(' '.join(f'{x:.17e}' for x in r) for r in v)
     payload='\n'.join(lines)+'\n'; digest=hashlib.sha256(payload.encode()).hexdigest()
-    template=(args.upper_sed/'source.nml').read_text()
+    template_path = source_child(args.upper_sed, 'source.nml', root=root)
+    template=template_path.read_text()
     template=re.sub(r'^!.*\n','! Explicit mixed comparison; omitted late radiation; not full SSP.\n',template,count=1)
     template=template.replace('version=4','version=5').replace('match_feedback_high_mass_only','common_imf_mixed_evolution')
     template=template.replace('PARSEC_v2_nonrot_high_mass_only','PARSEC_mixed_lowmass_comparison')
@@ -311,12 +367,16 @@ def build(args):
     (output/'source.nml').write_text(template);(output/'enrichment.nml').write_text(config)
     manifest=dict(model=MODEL,full_ssp=False,same_evolution=False,source_domain=dict(mass=[2,600],z=[float(z) for z,_ in coordinates]),
         imf_id=imf,imf_denominator=[.08,600],input_upper=feedback['model'],upper_output_sha256=feedback['output_sha256'],
-        parsec_inputs_sha256=inputs,upper_sed_manifest_sha256=sha(args.upper_sed/'manifest.json'),
-        agb_sources=dict(selection_matrix_sha256=sha(DEFAULT_MATRIX),
-            kl16=next(c for c in json.loads(DEFAULT_MATRIX.read_text())['candidates']
-                      if c['candidate_id']=='karakas_lugaro2016_agb'),
-            lifetime_path=str(LIFETIME_PATH),lifetime_sha256=LIFETIME_SHA256,
+        parsec_inputs_sha256=inputs,upper_sed_manifest_sha256=sha(sed_path),
+        agb_sources=dict(selection_matrix_sha256=provenance['kl16']['selection_matrix']['sha256'],
+            kl16=provenance['selected_agb_candidate'],
+            lifetime_path=provenance['kl16']['lifetimes']['path'],lifetime_sha256=LIFETIME_SHA256,
             fishlock_sha256=FISHLOCK_SHA256),sukhbold_selection=sn,nodes=nodes,
+        input_provenance=dict(source_root=str(root) if root is not None else None,
+            lower_sources=provenance, upper_material_manifest=file_identity(feedback_path),
+            upper_radiation_manifest=file_identity(sed_path), upper_source_wrapper=file_identity(template_path),
+            parsec_sources={name:dict(path=str(source_child(args.source_dir,name,root=root)),sha256=digest)
+                            for name,digest in inputs.items()}),
         radiation_knots=nr,material_rows=len(material),generator_sha256=sha(Path(__file__)),
         numerical_policy='positive_interval_QE;budgeted_wind;terminal_residual;untracked_reservoir_included',
         wind_mass_policy='PARSEC_RATE_integral_scaled_only_down_to_available_terminal_budget',
@@ -335,4 +395,10 @@ if __name__=='__main__':
     p.add_argument('--output',type=Path,required=True)
     p.add_argument('--agb-wind-km-s',type=float,required=True)
     p.add_argument('--sn-wind-km-s',type=float,required=True)
+    p.add_argument('--source-root',type=Path,help='Root containing all explicit input contracts and packages')
+    p.add_argument('--agb-matrix',type=Path,help='Source-bound KL16/Fishlock selection matrix')
+    p.add_argument('--kl16-lifetimes',type=Path,help='Exact pinned KL16 lifetime CSV inside the source root')
+    p.add_argument('--fishlock-yields',type=Path,help='Exact pinned Fishlock yield_z001.txt; never a TSV substitution')
+    p.add_argument('--sukhbold-root',type=Path,help='Root containing the release named by the Sukhbold contract')
+    p.add_argument('--sukhbold-contract',type=Path,help='Source-bound Sukhbold candidate contract')
     build(p.parse_args())
