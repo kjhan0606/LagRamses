@@ -6864,7 +6864,7 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
   integer, allocatable :: agn_local(:)
   logical, optional, intent(in) :: is_replay_ref(:),is_jet_ref(:)
   real(dp), optional, intent(in) :: mload_ref(:)
-  logical :: reference_call
+  logical :: reference_call,replay_i,jet_i
 
   if(verbose)write(*,*)'  +Entering average_AGN'
   reference_call=present(is_replay_ref).or.present(is_jet_ref).or.present(mload_ref)
@@ -7005,7 +7005,7 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
      end do
      ! Loop over grids
      ncache=active(ilevel)%ngrid
-!$omp parallel do private(iAGN,igrid,ngrid,i,ind,x,y,z,dxx,dyy,dzz,&
+!$omp parallel do private(iAGN,igrid,ngrid,i,ind,x,y,z,dxx,dyy,dzz,replay_i,jet_i,&
 !$omp                  dr_AGN,dr_cell,jtot,j_x,j_y,j_z,dzjet,drjet,psy,d,u,v,w,&
 !$omp                  ekk,eint,ibx,iby,ibz,jbx,jby,jbz,weights,axis) schedule(dynamic)
      do igrid=1,ncache,nvector
@@ -7042,6 +7042,13 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
                   dyy=y-xAGN(iAGN,2)
                   dzz=z-xAGN(iAGN,3)
                   dr_AGN=dxx*dxx+dyy*dyy+dzz*dzz
+                  ! Fortran logical operators need not short-circuit. Read
+                  ! optional event arrays only after the presence branch.
+                  replay_i=.false.; jet_i=.false.
+                  if(reference_call)then
+                     replay_i=is_replay_ref(iAGN)
+                     jet_i=is_jet_ref(iAGN)
+                  endif
                   if(agn_contains_donor([dxx,dyy,dzz],dx_loc))then
                      ! One half-open leaf should own the donor. Record ties
                      ! without an OMP race and reject before any mass removal.
@@ -7057,7 +7064,7 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
                   ! case 0: Some energy has not been released
                   ! ------------------------------------------
                   if((.not.reference_call.and.EsaveAGN(iAGN).gt.0d0).or. &
-                       (reference_call.and.is_replay_ref(iAGN)))then
+                       (reference_call.and.replay_i))then
                      if(dr_AGN.le.rmax2)then
                        Tvol_gas (iAGN)=Tvol_gas (iAGN)+vol_loc*uold(ind_cell(i),1)
                      endif
@@ -7074,7 +7081,7 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
                      ! Jet feedback
                      ! ------------------------------------------
                      if((.not.reference_call.and.X_radio(iAGN).lt.X_floor).or. &
-                          (reference_call.and.is_jet_ref(iAGN)))then
+                          (reference_call.and.jet_i))then
 
                        if(ok_blast_agn(iAGN))then
                           jtot=sqrt(jAGN(iAGN,1)**2+jAGN(iAGN,2)**2+jAGN(iAGN,3)**2)
@@ -7142,8 +7149,12 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
      vol_gas(iAGN)=geometry_all(1,isink)
      mass_gas(iAGN)=geometry_all(2,isink)
      psy_norm(iAGN,:)=geometry_all(3:4,isink)
-     if((.not.reference_call.and.EsaveAGN(iAGN)<=0d0.and.X_radio(iAGN)<X_floor).or. &
-          (reference_call.and.is_jet_ref(iAGN)))then
+     if(reference_call)then
+        jet_i=is_jet_ref(iAGN)
+     else
+        jet_i=EsaveAGN(iAGN)<=0d0.and.X_radio(iAGN)<X_floor
+     endif
+     if(jet_i)then
         if(ok_blast_agn(iAGN).and.sum(jAGN(iAGN,:)**2)>0d0.and.owner_all(isink)/=1)donor_error=1
      endif
   enddo
@@ -7161,10 +7172,13 @@ subroutine average_AGN(xAGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,vol_gas,mass_gas,psy_nor
   ! the actual pre-withdrawal cell, not a stale snapshot from the AMR pass.
   load_send=0d0
   do iAGN=1,nAGN
-     if((.not.reference_call.and.EsaveAGN(iAGN)>0d0).or. &
-          (.not.reference_call.and.X_radio(iAGN)>=X_floor).or. &
-          (reference_call.and..not.is_jet_ref(iAGN)).or. &
-          .not.ok_blast_agn(iAGN) .or. ind_blast(iAGN)<=0)cycle
+     if(reference_call)then
+        if(.not.is_jet_ref(iAGN))cycle
+     else
+        if(EsaveAGN(iAGN)>0d0)cycle
+        if(X_radio(iAGN)>=X_floor)cycle
+     endif
+     if(.not.ok_blast_agn(iAGN).or.ind_blast(iAGN)<=0)cycle
      if(sum(jAGN(iAGN,:)**2)<=0d0)cycle
      donor_row=uold(ind_blast(iAGN),1:nvar)
      if(reference_call)then
