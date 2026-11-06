@@ -20,6 +20,7 @@ For other idealized problems (Sedov, tubes, ...) use namelist/*.nml.
 Run: python3 mkrun.py                 # terminal wizard
      python3 mkrun.py --mode gui      # graphical setup, preview and confirmed save
      python3 mkrun.py --gui            # legacy alias for --mode gui
+     python3 mkrun.py --hydro --no-dust --no-ray --no-uvb --no-agn --nspecies basic
 """
 import argparse
 import hashlib
@@ -35,6 +36,8 @@ from collections import OrderedDict
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, 'patch', 'cuRamses', 'aux'))
 import ramses_nml_generator as rng  # noqa: E402
+
+DEFAULT_SIMPLE_OPTIONS = {}
 
 
 def snrt_group_profile_details(profile_id):
@@ -1507,12 +1510,19 @@ def generate_comparison(name, outdir, ui, write_text, parallel=False, ccsn=False
     return {'paths': list(files), 'messages': msgs, 'values': values, 'outdir': outdir}
 
 
-def generate_run(ui=None, write_text=save_text):
+def generate_run(ui=None, write_text=save_text, simple_options=None):
     """Shared wizard; a GUI supplies prompts and an in-memory text sink.
 
     No directories or files are touched except by the supplied text sink.
     """
     ui = ui or ConsoleUI()
+    simple_options = dict(DEFAULT_SIMPLE_OPTIONS if simple_options is None else simple_options)
+    forced_mode = simple_options.pop('run_mode', None)
+    explicit_mode = forced_mode
+    if simple_options.get('dmo') and simple_options.get('nspecies') == 'basic':
+        raise ValueError("DMO has no gas chemistry; omit --nspecies for a DMO run.")
+    if simple_options.get('grackle_data_file') and simple_options.get('nspecies') != 'basic':
+        raise ValueError('--grackle-data-file requires --nspecies basic.')
     ask, ask_bool, ask_choice = ui.ask, ui.ask_bool, ui.ask_choice
     ask_floats, print = ui.ask_floats, ui.info
     print('=== lagRamses run generator (cosmological / fixed RT comparison) ===')
@@ -1530,16 +1540,34 @@ def generate_run(ui=None, write_text=save_text):
     values['pic'] = True
     values['poisson'] = True
 
-    mode = ask_choice('\n=== Run mode ===', OrderedDict([
+    run_modes = OrderedDict([
         ('dmo', ('DMO (dark matter only, N-body + gravity)',)),
         ('hydro', ('Hydro (gas + gravity + N-body)',)),
         ('comparison', ('RT/feedback/dust comparison (fixed non-cosmological reference)',)),
         ('comparison_parallel', ('RT/feedback/dust comparison (MPI + GPU/OpenMP placement)',)),
         ('comparison_ccsn', ('LC18 ordinary CCSN + AGB/SNIa/RT/dust comparison (13--120 Msun)',)),
-    ]), 'dmo')
+    ])
+    if forced_mode is None and any(simple_options.get(key) for key in
+                                   ('no_dust', 'no_ray', 'no_uvb', 'no_agn', 'nspecies')):
+        forced_mode = 'hydro'
+        # Physics-only shortcuts imply a gas run. Keep that mode pinned even
+        # if the advanced editor later changes the hydro flag.
+        explicit_mode = forced_mode
+    if forced_mode is not None:
+        if forced_mode not in ('dmo', 'hydro'):
+            raise ValueError('Quick run mode must be dmo or hydro.')
+        mode = forced_mode
+        print('Run mode selected by shortcut: {}'.format(mode))
+    else:
+        mode = ask_choice('\n=== Run mode ===', run_modes, 'dmo')
     if mode in ('comparison', 'comparison_parallel', 'comparison_ccsn'):
+        if any(simple_options.get(key) for key in
+               ('no_dust', 'no_ray', 'no_uvb', 'no_agn', 'nspecies', 'grackle_data_file')):
+            raise ValueError('Simple physics switches apply to cosmological DMO/hydro runs, not fixed comparison profiles.')
         return generate_comparison(name, outdir, ui, write_text, parallel=(mode != 'comparison'),
                                    ccsn=(mode == 'comparison_ccsn'))
+    if mode != 'hydro' and simple_options.get('grackle_data_file'):
+        raise ValueError('--grackle-data-file requires a hydro run.')
     values['hydro'] = (mode == 'hydro')
 
     dm_choice, extra_dm = collect_dm_sector(values, ui)
@@ -1630,7 +1658,10 @@ def generate_run(ui=None, write_text=save_text):
 
     if values['hydro']:
         print('\n=== Hydro solver ===')
-        values.update(collect_snrt_transport(ui))
+        if simple_options.get('no_ray') or simple_options.get('nspecies') == 'basic':
+            values['radiation_transport'] = 'none'
+        else:
+            values.update(collect_snrt_transport(ui))
         values['gamma'] = ask('gamma', 5.0/3.0, float)
         values['courant_factor'] = ask('courant_factor', 0.8, float)
         values['slope_type'] = ask('slope_type', 2, int)
@@ -1648,7 +1679,10 @@ def generate_run(ui=None, write_text=save_text):
             print('Requires a separate SOLVER=mhd HDF5 binary; passive fields shift by 3. '
                   'Dust Lorentz force and field-aligned CR transport are not enabled.')
         values['pressure_fix'] = not values.get('mhd_enabled', False)
-        physics_on = ask_bool('enable cooling + star formation physics?', True)
+        if simple_options.get('nspecies') == 'basic':
+            physics_on = True
+        else:
+            physics_on = ask_bool('enable cooling + star formation physics?', True)
     else:
         physics_on = False
 
@@ -1665,20 +1699,30 @@ def generate_run(ui=None, write_text=save_text):
         ('use_snia', False), ('use_pisn', False),
     ])
     if physics_on:
-        cooling_choice=ui.ask_choice('Cooling solver',OrderedDict([
+        cooling_choices=OrderedDict([
             ('original',('Existing RAMSES cooling',)),
             ('exact',('Equilibrium Grackle binary table + analytic energy integration',)),
             ('grackle_neq',('Nine-species non-equilibrium Grackle + equilibrium metals; dust/RT off',)),
-        ]),'original')
+        ])
+        cooling_default='grackle_neq' if simple_options.get('nspecies') == 'basic' else 'original'
+        if simple_options.get('nspecies') == 'basic':
+            cooling_choice='grackle_neq'
+            ui.info('nspecies=basic selects the existing nine-species Grackle NEQ network.')
+        else:
+            cooling_choice=ui.ask_choice('Cooling solver',cooling_choices,cooling_default)
         values['cooling_method']=cooling_choice
         if cooling_choice=='grackle_neq':
             values.update(cooling=True,metal=True,neq_chem=False,radiation_transport='none',dust_mass_enabled=False,
                           gamma=5.0/3.0,interpol_var=0,interpol_type=1,gpu_hydro=False,
                           outformat="'hdf5'",informat="'hdf5'")
-            values['haardt_madau']=ask_bool('Enable uniform HM2012 UV background?', True)
-            values['grackle_neq_data_file']=ask('Grackle HDF5 data file (absolute path)',
-                '/home/kjhan/BACKUP/Eunha.A1/Prerequisites/Cooling_Grackle/input/'+
+            values['haardt_madau'] = (False if simple_options.get('no_uvb') else
+                                      ask_bool('Enable uniform HM2012 UV background?', True))
+            data_default = ('/home/kjhan/BACKUP/Eunha.A1/Prerequisites/Cooling_Grackle/input/'+
                 ('CloudyData_UVB=HM2012.h5' if values['haardt_madau'] else 'CloudyData_noUVB.h5'))
+            selected_data_file = (simple_options.get('grackle_data_file') or
+                                  os.environ.get('GRACKLE_NEQ_DATA_FILE'))
+            values['grackle_neq_data_file'] = selected_data_file or ask(
+                'Grackle HDF5 data file (absolute path)', data_default)
             ui.info('Requires GRACKLE_NEQ=1 HDF5=1 build with CPU closure-consistent hydro; GPU Poisson remains available. Local RT/dust are disabled for this route; exact/CHIMES cooling is not also applied.')
         elif cooling_choice=='exact':
             values['grackle_table']=ask('Grackle equilibrium binary table (absolute path)','grackle_multi_z.bin')
@@ -1704,6 +1748,13 @@ def generate_run(ui=None, write_text=save_text):
         '\nOpen the full parameter editor for fine-tuning before writing?', False)
     if advanced:
         values = ui.edit(values)
+
+    if explicit_mode == 'hydro':
+        values['hydro'] = True
+        ui.info('--hydro remains enabled over advanced-editor changes.')
+    if any(value for value in simple_options.values()):
+        values = rng.apply_simple_physics_options(values, **simple_options)
+        ui.info('Quick physics options are final overrides over values edited in the advanced editor.')
 
     # ---- AMR / refine / init defaults not asked above ----
     values.setdefault('ngridtot', 100_000_000)
@@ -1758,8 +1809,10 @@ def generate_run(ui=None, write_text=save_text):
     if physics_on:
         physics_extra = {}
         record(values, physics_extra, 'PHYSICS_PARAMS', [
-            ('cooling', True), ('metal', True), ('haardt_madau', True),
-            ('self_shielding', True), ('t_star', 8.0), ('n_star', 0.1),
+            ('cooling', True), ('metal', True),
+            ('haardt_madau', values.get('haardt_madau', True)),
+            ('agn', values.get('agn', False)),
+            ('self_shielding', cooling_choice!='grackle_neq'), ('t_star', 8.0), ('n_star', 0.1),
             ('eps_star', 0.02), ('T2_star', 1.0e4), ('T2thres_SF', 1.0e4),
             ('yieldtablefilename', 'CHANGE_ME/yield_table.asc'),
         ])
@@ -1794,8 +1847,20 @@ def generate_run(ui=None, write_text=save_text):
         raise ValueError('Invalid namelist: ' + '; '.join(errors))
 
     nml_path = os.path.join(outdir, '{}.nml'.format(name))
+    quick = []
+    if explicit_mode == 'dmo':
+        quick.append('--dmo')
+    elif explicit_mode == 'hydro':
+        quick.append('--hydro')
+    for key, flag in (('no_dust', '--no-dust'), ('no_ray', '--no-ray'),
+                      ('no_uvb', '--no-uvb'), ('no_agn', '--no-agn')):
+        if simple_options.get(key):
+            quick.append(flag)
+    if simple_options.get('nspecies'):
+        quick.append('--nspecies {}'.format(simple_options['nspecies']))
+    quick_comment = ('! Simple physics options: {}\n'.format(' '.join(quick)) if quick else '')
     write_text(nml_path, '! Generated by mkrun.py -- dm={} grav={} mode={}\n'.format(
-        dm_choice, grav_choice, mode) + nml_text)
+        dm_choice, grav_choice, mode) + quick_comment + nml_text)
     written = [nml_path]
 
     # ---- lagCAMB transfer function(s) ----
@@ -2089,13 +2154,49 @@ def main(argv=None):
                         help='Select the setup interface (default: cli).')
     parser.add_argument('--gui', action='store_true',
                         help='Legacy alias for --mode gui; never launches simulations or submits jobs')
+    run_group = parser.add_mutually_exclusive_group()
+    run_group.add_argument('--dmo', action='store_true',
+                           help='Select a cosmological dark-matter-only run')
+    run_group.add_argument('--hydro', action='store_true',
+                           help='Select a cosmological hydro run')
+    parser.add_argument('--no-dust', action='store_true',
+                        help='Force dust mass, dust submodels and IR dust feedback off')
+    parser.add_argument('--no-ray', action='store_true',
+                        help='Disable local radiation transport; keep the UV background independent')
+    parser.add_argument('--no-uvb', action='store_true',
+                        help='Disable the metagalactic UV background independently of local radiation transport')
+    parser.add_argument('--no-agn', action='store_true',
+                        help='Disable the whole sink module, including non-AGN sinks, accretion, jets and sink IR feedback')
+    parser.add_argument('--nspecies', choices=('basic',),
+                        help='Select the basic nine-species Grackle non-equilibrium network')
+    parser.add_argument('--grackle-data-file',
+                        help='Grackle HDF5 rate/UV table for --nspecies basic')
     args = parser.parse_args(argv)
     if args.gui and args.mode == 'cli':
         parser.error('--gui conflicts with --mode cli')
+
+    if args.dmo and args.nspecies:
+        parser.error('--dmo and --nspecies basic are incompatible')
+    if args.dmo and args.grackle_data_file:
+        parser.error('--grackle-data-file is not used by DMO')
+    if args.grackle_data_file and not args.nspecies:
+        parser.error('--grackle-data-file requires --nspecies basic')
+    simple_options = {
+        'run_mode': 'dmo' if args.dmo else ('hydro' if args.hydro else None),
+        'dmo': args.dmo,
+        'no_dust': args.no_dust,
+        'no_ray': args.no_ray,
+        'no_uvb': args.no_uvb,
+        'no_agn': args.no_agn,
+        'nspecies': args.nspecies,
+        'grackle_data_file': args.grackle_data_file,
+    }
+    global DEFAULT_SIMPLE_OPTIONS
+    DEFAULT_SIMPLE_OPTIONS = simple_options
     if args.gui or args.mode == 'gui':
         from ramses_run_gui import launch
         return launch(sys.modules[__name__])
-    generate_run()
+    generate_run(simple_options=simple_options)
     return 0
 
 

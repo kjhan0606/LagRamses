@@ -396,6 +396,7 @@ PARAMS = [
 
     # AGN/Sink feedback
     ParamDef('n_sink',    'real', 0.0,     'PHYSICS_PARAMS', S_FEED, 'Sink formation density [H/cc]'),
+    ParamDef('agn',       'bool', False,   'PHYSICS_PARAMS', S_FEED, 'Legacy AGN physics mode switch'),
     ParamDef('sink_AGN',  'bool', False,   'PHYSICS_PARAMS', S_FEED, 'AGN feedback from sinks',
              visible_when='sink==True'),
     ParamDef('bondi',     'bool', False,   'PHYSICS_PARAMS', S_FEED, 'Bondi accretion',
@@ -720,6 +721,116 @@ class ValidationMsg:
         self.msg = msg
     def __str__(self):
         return '[{}] {}'.format(self.level, self.msg)
+
+
+def apply_simple_physics_options(values, *, dmo=False, hydro=False,
+                                 no_dust=False, no_ray=False, no_uvb=False,
+                                 no_agn=False, nspecies=None,
+                                 grackle_data_file=None):
+    """Expand short run switches into supported low-level namelist fields.
+
+    ``nspecies=basic`` selects the existing nine-species Grackle network; it
+    is a generator convenience, not a new Fortran namelist variable.
+    """
+    result = OrderedDict(values)
+
+    def set_value(name, value):
+        key = next((item for item in result if item.lower() == name.lower()), name)
+        result[key] = value
+
+    if nspecies not in (None, 'basic'):
+        raise ValueError("nspecies must be omitted or 'basic'.")
+    if dmo and hydro:
+        raise ValueError("Choose either DMO or hydro, not both.")
+    if dmo and nspecies == 'basic':
+        raise ValueError("DMO has no gas chemistry; omit --nspecies for a DMO run.")
+    if grackle_data_file and nspecies != 'basic':
+        raise ValueError("--grackle-data-file requires --nspecies basic.")
+
+    if dmo:
+        for name, value in (
+            ('cosmo', True), ('pic', True), ('poisson', True), ('hydro', False),
+            ('sink', False), ('create_sinks', False), ('sink_AGN', False),
+            ('bondi', False), ('drag', False), ('spin_bh', False), ('mad_jet', False),
+            ('cooling', False), ('metal', False), ('haardt_madau', False),
+            ('neq_chem', False), ('isothermal', False), ('cooling_method', 'original'),
+            ('radiation_transport', 'none'), ('snrt_moment_order', 3),
+            ('dust_mass_enabled', False),
+            ('dust_relative_motion', False), ('dust_cooling', 'none'),
+            ('dust_iron_model', 'none'), ('dust_pah_model', 'none'),
+            ('dust_growth', False), ('dust_sputtering', False),
+            ('dust_coagulation', False), ('dust_shattering', False),
+            ('dust_sn_shocks', False), ('ir_feedback', False),
+            ('cr_enabled', False), ('mhd_enabled', False), ('gpu_hydro', False),
+            ('delayed_cooling', False), ('use_sgs', False),
+        ):
+            set_value(name, value)
+        no_dust = True
+        no_ray = True
+        no_uvb = True
+        no_agn = True
+
+    if hydro:
+        for name, value in (
+            ('cosmo', True), ('pic', True), ('poisson', True), ('hydro', True),
+        ):
+            set_value(name, value)
+
+    if nspecies == 'basic':
+        for name, value in (
+            ('hydro', True), ('cooling', True), ('metal', True),
+            ('cooling_method', 'grackle_neq'), ('neq_chem', False),
+            ('radiation_transport', 'none'), ('snrt_moment_order', 3),
+            ('dust_mass_enabled', False),
+            ('dust_relative_motion', False), ('dust_cooling', 'none'),
+            ('gamma', 5.0 / 3.0), ('interpol_var', 0), ('interpol_type', 1),
+            ('self_shielding', False), ('gpu_hydro', False),
+            ('outformat', 'hdf5'), ('informat', 'hdf5'),
+        ):
+            set_value(name, value)
+        data_file = grackle_data_file or result.get('grackle_neq_data_file') or \
+            os.environ.get('GRACKLE_NEQ_DATA_FILE', '')
+        if data_file:
+            set_value('grackle_neq_data_file', data_file)
+        no_dust = True
+        no_ray = True
+    elif grackle_data_file:
+        set_value('grackle_neq_data_file', grackle_data_file)
+
+    if no_dust or nspecies == 'basic':
+        for name, value in (
+            ('dust_mass_enabled', False), ('dust_relative_motion', False),
+            ('dust_mass_model', 'bulk_v1'), ('dust_cooling', 'none'),
+            ('dust_sublimation', 'none'),
+            ('dust_material_model', 'fixed_mix'), ('dust_optics_model', 'fixed_mix'),
+            ('dust_iron_model', 'none'), ('dust_pah_model', 'none'),
+            ('dust_fe_kinetics', False), ('dust_fe_condensation', 0.0),
+            ('dust_pah_condensation', 0.0), ('dust_growth', False),
+            ('dust_sputtering', False), ('dust_coagulation', False),
+            ('dust_shattering', False), ('dust_sn_shocks', False),
+            ('dust_condensation', '0,0,0'), ('ir_feedback', False),
+        ):
+            set_value(name, value)
+
+    if no_ray:
+        # Local transport only; the metagalactic UV background is independent.
+        set_value('radiation_transport', 'none')
+        set_value('snrt_moment_order', 3)
+
+    if no_uvb:
+        set_value('haardt_madau', False)
+
+    if no_agn:
+        for name, value in (
+            ('sink', False), ('create_sinks', False), ('agn', False),
+            ('sink_AGN', False), ('bondi', False), ('drag', False),
+            ('spin_bh', False), ('mad_jet', False), ('random_jet', False),
+            ('ir_feedback', False),
+        ):
+            set_value(name, value)
+
+    return result
+
 
 def validate_params(values):
     """Run all validation rules. Returns list of ValidationMsg."""
@@ -1698,6 +1809,9 @@ def main():
   %(prog)s --preset hr5_production -o cosmo.nml     # Non-interactive
   %(prog)s --import old.nml -o new.nml              # Import & re-export
   %(prog)s --import old.nml                         # Import & interactive edit
+  %(prog)s --import old.nml --no-dust --no-ray --no-uvb --no-agn -o lean.nml
+  %(prog)s --import hydro.nml --nspecies basic --grackle-data-file rates.h5 -o basic.nml
+  %(prog)s --import hydro_base.nml --hydro --no-ray --no-dust -o hydro.nml
   %(prog)s --list-presets                            # Show presets
 """)
     parser.add_argument('--preset', '-p', help='Use preset (name or number)')
@@ -1710,8 +1824,32 @@ def main():
                         help='Skip interactive editing')
     parser.add_argument('--emit-defaults', action='store_true',
                         help='Emit all parameters including defaults')
+    run_group = parser.add_mutually_exclusive_group()
+    run_group.add_argument('--dmo', action='store_true',
+                           help='Force cosmological dark-matter-only settings')
+    run_group.add_argument('--hydro', action='store_true',
+                           help='Force cosmological hydro settings')
+    parser.add_argument('--no-dust', action='store_true',
+                        help='Force dust mass, dust submodels and IR dust feedback off')
+    parser.add_argument('--no-ray', action='store_true',
+                        help='Disable local radiation transport; keep the UV background independent')
+    parser.add_argument('--no-uvb', action='store_true',
+                        help='Disable the metagalactic UV background independently of local radiation transport')
+    parser.add_argument('--no-agn', action='store_true',
+                        help='Disable the whole sink module, including non-AGN sinks, accretion, jets and sink IR feedback')
+    parser.add_argument('--nspecies', choices=('basic',),
+                        help='Select the basic nine-species Grackle non-equilibrium network')
+    parser.add_argument('--grackle-data-file',
+                        help='Grackle HDF5 rate/UV table for --nspecies basic')
 
     args = parser.parse_args()
+
+    if args.dmo and args.nspecies:
+        parser.error('--dmo and --nspecies basic are incompatible')
+    if args.grackle_data_file and args.dmo:
+        parser.error('--grackle-data-file is not used by DMO')
+    if args.grackle_data_file and not args.nspecies:
+        parser.error('--grackle-data-file requires --nspecies basic')
 
     if args.list_presets:
         list_presets()
@@ -1792,6 +1930,37 @@ def main():
     if is_interactive and not args.non_interactive:
         values = interactive_edit(values)
 
+    shortcuts = {
+        'dmo': args.dmo,
+        'hydro': args.hydro,
+        'no_dust': args.no_dust,
+        'no_ray': args.no_ray,
+        'no_uvb': args.no_uvb,
+        'no_agn': args.no_agn,
+        'nspecies': args.nspecies,
+        'grackle_data_file': args.grackle_data_file,
+    }
+    chosen = []
+    if args.dmo:
+        chosen.append('--dmo')
+    if args.hydro:
+        chosen.append('--hydro')
+    if args.no_dust:
+        chosen.append('--no-dust')
+    if args.no_ray:
+        chosen.append('--no-ray')
+    if args.no_uvb:
+        chosen.append('--no-uvb')
+    if args.no_agn:
+        chosen.append('--no-agn')
+    if args.nspecies:
+        chosen.append('--nspecies {}'.format(args.nspecies))
+    if args.grackle_data_file:
+        chosen.append('--grackle-data-file {}'.format(args.grackle_data_file))
+    if any(value for value in shortcuts.values()):
+        values = apply_simple_physics_options(values, **shortcuts)
+        print('Applied simple physics options: {}'.format(', '.join(chosen)))
+
     # --- Generate output ---
     output = show_review(values)
     if any(msg.level == 'ERROR' for msg in validate_params(values)):
@@ -1813,6 +1982,8 @@ def main():
         # Non-interactive, no output specified -> stdout
         return 0
 
+    if chosen:
+        output = '! Simple physics options: {}\n'.format(' '.join(chosen)) + output
     with open(outpath, 'w') as f:
         f.write(output)
     print('Written: {}'.format(outpath))

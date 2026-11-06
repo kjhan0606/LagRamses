@@ -80,6 +80,105 @@ Run the bounded analytic regression with
 
 ### Build options
 
+### Short physics switches for generated namelists
+
+`mkrun.py` and `patch/cuRamses/aux/ramses_nml_generator.py` accept short
+command-line switches that expand to existing namelist fields. These are
+**input-generation options**, not `make` options: they do not compile an
+executable or submit a job. Run the following from the repository root:
+
+```bash
+python3 mkrun.py --dmo
+python3 mkrun.py --hydro --no-dust --no-ray --no-uvb --no-agn --nspecies basic
+python3 mkrun.py --mode gui --hydro --no-dust --no-ray --no-agn --nspecies basic
+python3 patch/cuRamses/aux/ramses_nml_generator.py --import hydro_base.nml --hydro --no-dust --no-ray --no-uvb --no-agn -o lean.nml
+python3 patch/cuRamses/aux/ramses_nml_generator.py --import old.nml --nspecies basic --grackle-data-file rates.h5 -o basic.nml
+```
+
+| Generator option | Result | Build requirement / limitation |
+| --- | --- | --- |
+| `--dmo` | Cosmological N-body + gravity; gas physics off | No chemistry or dust library is needed; keep FFTW for base-grid gravity. |
+| `--hydro` | Cosmological gas + N-body + gravity | Select the cooling/feedback model separately. |
+| `--no-dust` | Dust evolution and dust submodels off | A dedicated dust-free binary may use `DUST_LIVE=0`. |
+| `--no-ray` | `radiation_transport='none'` | Does not imply `SNRT=0` or `USE_CUDA=0`; matter modules can still need SNRT infrastructure. |
+| `--no-uvb` | Uniform UV background off | Use rate data consistent with that background choice. |
+| `--no-agn` | Sinks, sink creation, accretion and AGN feedback off | Also disables non-AGN uses of the shared sink module. |
+| `--nspecies=basic` | Existing nine-species Grackle NEQ network | Requires `GRACKLE_NEQ=1 HDF5=1`; currently forces local RT/dust off. |
+| `--grackle-data-file PATH` | Select the Grackle HDF5 rate/UV data | Requires `--nspecies=basic`; not the `exact` solver's binary table. |
+
+Use the spelling `nspecies`. Both `--nspecies=basic` and
+`--nspecies basic` are accepted. No arbitrary species count is implemented.
+
+`--dmo` selects cosmological collisionless matter and disables gas physics,
+sinks, local radiation transport, dust, AGN, CR and MHD. Do not
+combine it with `--nspecies basic`. `--no-dust` disables dust mass evolution,
+dust submodels and IR dust feedback. `--no-ray` disables only local radiation
+transport; the metagalactic UV background remains controlled by
+`haardt_madau`. Use `--no-uvb` to disable that background independently.
+`--no-agn` disables the sink module and creation, the legacy AGN switch,
+accretion, jets and IR feedback from accreting sinks. This also turns off
+non-AGN uses of the shared sink module.
+`--nspecies basic` means the existing nine-species Grackle non-equilibrium
+network, not a new species-count namelist field. It selects that route's
+supported no-local-RT/no-dust configuration while leaving the uniform UV
+background independent. It requires a matching `GRACKLE_NEQ=1 HDF5=1`
+executable and Grackle HDF5 rate/UV data. Supply the table with
+`--grackle-data-file PATH` (which requires `--nspecies basic`), keep it in the
+imported namelist, or set `GRACKLE_NEQ_DATA_FILE`; otherwise `mkrun.py` asks
+for the table path. Match the table's UV content to the `--no-uvb` choice.
+The quick switches override conflicting values
+from the advanced editor and are recorded in the generated namelist comment.
+`mkrun.py` continues to ask for cosmology, resolution, IC and output choices.
+
+### Matching compile-time options
+
+Build in a separate clean build tree for each field/physics profile. Changing
+`GRACKLE_NEQ`, `DUST_LIVE`, `NENER`, `SOLVER`, or CUDA options requires rebuilding
+the affected objects; an existing executable is not updated by generating a
+namelist. Restart files must match the compiled field layout and metadata.
+Preserve the `bin/Makefile` source precedence (`patch/lagRamses` before
+`patch/cuRamses` and the base directories); do not reorder `VPATH` to resolve
+a build error.
+
+The following are build profiles for a configured build tree, not commands
+to run together in a shared directory. Library/compiler paths must match the
+host. `make -C bin` uses the repository's current `bin/Makefile`:
+
+```bash
+# DMO, or hydro with the original/equilibrium-exact cooling route
+make -C bin HDF5=1 USE_FFTW=1 USE_CUDA=0 SNRT=0 \
+  GRACKLE_NEQ=0 DUST_LIVE=0 CHIMES=0 CHIMES_CUDA=0 SOLVER=hydro NENER=0
+
+# --nspecies=basic: nine-species non-equilibrium chemistry
+make -C bin HDF5=1 USE_FFTW=1 USE_CUDA=0 SNRT=0 \
+  GRACKLE_NEQ=1 GRACKLE_DIR="$HOME/local" DUST_LIVE=0 CHIMES=0 \
+  CHIMES_CUDA=0 RADIOACTIVE=0 SOLVER=hydro NENER=0
+
+# SNRT infrastructure + live dust + CPU CHIMES
+# Replace these installation paths with compatible, double-precision builds.
+make -C bin HDF5=1 USE_FFTW=1 USE_CUDA=0 SNRT=1 \
+  GRACKLE_NEQ=0 DUST_LIVE=1 CHIMES=1 CHIMES_CUDA=0 \
+  CHIMES_DIR=/path/to/built/chimes SUNDIALS_DIR=/path/to/sundials \
+  SOLVER=hydro NENER=0
+```
+
+`USE_CUDA=1` compiles GPU support independently of whether local RT runs.
+For Grackle NEQ, GPU Poisson can be enabled, but `gpu_hydro=.false.` remains
+required for the supported composition-conserving hydro path. The generators
+write this choice explicitly. CPU OpenMP support comes from the configured
+compiler flags (currently `mpiifx -qopenmp`); set `OMP_NUM_THREADS` and allocate
+matching CPUs at execution time.
+
+`SNRT=1` builds shared radiation/matter infrastructure; it does **not** require
+`radiation_transport` to be enabled at runtime. In this Makefile both
+`DUST_LIVE=1` and `CHIMES=1` require `SNRT=1`, even for a no-ray matter run.
+For CHIMES GPU hybrid support, additionally set `USE_CUDA=1 CHIMES_CUDA=1`
+and provide `CHIMES_CUDA_SUNDIALS_SOURCE_DIR`,
+`CHIMES_CUDA_SUNDIALS_BUILD_DIR`, and `CHIMES_CUDA_SUNDIALS_INSTALL_DIR`.
+Select `SNRT_CHIMES_COMPUTE_BACKEND=cpu|hybrid` at execution time; CPU is the
+default. See the backend limitations below. `GRACKLE_NEQ=1` cannot be combined
+with `CHIMES=1`, `DUST_LIVE=1`, or `RADIOACTIVE=1` in this build.
+
 ### Nine-species non-equilibrium Grackle
 
 Build a separate hydro executable with `GRACKLE_NEQ=1 HDF5=1 DUST_LIVE=0
