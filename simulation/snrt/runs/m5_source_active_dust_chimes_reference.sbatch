@@ -39,6 +39,7 @@ readonly AGN_DONOR_OCT=${M5_25G_AGN_DONOR_OCT:-}
 readonly AGN_LEVEL_ENTRY_TRACE=${M5_25G_AGN_LEVEL_ENTRY_TRACE:-0}
 readonly EFFECTIVE_AGN_IC_MODE=${M5_EFFECTIVE_AGN_IC_MODE:-small_bh_control}
 readonly EFFECTIVE_AGN_ENABLED=${M5_EFFECTIVE_AGN_ENABLED:-1}
+readonly EFFECTIVE_SINK_ENABLED=${M5_EFFECTIVE_SINK_ENABLED:-1}
 readonly VERIFY_RESTART=${M5_VERIFY_RESTART:-0}
 readonly AMR_INTERFACE=${M5_AMR_INTERFACE_CHECK:-0}
 readonly REQUESTED_STELLAR_PACKAGE=${M5_STELLAR_PACKAGE:-}
@@ -83,11 +84,34 @@ case "$EFFECTIVE_AGN_ENABLED" in
   0|1) ;;
   *) echo 'M5_EFFECTIVE_AGN_ENABLED must be 0 or 1' >&2; exit 2 ;;
 esac
+case "$EFFECTIVE_SINK_ENABLED" in
+  0|1) ;;
+  *) echo 'M5_EFFECTIVE_SINK_ENABLED must be 0 or 1' >&2; exit 2 ;;
+esac
 if [[ "$EFFECTIVE_AGN_ENABLED" == 0 && \
       ( "$PROFILE" != effective_population || "$CANDIDATE_25G_DIAGNOSTIC" == 1 ) ]]; then
   echo 'M5_EFFECTIVE_AGN_ENABLED=0 is limited to the effective_population reference profile' >&2
   exit 2
 fi
+if [[ "$EFFECTIVE_SINK_ENABLED" == 0 && \
+      ( "$PROFILE" != effective_population || "$CANDIDATE_25G_DIAGNOSTIC" == 1 ) ]]; then
+  echo 'M5_EFFECTIVE_SINK_ENABLED=0 is limited to the effective_population reference profile' >&2
+  exit 2
+fi
+if [[ "$PROFILE" == effective_population && \
+      "$EFFECTIVE_AGN_ENABLED" != "$EFFECTIVE_SINK_ENABLED" ]]; then
+  echo 'effective_population requires AGN and sink flags to be enabled together; dust with AGN off requires an explicit no-sink profile' >&2
+  exit 2
+fi
+AGN_MODEL=partition_reference_v1
+SINK_MODE=existing_BH_accretion_sink
+if [[ "$PROFILE" == effective_population && "$EFFECTIVE_AGN_ENABLED" == 0 ]]; then
+  # The comparison AGN model intentionally requires Bondi+AGN. An AGN-off,
+  # no-sink reference uses the existing legacy/no-AGN runtime selection.
+  AGN_MODEL=legacy
+  SINK_MODE=disabled
+fi
+readonly AGN_MODEL SINK_MODE
 case "$CANDIDATE_25G_STELLAR_AGN" in
   0|1) ;;
   *) echo 'M5_25G_STELLAR_AGN_DIAGNOSTIC must be 0 or 1' >&2; exit 2 ;;
@@ -585,7 +609,14 @@ GROUP_COUNT=9
 if [[ "$CANDIDATE_25G_DIAGNOSTIC" == 1 ]]; then GROUP_COUNT=25; fi
 for ((i=1; i<=GROUP_COUNT; i++)); do test -f "$GROUP_DIR/group_$(printf '%02d' "$i").hdf5"; done
 cp -- "$TEMPLATE" "$WORK/effective.nml"
-cp -- "$SOURCE_IC" "$WORK/ic_sink"
+if [[ "$PROFILE" == effective_population && "$EFFECTIVE_SINK_ENABLED" == 0 ]]; then
+  # No sink is part of this AGN-off reference. init_part calls init_sink only
+  # when sink=.true.; an empty marker prevents a stale BH seed from entering
+  # this run or its restart comparator.
+  : > "$WORK/ic_sink"
+else
+  cp -- "$SOURCE_IC" "$WORK/ic_sink"
+fi
 if [[ -n "$CANDIDATE_RESTART_ORDERING" ]]; then
   python3 -B - "$WORK/effective.nml" "$CANDIDATE_RESTART_ORDERING" <<'PY'
 from pathlib import Path
@@ -1025,23 +1056,45 @@ if [[ "$AMR_INTERFACE" == 1 ]]; then
   grep -Fq 'void_refine=.true., void_refine_min_level=3' "$WORK/effective.nml"
 fi
 if [[ "$PROFILE" == effective_population && "$EFFECTIVE_AGN_ENABLED" == 0 ]]; then
+  sed -i '1c\! Stellar-feedback reference with M5 + live dust + CHIMES; AGN and sink disabled.' \
+    "$WORK/effective.nml"
   agn_true_count=$(grep -Eic '^[[:space:]]*agn[[:space:]]*=[[:space:]]*\.true\.' \
     "$WORK/effective.nml" || true)
   sink_agn_true_count=$(grep -Eic '^[[:space:]]*sink_AGN[[:space:]]*=[[:space:]]*\.true\.' \
     "$WORK/effective.nml" || true)
-  if ((agn_true_count == 0 || sink_agn_true_count == 0)); then
-    echo 'Cannot construct AGN-off effective_population input: expected AGN flags are missing' >&2
+  sink_true_count=$(grep -Eic '^[[:space:]]*sink[[:space:]]*=[[:space:]]*\.true\.' \
+    "$WORK/effective.nml" || true)
+  smbh_true_count=$(grep -Eic '^[[:space:]]*smbh[[:space:]]*=[[:space:]]*\.true\.' \
+    "$WORK/effective.nml" || true)
+  bondi_true_count=$(grep -Eic '^[[:space:]]*bondi[[:space:]]*=[[:space:]]*\.true\.' \
+    "$WORK/effective.nml" || true)
+  if ((agn_true_count == 0 || sink_agn_true_count == 0 || sink_true_count == 0 || \
+       smbh_true_count == 0 || bondi_true_count == 0)) || \
+     ! grep -Eiq "^[[:space:]]*accretion_scheme[[:space:]]*=[[:space:]]*'bondi'[[:space:]]*$" \
+       "$WORK/effective.nml"; then
+    echo 'Cannot construct AGN-off effective_population input: expected BH/sink flags or Bondi scheme are missing' >&2
     exit 2
   fi
   sed -i -E \
+    -e 's/^([[:space:]]*sink[[:space:]]*=[[:space:]]*)\.true\./\1.false./I' \
+    -e 's/^([[:space:]]*smbh[[:space:]]*=[[:space:]]*)\.true\./\1.false./I' \
     -e 's/^([[:space:]]*agn[[:space:]]*=[[:space:]]*)\.true\./\1.false./I' \
     -e 's/^([[:space:]]*sink_AGN[[:space:]]*=[[:space:]]*)\.true\./\1.false./I' \
+    -e 's/^([[:space:]]*bondi[[:space:]]*=[[:space:]]*)\.true\./\1.false./I' \
+    -e "s/^([[:space:]]*accretion_scheme[[:space:]]*=[[:space:]]*)'bondi'([[:space:]]*)$/\1'none'\2/I" \
     "$WORK/effective.nml"
-  if grep -Eiq '^[[:space:]]*(agn|sink_AGN)[[:space:]]*=[[:space:]]*\.true\.' \
+  if grep -Eiq '^[[:space:]]*(sink|smbh|agn|sink_AGN|bondi)[[:space:]]*=[[:space:]]*\.true\.' \
        "$WORK/effective.nml" || \
+     grep -Eiq "^[[:space:]]*accretion_scheme[[:space:]]*=[[:space:]]*'bondi'[[:space:]]*$" \
+       "$WORK/effective.nml" || \
+     [[ $(grep -Eic '^[[:space:]]*sink[[:space:]]*=[[:space:]]*\.false\.' "$WORK/effective.nml" || true) -eq 0 ]] || \
+     [[ $(grep -Eic '^[[:space:]]*smbh[[:space:]]*=[[:space:]]*\.false\.' "$WORK/effective.nml" || true) -eq 0 ]] || \
      [[ $(grep -Eic '^[[:space:]]*agn[[:space:]]*=[[:space:]]*\.false\.' "$WORK/effective.nml" || true) -eq 0 ]] || \
-     [[ $(grep -Eic '^[[:space:]]*sink_AGN[[:space:]]*=[[:space:]]*\.false\.' "$WORK/effective.nml" || true) -eq 0 ]]; then
-    echo 'Failed to disable both AGN and sink_AGN namelist flags' >&2
+     [[ $(grep -Eic '^[[:space:]]*sink_AGN[[:space:]]*=[[:space:]]*\.false\.' "$WORK/effective.nml" || true) -eq 0 ]] || \
+     [[ $(grep -Eic '^[[:space:]]*bondi[[:space:]]*=[[:space:]]*\.false\.' "$WORK/effective.nml" || true) -eq 0 ]] || \
+     ! grep -Eiq "^[[:space:]]*accretion_scheme[[:space:]]*=[[:space:]]*'none'[[:space:]]*$" \
+       "$WORK/effective.nml"; then
+    echo 'Failed to disable all sink/SMBH/AGN and Bondi settings in the effective namelist' >&2
     exit 2
   fi
 fi
@@ -1090,7 +1143,7 @@ printf 'AGN_RESTART_TRACE=%s\n' "$AGN_RESTART_TRACE" | tee -a "$WORK/launch.txt"
 printf 'AGN_STENCIL_TRACE=%s\n' "$AGN_STENCIL_TRACE" | tee -a "$WORK/launch.txt"
 printf 'AGN_DONOR_SNAPSHOT=%s OCT=%s\n' "$AGN_DONOR_SNAPSHOT" "$AGN_DONOR_OCT" | tee -a "$WORK/launch.txt"
 printf 'AGN_LEVEL_ENTRY_TRACE=%s\n' "$AGN_LEVEL_ENTRY_TRACE" | tee -a "$WORK/launch.txt"
-export SNRT_BACKEND="$TRANSPORT_BACKEND" SNRT_DUST_BACKEND="$MATERIAL_BACKEND" SNRT_AGN_MODEL=partition_reference_v1
+export SNRT_BACKEND="$TRANSPORT_BACKEND" SNRT_DUST_BACKEND="$MATERIAL_BACKEND" SNRT_AGN_MODEL="$AGN_MODEL"
 export SNRT_REDUCED_C=0.01 SNRT_RT_LEVEL=3 SNRT_ALLOW_REFERENCE_CONTROL=1
 if [[ "$CANDIDATE_25G_DIAGNOSTIC" == 1 ]]; then
   case "$CANDIDATE_25G_RECEIVER" in
@@ -1155,17 +1208,24 @@ if [[ "$PROFILE" == effective_population ]]; then
 fi
 
 printf 'PROFILE=%s_M5_live_dust_CHIMES_%s_NONPRODUCTION\n' "$PROFILE" "$CHIMES_LIBRARY_MODE" | tee -a "$WORK/launch.txt"
-printf 'EFFECTIVE_AGN_ENABLED=%s\n' "$EFFECTIVE_AGN_ENABLED" | tee -a "$WORK/launch.txt"
+printf 'EFFECTIVE_AGN_ENABLED=%s EFFECTIVE_SINK_ENABLED=%s\n' \
+  "$EFFECTIVE_AGN_ENABLED" "$EFFECTIVE_SINK_ENABLED" | tee -a "$WORK/launch.txt"
 if [[ "$PROFILE" == effective_population ]]; then
-  printf 'EFFECTIVE_AGN_IC_MODE=%s\nEFFECTIVE_AGN_IC_SHA256=%s\n' \
-    "$EFFECTIVE_AGN_IC_MODE" "$(sha256sum "$SOURCE_IC" | awk '{print $1}')" \
-    | tee -a "$WORK/launch.txt"
+  if [[ "$EFFECTIVE_SINK_ENABLED" == 1 ]]; then
+    printf 'EFFECTIVE_AGN_IC_MODE=%s\nEFFECTIVE_AGN_IC_SHA256=%s\n' \
+      "$EFFECTIVE_AGN_IC_MODE" "$(sha256sum "$SOURCE_IC" | awk '{print $1}')" \
+      | tee -a "$WORK/launch.txt"
+  else
+    printf 'EFFECTIVE_AGN_IC_MODE=not_imported\nEFFECTIVE_AGN_IC_SHA256=not_applicable\n' \
+      | tee -a "$WORK/launch.txt"
+  fi
 fi
 stellar_sed_status=enabled
 if [[ -z "$SED" ]]; then stellar_sed_status=disabled; fi
-printf 'MPI=%s OMP=%s; real_BH_accretion_sink; stellar_SED=%s; AGN/dust contracts=reference_control; CHIMES_backend=%s; VERIFY_RESTART=%s\n' \
-  "$MPI_RANKS" "$OMP_NUM_THREADS" "$stellar_sed_status" "$CHIMES_BACKEND" "$VERIFY_RESTART" \
+printf 'MPI=%s OMP=%s; sink/BH=%s; stellar_SED=%s; AGN/dust contracts=reference_control; CHIMES_backend=%s; VERIFY_RESTART=%s\n' \
+  "$MPI_RANKS" "$OMP_NUM_THREADS" "$SINK_MODE" "$stellar_sed_status" "$CHIMES_BACKEND" "$VERIFY_RESTART" \
   | tee -a "$WORK/launch.txt"
+printf 'AGN_MODEL=%s\n' "$AGN_MODEL" | tee -a "$WORK/launch.txt"
 if [[ "$CANDIDATE_25G_DIAGNOSTIC" == 1 ]]; then
   printf '25G_CANDIDATE_RECEIVER=%s; metallic_Fe_grains=disabled; profile_runtime_admissible=false\n' \
     "$CANDIDATE_25G_RECEIVER" | tee -a "$WORK/launch.txt"

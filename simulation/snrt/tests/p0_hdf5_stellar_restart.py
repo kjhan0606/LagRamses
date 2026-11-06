@@ -1521,7 +1521,7 @@ def compare_m5_coupled(
             and candidate_profile_id != "snrt_agn25_joint_diag_20261102_v1"):
         raise ValueError("non-default restart tolerance is restricted to the AGN25 diagnostic profile")
     rtol, atol = relative_tolerance, 1e-25
-    scopes = ("hydro/", "snrt/", "gravity/", "particles/", "sinks/")
+    scopes = ("hydro/", "snrt/", "gravity/", "particles/")
     paths = (left, right) if checkpoint is None else (left, right, checkpoint)
     candidate_identity: dict[str, str] = {}
     if candidate_profile_id is not None:
@@ -1604,6 +1604,18 @@ def compare_m5_coupled(
             assert int(np.asarray(seed["snrt"].attrs["format_version"]).flat[0]) >= 1000
         existing_stars = set()
     with h5py.File(left, "r") as a, h5py.File(right, "r") as b:
+        nsink_a = (
+            int(np.asarray(a["sinks"].attrs["nsink"]).reshape(-1)[0])
+            if "sinks" in a else 0
+        )
+        nsink_b = (
+            int(np.asarray(b["sinks"].attrs["nsink"]).reshape(-1)[0])
+            if "sinks" in b else 0
+        )
+        assert nsink_a == nsink_b, ("nsink", nsink_a, nsink_b)
+        if nsink_a > 0:
+            scopes = (*scopes, "sinks/")
+
         def ordering_name(handle: h5py.File) -> str:
             value = handle["header"].attrs["ordering"]
             if isinstance(value, np.ndarray):

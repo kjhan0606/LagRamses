@@ -75,6 +75,20 @@ and whole-cell CPU retry reinitializes from original inputs. Job 451493 remains
 unexplained; no speculative patch or extra runtime matrix is justified. The
 hybrid candidate remains nonproduction and CPU remains the configured default.
 
+Separate AGN-off source-active MPI2 restart smoke 451706 completed both M5
+order-5 + live-dust + CHIMES hybrid branches through step 4 on A100, with
+zero AGN packets and zero CHIMES CPU fallbacks/device errors. Its unchanged
+strict restart comparison failed: 771 values across 68 datasets exceeded
+`rtol=1e-12`, `atol=1e-25`; all clocks were bitwise equal and AMR ownership
+matched. Astra localized the largest paired hydro/SNRT difference to HII at
+one level-2 cell (about `5.60e-9` relative), consistent with the earlier
+MPI2 chemistry restart-drift family but not proving a common root. The JSON
+does not identify every SNRT component. The potential mismatch may be an
+additive offset because forces agree, but raw arrays were removed before
+spatial uniformity could be established. No tolerance was relaxed. Production
+AGN SED admission remains blocked pending an operator-designated AGN-on run.
+Compact evidence and hashes remain in `.m5-effective-restart-451706/`.
+
 [Periodic sink antipode tie convention](sink_periodic_antipode_tie_bundle_2026-11-05.md):
 the one-ULP negative-image rule is implemented and passed GNU/Intel native
 fixtures plus CPU MPI2/OMP4 integration. The fixed-order sink-stat reduction
