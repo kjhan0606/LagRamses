@@ -7627,7 +7627,8 @@ contains
     integer, intent(out) :: ierr
     real(dp) :: row(nvar), before_row(nvar)
     character(len=8) :: accounting_switch
-    integer :: accounting_status
+    integer :: accounting_status, diagnostic_grid, diagnostic_child
+    real(dp) :: diagnostic_width, diagnostic_position(3), diagnostic_offset(3)
 
     row=uold(cell,1:nvar)
     before_row=row
@@ -7638,9 +7639,19 @@ contains
        accounting_switch=''
        call get_environment_variable('RAR_AGN_COMMIT_LEDGER',accounting_switch,status=accounting_status)
        if(accounting_status==0 .and. trim(accounting_switch)=='1')then
+          diagnostic_grid=IGRID_OF(cell)
+          diagnostic_child=ICHILD_OF(cell)-1
+          diagnostic_width=volume**(1d0/ndim)
+          diagnostic_offset=[real(mod(diagnostic_child,2),dp)-0.5d0, &
+               real(mod(diagnostic_child/2,2),dp)-0.5d0,real(diagnostic_child/4,dp)-0.5d0]
+          diagnostic_position=(xg(diagnostic_grid,1:3)-skip_loc)*scale+ &
+               diagnostic_offset*diagnostic_width
 !$omp critical(rar_agn_commit_output)
           write(*,*) 'RAR_AGN_COMMIT_V1',myid,cell,volume, &
                drho*volume,dmomentum*volume,denergy*volume,deferred,(row-before_row)*volume
+          write(*,*) 'RAR_AGN_LOCATION_V1',myid,cell,aexp,diagnostic_position, &
+               volume,before_row(1:5),drho*volume,dmomentum*volume,denergy*volume,deferred, &
+               (row(1:5)-before_row(1:5))*volume
 !$omp end critical(rar_agn_commit_output)
        endif
     endif
