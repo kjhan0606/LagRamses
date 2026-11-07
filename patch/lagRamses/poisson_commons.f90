@@ -1,11 +1,13 @@
 module poisson_commons
   use amr_commons
   use poisson_parameters
+  use qumond_composite
 
   ! Experimental fixed-hierarchy history path; the shared solver state remains
   ! authoritative unless explicitly enabled. This does not repair AMR source loss.
   logical :: qh_checked=.false.,qh_enabled=.false.
   integer :: qh_stage=0
+  type(composite_mesh_t) :: qh_composite_mesh
   real(dp),allocatable :: qh_current(:,:),qh_previous(:,:)
   real(dp),allocatable :: qh_time(:,:),qh_old_time(:,:)
   integer,allocatable :: qh_epoch(:,:)
@@ -224,7 +226,66 @@ contains
     if(first)qh_old_time(stage,ilevel)=t
     qh_time(stage,ilevel)=t;qh_valid(stage,ilevel)=.true.
     write(*,*) 'RAR_QUMOND_HISTORY_V1',stage,ilevel,t,qh_old_time(stage,ilevel),first
+    if(stage==1.and.ilevel==nlevelmax)call qumond_composite_operator_check()
   end subroutine qumond_history_capture
+
+  subroutine qumond_composite_operator_check()
+    character(len=8)::env
+    integer::status,ierr,d,f,l,r,ncheck,ninterface
+    real(dp),allocatable::p(:),op(:),ph(:),gradient(:,:)
+    real(dp)::vector(3),target(3),constant_error,affine_error,band,flux_balance,phantom_balance
+    real(dp)::scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2,a0,external(3),fourpi
+    env=''
+    call get_environment_variable('RAR_QUMOND_COMPOSITE_OPERATOR',env,status=status)
+    if(status/=0.or.trim(env)/='1')return
+    if(qh_composite_mesh%n==0)then
+       call composite_native_build(qh_composite_mesh,ierr)
+       if(ierr/=0)then
+          write(*,*) 'QUMOND composite operator: native topology failed',ierr
+          call clean_stop
+       endif
+    endif
+    associate(mesh=>qh_composite_mesh)
+    allocate(p(mesh%n),op(mesh%n),ph(mesh%n),gradient(3,mesh%n))
+    p=1d0;call composite_apply(mesh,p,op,ierr)
+    if(ierr/=0)call clean_stop
+    constant_error=maxval(abs(op));affine_error=0d0;ncheck=0;ninterface=0
+    band=2d0*maxval(mesh%width)
+    do d=1,3
+       p=mesh%center(d,:);call composite_slopes(mesh,p,gradient,ierr)
+       if(ierr/=0)call clean_stop
+       target=0d0;target(d)=1d0
+       do f=1,mesh%nface
+          l=mesh%left(f);r=mesh%right(f)
+          if(any(mesh%center(:,l)<=band).or.any(mesh%center(:,l)>=mesh%box-band).or. &
+               any(mesh%center(:,r)<=band).or.any(mesh%center(:,r)>=mesh%box-band))cycle
+          call composite_face_gradient(mesh,p,gradient,f,vector)
+          affine_error=max(affine_error,maxval(abs(vector-target)));ncheck=ncheck+1
+          if(mesh%width(l)/=mesh%width(r))ninterface=ninterface+1
+       enddo
+    enddo
+    if(constant_error>1d-12.or.affine_error>1d-9.or.ncheck==0.or.ninterface==0)then
+       write(*,*) 'QUMOND composite operator: constant/affine failure',constant_error,affine_error,ninterface
+       call clean_stop
+    endif
+    p=qh_current(mesh%cell,1)
+    call composite_apply(mesh,p,op,ierr)
+    if(ierr/=0)call clean_stop
+    call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
+    a0=a0_mond*scale_t**2/scale_l;external=g_ext_mond*scale_t**2/scale_l
+    fourpi=4d0*acos(-1d0)
+    call composite_phantom(mesh,p,a0,fourpi,external,ph,ierr)
+    if(ierr/=0)call clean_stop
+    flux_balance=abs(sum(op*mesh%volume))/max(sum(abs(op)*mesh%volume),tiny(1d0))
+    phantom_balance=abs(sum(ph*mesh%volume))/max(sum(abs(ph)*mesh%volume),tiny(1d0))
+    if(flux_balance>1d-12.or.phantom_balance>1d-12)then
+       write(*,*) 'QUMOND composite operator: shared flux balance failure',flux_balance,phantom_balance
+       call clean_stop
+    endif
+    write(*,*) 'RAR_QUMOND_COMPOSITE_V1',nstep_coarse,mesh%n,mesh%nface,ninterface, &
+         constant_error,affine_error,flux_balance,phantom_balance
+    end associate
+  end subroutine qumond_composite_operator_check
 
   real(dp) function qumond_history_value(cell,level,tfrac) result(value)
     integer,intent(in)::cell,level
