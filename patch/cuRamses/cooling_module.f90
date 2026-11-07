@@ -498,12 +498,13 @@ subroutine solve_cooling(nH,T2,zsolar,boost,dt,deltaT2,ncell)
   real(kind=8),dimension(1:ncell)::rgt,lft,tau,tau_old
   real(kind=8),dimension(1:ncell)::time,time_old,facH,zzz,tau_ini
   real(kind=8),dimension(1:ncell)::w1H,w2H,wmax,time_max
-  real(kind=8)::varmax=4d0
+  real(kind=8)::varmax
   integer::i,i_T2,iter,n,n_active
   integer,dimension(1:ncell)::ind,iii,i_nH
   logical::tau_negative
   
   ! Initializations
+  varmax=cooling_varmax
   logT2max=log10(T2_max_fix)
   dlog_nH=dble(table%n1-1)/(table%nH(table%n1)-table%nH(1))
   dlog_T2=dble(table%n2-1)/(table%T2(table%n2)-table%T2(1))

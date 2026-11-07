@@ -378,6 +378,9 @@ module amr_parameters
   ! 'exact'   : Eunha exact_integrate (Grackle + Townsend)
   ! 'compare' : run both, use original for physics, report diagnostics
   character(LEN=16)::cooling_method='original'
+  ! Original solver limits a substep's fractional temperature change by
+  ! approximately 1/varmax. Keep its historical value unless tightened.
+  real(dp)::cooling_varmax=4d0
   character(LEN=256)::grackle_table='grackle_multi_z.bin'
 
   ! SIDM (Self-Interacting Dark Matter) parameters

@@ -121,7 +121,7 @@ subroutine read_hydro_params(nml_ok)
        & ,dust_material_model,dust_optics_model,dust_sublimation &
        & ,dust_iron_model,dust_fe_condensation,dust_fe_kinetics,dust_fe_sticking &
        & ,dust_pah_model,dust_pah_condensation &
-       & ,cooling_method,grackle_table
+       & ,cooling_method,cooling_varmax,grackle_table
 #ifdef grackle
   namelist/grackle_params/grackle_comoving_coordinates,grackle_with_radiative_cooling,grackle_primordial_chemistry &
        & ,grackle_metal_cooling,grackle_UVbackground,grackle_h2_on_dust,grackle_cmb_temperature_floor &
@@ -296,6 +296,10 @@ subroutine read_hydro_params(nml_ok)
   read(1,NML=grackle_params)
 #endif
   ! Validate and initialize Eunha cooling
+  if(.not.ieee_is_finite(cooling_varmax).or.cooling_varmax<4d0)then
+     if(myid==1)write(*,*) 'ERROR: cooling_varmax must be finite and at least 4'
+     call clean_stop
+  endif
   if(cooling_method=='exact' .or. cooling_method=='compare') then
      if(len_trim(grackle_table)==0) then
         if(myid==1) write(*,*) 'ERROR: grackle_table required for cooling_method=',trim(cooling_method)
@@ -306,6 +310,7 @@ subroutine read_hydro_params(nml_ok)
      call eunha_load_multi_z(trim(grackle_table))
   else
      if(myid==1 .and. cooling) write(*,'(A)') ' Cooling method: original (RAMSES solve_cooling)'
+     if(myid==1 .and. cooling) write(*,'(A,ES16.7)') ' Original cooling varmax = ',cooling_varmax
   endif
 #ifdef ATON
   if(aton)call read_radiation_params(1)
