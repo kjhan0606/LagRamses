@@ -67,6 +67,8 @@ subroutine move_fine(ilevel)
   if(numbtot(1,ilevel)==0)return
   if(verbose)write(*,111)ilevel
 
+  if(sink.and.ilevel==levelmin)call rar_sink_cloud_census('before_move')
+
   ! Set new sink variables to old ones
   if(sink)then
      vsink_new=0d0

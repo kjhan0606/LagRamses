@@ -94,6 +94,8 @@ subroutine create_sink
   call kjhan_sync_sink_particle_coordinates
   t_create_cloud=t_create_cloud+omp_get_wtime()-t_stage
 
+  call rar_sink_cloud_census('before_rebuild')
+
   ! Scatter particle to the grid
   t_stage=omp_get_wtime()
   do ilevel=1,nlevelmax
@@ -102,6 +104,7 @@ subroutine create_sink
      call virtual_tree_fine(ilevel)
   end do
   t_tree_rebuild=t_tree_rebuild+omp_get_wtime()-t_stage
+  call rar_sink_cloud_census('after_rebuild')
 
   ! Tree migration changes local particle slots. The pre-migration map used
   ! for coordinate synchronization cannot be used for Bondi sampling.
@@ -8225,3 +8228,54 @@ subroutine agn_select_scalar_fields(fields,nscalar,metal_slot,ierr)
   call agn_scalar_map(nvar,merge(imetal,0,metal),ichem,nelements,reserved_fields,fields(1:nscalar),ierr, &
        nhydro+nener,material_fields(:nmaterial))
 end subroutine agn_select_scalar_fields
+
+! Opt-in list census to distinguish cloud creation from ownership/traversal loss.
+subroutine rar_sink_cloud_census(stage)
+  use pm_commons
+  use amr_commons
+  implicit none
+  character(len=*),intent(in)::stage
+  character(len=8)::env
+  integer::status,lev,cpu,grid,g,part,j,ncloud,duplicates,invalid
+  logical,allocatable::seen_grid(:),seen_part(:)
+  real(dp)::position_sum(3)
+  env=''
+  call get_environment_variable('RAR_SINK_POSITION_LEDGER',env,status=status)
+  if(status/=0.or.trim(env)/='1')return
+  if(.not.sink.or.nsink==0)return
+  allocate(seen_grid(size(numbp)),seen_part(size(idp)))
+  seen_grid=.false.;seen_part=.false.
+  do lev=1,nlevelmax
+     do cpu=1,ncpu
+        grid=headl(cpu,lev)
+        ncloud=0;duplicates=0;invalid=0;position_sum=0d0
+        do g=1,numbl(cpu,lev)
+           if(grid<1.or.grid>size(numbp))then
+              invalid=invalid+1
+              exit
+           endif
+           if(.not.seen_grid(grid))then
+              seen_grid(grid)=.true.
+              part=headp(grid)
+              do j=1,numbp(grid)
+                 if(part<1.or.part>size(idp))then
+                    invalid=invalid+1
+                    exit
+                 endif
+                 if(ptypep(part)==PTYPE_SINK)then
+                    if(seen_part(part))duplicates=duplicates+1
+                    seen_part(part)=.true.
+                    ncloud=ncloud+1
+                    position_sum=position_sum+xp(part,1:3)
+                 endif
+                 part=nextp(part)
+              enddo
+           endif
+           grid=next(grid)
+        enddo
+        write(*,*) 'RAR_SINK_CENSUS_V1',trim(stage),myid,nstep_coarse,aexp, &
+             lev,cpu,ncloud,duplicates,invalid,position_sum
+     enddo
+  enddo
+  deallocate(seen_grid,seen_part)
+end subroutine rar_sink_cloud_census
