@@ -909,7 +909,10 @@ recursive subroutine amr_step(ilevel,icount)
   !-----------
   ! Hydro step
   !-----------
-  if(hydro)then
+  ! The legacy set_uold wrapper adds a full gravity source even when the
+  ! static Godunov solver returns immediately. Frozen-source publication
+  ! must bypass this whole update, not just the explicit half kicks.
+  if(hydro.and..not.qh_publish)then
 
      ! Hyperbolic solver
                                call timer('hydro - godunov','start')
