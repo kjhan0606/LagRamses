@@ -8,7 +8,7 @@ module poisson_commons
   logical :: qh_checked=.false.,qh_enabled=.false.
   integer :: qh_stage=0
   type(composite_mesh_t) :: qh_composite_mesh
-  real(dp),allocatable :: qh_current(:,:),qh_previous(:,:)
+  real(dp),allocatable :: qh_current(:,:),qh_previous(:,:),qh_rho_newton(:)
   real(dp),allocatable :: qh_time(:,:),qh_old_time(:,:)
   integer,allocatable :: qh_epoch(:,:)
   logical,allocatable :: qh_valid(:,:)
@@ -141,9 +141,10 @@ contains
        enddo
     enddo
     if(.not.allocated(qh_current))then
-       allocate(qh_current(size(phi),2),qh_previous(size(phi),2))
+       allocate(qh_current(size(phi),2),qh_previous(size(phi),2),qh_rho_newton(size(phi)))
        allocate(qh_time(2,nlevelmax),qh_old_time(2,nlevelmax),qh_valid(2,nlevelmax),qh_epoch(2,nlevelmax))
        allocate(qh_cell_level(size(phi)),qh_grid_level(size(xg,1)),qh_son(size(son)),qh_xg(size(xg,1),ndim))
+       qh_rho_newton=0d0
        qh_current=0d0;qh_previous=0d0;qh_time=0d0;qh_old_time=0d0;qh_valid=.false.
        qh_epoch=-1
        qh_grid_level=levels;qh_son=son;qh_xg=0d0;qh_cell_level=0
@@ -211,6 +212,7 @@ contains
           call clean_stop
        endif
        qh_current(cell,stage)=phi(cell)
+       if(stage==1)qh_rho_newton(cell)=rho(cell)
        if(first)qh_previous(cell,stage)=phi(cell)
     enddo
     if(ilevel==levelmin)then
@@ -284,8 +286,78 @@ contains
     endif
     write(*,*) 'RAR_QUMOND_COMPOSITE_V1',nstep_coarse,mesh%n,mesh%nface,ninterface, &
          constant_error,affine_error,flux_balance,phantom_balance
+    if(nstep_coarse==0)call qumond_composite_solver_check()
     end associate
   end subroutine qumond_composite_operator_check
+
+  subroutine qumond_composite_solver_check()
+    character(len=8)::env
+    integer::status,ierr,iterations
+    real(dp),allocatable::exact(:),rhs(:),answer(:),potential_n(:),phantom(:),work(:)
+    real(dp)::relative,error,twopi,scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2
+    real(dp)::a0,fourpi,external(3),removed_mean
+    env=''
+    call get_environment_variable('RAR_QUMOND_COMPOSITE_SOLVER',env,status=status)
+    if(status/=0.or.trim(env)/='1')return
+    if(mond_mu_type/=1)then
+       write(*,*) 'QUMOND composite solver: only simple nu is implemented'
+       call clean_stop
+    endif
+    associate(mesh=>qh_composite_mesh)
+    allocate(exact(mesh%n),rhs(mesh%n),answer(mesh%n),potential_n(mesh%n),phantom(mesh%n),work(mesh%n))
+    twopi=2d0*acos(-1d0)
+    exact=sin(twopi*mesh%center(1,:)/mesh%box)+0.3d0*cos(2d0*twopi*mesh%center(2,:)/mesh%box) &
+         +0.2d0*sin(twopi*mesh%center(3,:)/mesh%box)
+    exact=exact-sum(exact*mesh%volume)/sum(mesh%volume)
+    call composite_apply(mesh,exact,rhs,ierr)
+    if(ierr/=0)call clean_stop
+    answer=0d0
+    call composite_solve(mesh,rhs,answer,1d-9,1200,40,iterations,relative,ierr)
+    error=sqrt(sum(mesh%volume*(answer-exact)**2)/sum(mesh%volume*exact**2))
+    write(*,*) 'RAR_QUMOND_SOLVER_V1',0,mesh%n,iterations,relative,error,ierr
+    if(ierr/=0.or.error>1d-6)then
+       write(*,*) 'QUMOND composite solver: manufactured recovery failed'
+       call clean_stop
+    endif
+    answer=0d0
+    call composite_solve(mesh,rhs,answer,1d-12,1,1,iterations,relative,ierr)
+    if(ierr/=2.or.relative<=1d-12)then
+       write(*,*) 'QUMOND composite solver: nonconvergence was not rejected'
+       call clean_stop
+    endif
+    work=1d0;answer=0d0
+    call composite_solve(mesh,work,answer,1d-9,10,5,iterations,relative,ierr)
+    if(ierr/=4)then
+       write(*,*) 'QUMOND composite solver: incompatible source was not rejected'
+       call clean_stop
+    endif
+    write(*,*) 'RAR_QUMOND_SOLVER_REJECTION_V1',2,4
+    fourpi=4d0*acos(-1d0)
+    removed_mean=sum(qh_rho_newton(mesh%cell)*mesh%volume)/sum(mesh%volume)
+    rhs=fourpi*(qh_rho_newton(mesh%cell)-removed_mean)
+    potential_n=qh_current(mesh%cell,1)
+    call composite_solve(mesh,rhs,potential_n,1d-9,1200,40,iterations,relative,ierr)
+    write(*,*) 'RAR_QUMOND_SOLVER_V1',1,mesh%n,iterations,relative,removed_mean,ierr
+    if(ierr/=0)then
+       write(*,*) 'QUMOND composite solver: Newtonian stage failed'
+       call clean_stop
+    endif
+    call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
+    a0=a0_mond*scale_t**2/scale_l;external=g_ext_mond*scale_t**2/scale_l
+    call composite_phantom(mesh,potential_n,a0,fourpi,external,phantom,ierr)
+    if(ierr/=0)call clean_stop
+    rhs=rhs+fourpi*phantom
+    rhs=rhs-sum(rhs*mesh%volume)/sum(mesh%volume)
+    answer=potential_n
+    call composite_solve(mesh,rhs,answer,1d-9,1200,40,iterations,relative,ierr)
+    write(*,*) 'RAR_QUMOND_SOLVER_V1',2,mesh%n,iterations,relative, &
+         sum(phantom*mesh%volume),ierr
+    if(ierr/=0)then
+       write(*,*) 'QUMOND composite solver: QUMOND stage failed'
+       call clean_stop
+    endif
+    end associate
+  end subroutine qumond_composite_solver_check
 
   real(dp) function qumond_history_value(cell,level,tfrac) result(value)
     integer,intent(in)::cell,level

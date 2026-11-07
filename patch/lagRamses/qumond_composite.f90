@@ -7,7 +7,7 @@ module qumond_composite
   implicit none
   private
   public :: composite_mesh_t, composite_native_build, composite_apply, composite_phantom
-  public :: composite_slopes, composite_face_gradient
+  public :: composite_slopes, composite_face_gradient, composite_solve
   type composite_mesh_t
      integer :: n=0,nface=0
      real(dp) :: box=0d0
@@ -249,4 +249,114 @@ contains
     endif
     ierr=0
   end subroutine
+
+  ! Restarted flexible GMRES for L phi = rhs on the volume-weighted zero-mean
+  ! space. Face-Jacobi is an initial preconditioner, not a claimed AMR MG solve.
+  ! Success requires the independently recomputed, unpreconditioned residual.
+  subroutine composite_solve(mesh,rhs,x,rtol,maxiter,restart,iterations,relative_residual,ierr)
+    type(composite_mesh_t),intent(in)::mesh
+    real(dp),intent(in)::rhs(:),rtol
+    real(dp),intent(inout)::x(:)
+    integer,intent(in)::maxiter,restart
+    integer,intent(out)::iterations,ierr
+    real(dp),intent(out)::relative_residual
+    real(dp),allocatable::v(:,:),z(:,:),h(:,:),cs(:),sn(:),g(:),y(:),b(:),r(:),w(:),diagonal(:)
+    real(dp)::bnorm,beta,hn,entry,tmp,radius,volume_sum,mean_rhs
+    integer::n,m,f,l,rr,i,j,k,pass,status
+    logical::happy
+    ierr=1;iterations=0;relative_residual=huge(1d0)
+    n=mesh%n;m=min(restart,maxiter)
+    if(n<=0.or.size(rhs)/=n.or.size(x)/=n.or.m<1.or.rtol<=0d0.or.rtol>=1d0)return
+    if(.not.all(ieee_is_finite(rhs)).or..not.all(ieee_is_finite(x)))return
+    if(.not.ieee_is_finite(rtol))return
+    allocate(v(n,m+1),z(n,m),h(m+1,m),cs(m),sn(m),g(m+1),y(m),b(n),r(n),w(n),diagonal(n))
+    volume_sum=sum(mesh%volume)
+    b=-rhs;bnorm=weighted_norm(b)
+    if(.not.ieee_is_finite(bnorm))return
+    mean_rhs=sum(b*mesh%volume)/volume_sum
+    if(abs(mean_rhs)*sqrt(volume_sum)>1d-12*bnorm)then
+       ierr=4;return ! Incompatible periodic source must be fixed by caller.
+    endif
+    call project(b);bnorm=weighted_norm(b)
+    if(bnorm==0d0)then
+       x=0d0;relative_residual=0d0;ierr=0;return
+    endif
+    diagonal=0d0
+    do f=1,mesh%nface
+       l=mesh%left(f);rr=mesh%right(f)
+       entry=mesh%area(f)/mesh%distance(f)
+       diagonal(l)=diagonal(l)+entry;diagonal(rr)=diagonal(rr)+entry
+    enddo
+    diagonal=diagonal/mesh%volume
+    if(any(diagonal<=0d0).or..not.all(ieee_is_finite(diagonal)))return
+    call project(x)
+    call composite_apply(mesh,x,w,status)
+    if(status/=0)return
+    r=b+w
+    do
+       beta=weighted_norm(r);relative_residual=beta/bnorm
+       if(.not.ieee_is_finite(relative_residual))return
+       if(relative_residual<=rtol)then
+          ierr=0;return
+       endif
+       if(iterations>=maxiter)then
+          ierr=2;return
+       endif
+       call project(r);beta=weighted_norm(r)
+       if(beta<=tiny(1d0))then
+          ierr=3;return
+       endif
+       h=0d0;g=0d0;g(1)=beta;v(:,1)=r/beta;k=0
+       do j=1,min(m,maxiter-iterations)
+          z(:,j)=v(:,j)/diagonal;call project(z(:,j))
+          call composite_apply(mesh,z(:,j),w,status)
+          if(status/=0)return
+          w=-w;call project(w)
+          ! Two modified Gram-Schmidt passes control loss of orthogonality.
+          do pass=1,2
+             do i=1,j
+                entry=sum(mesh%volume*v(:,i)*w)
+                h(i,j)=h(i,j)+entry;w=w-entry*v(:,i)
+             enddo
+          enddo
+          hn=weighted_norm(w);h(j+1,j)=hn;happy=hn<=tiny(1d0)
+          if(.not.happy)v(:,j+1)=w/hn
+          do i=1,j-1
+             tmp=cs(i)*h(i,j)+sn(i)*h(i+1,j)
+             h(i+1,j)=-sn(i)*h(i,j)+cs(i)*h(i+1,j);h(i,j)=tmp
+          enddo
+          radius=sqrt(h(j,j)**2+h(j+1,j)**2)
+          if(radius<=tiny(1d0).or..not.ieee_is_finite(radius))then
+             ierr=3;return
+          endif
+          cs(j)=h(j,j)/radius;sn(j)=h(j+1,j)/radius
+          h(j,j)=radius;h(j+1,j)=0d0
+          g(j+1)=-sn(j)*g(j);g(j)=cs(j)*g(j)
+          iterations=iterations+1;k=j
+          if(abs(g(j+1))/bnorm<=rtol.or.happy)exit
+       enddo
+       y=0d0
+       do i=k,1,-1
+          if(abs(h(i,i))<=tiny(1d0))then
+             ierr=3;return
+          endif
+          y(i)=(g(i)-dot_product(h(i,i+1:k),y(i+1:k)))/h(i,i)
+       enddo
+       x=x+matmul(z(:,1:k),y(1:k));call project(x)
+       if(.not.all(ieee_is_finite(x)))return
+       call composite_apply(mesh,x,w,status)
+       if(status/=0)return
+       r=b+w
+    enddo
+  contains
+    subroutine project(q)
+      real(dp),intent(inout)::q(:)
+      q=q-sum(q*mesh%volume)/volume_sum
+    end subroutine
+    real(dp) function weighted_norm(q) result(norm)
+      real(dp),intent(in)::q(:)
+      norm=sqrt(sum(mesh%volume*q*q))
+    end function
+  end subroutine composite_solve
+
 end module qumond_composite
