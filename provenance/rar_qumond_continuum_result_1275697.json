@@ -1,0 +1,48 @@
+{
+  "schema": "rar_native_continuum_v1",
+  "resolutions": [
+    {
+      "leaves": 59312.0,
+      "iterations_n": 291.0,
+      "iterations_q": 270.0,
+      "residual_n": 9.211340417273341e-10,
+      "residual_q": 9.61269965884818e-10,
+      "potential_error_n": 0.002851653932501536,
+      "force_error_n": 0.004071054614169876,
+      "force_error_q": 0.004221944263135009,
+      "removed_rhs_mean": -0.0005959026591665589,
+      "run": "/gpfs/kjhan/RAR_QUMOND/runs/rar_stage_history_1275695",
+      "levelmin": 5,
+      "source_commit": "bd9623782a222da2db05bfe25680c98f10745a9f"
+    },
+    {
+      "leaves": 425832.0,
+      "iterations_n": 768.0,
+      "iterations_q": 743.0,
+      "residual_n": 9.735779077741677e-10,
+      "residual_q": 9.659858957925684e-10,
+      "potential_error_n": 0.0007214345089258321,
+      "force_error_n": 0.001188002584860397,
+      "force_error_q": 0.001213085630521615,
+      "removed_rhs_mean": -0.0001227194682134356,
+      "run": "/gpfs/kjhan/RAR_QUMOND/runs/rar_stage_history_1275696",
+      "levelmin": 6,
+      "source_commit": "bd9623782a222da2db05bfe25680c98f10745a9f"
+    }
+  ],
+  "measured_orders": {
+    "potential_error_n": 1.9828585721819882,
+    "force_error_n": 1.7768646005429802,
+    "force_error_q": 1.7992261402986598
+  },
+  "input_sha256": {
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_stage_history_1275695/new_on/run.log": "ca1a3f07933d2553623c70e37a0af4df3c34744c7716190bd00d6616a982ffa7",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_stage_history_1275695/new_on/effective.nml": "0c4e7bc6d2fd6b0644a762614b8060c25705e8df6af3c1c43e88d59111150061",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_stage_history_1275695/new_on/source_commit.txt": "855ea396d09a890b6de2f35b8bc5fa36af3d684ea5fc11086bc5966c982c1fdf",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_stage_history_1275696/new_on/run.log": "74f88207393a073df7fb703e6f413d71ee735cbc744f60664227b859cda94cba",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_stage_history_1275696/new_on/effective.nml": "979c8f1ae925da29e2a8a4018ba190ae27801b439eec8244e649615946abacc0",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_stage_history_1275696/new_on/source_commit.txt": "855ea396d09a890b6de2f35b8bc5fa36af3d684ea5fc11086bc5966c982c1fdf"
+  },
+  "scope": "Native two-stage AMR solve and force versus smooth periodic analytic planar solution with transverse external field. Tests continuum source, not inverse recovery of the same discrete operator.",
+  "limits": "Single smooth periodic geometry, two resolutions, serial frozen hierarchy. Not galaxy force calibration, compact-source accuracy, particles or evolving MPI/restart."
+}

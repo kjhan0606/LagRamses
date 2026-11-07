@@ -41,3 +41,17 @@ resolutions, then actual coupled source deposition and synchronized evolving
 publication with lifecycle support. Existing legacy continuous-source studies
 must be distinguished from this new native operator. The full RAR programme
 and subsequent BIMOND/FDM work remain active.
+
+## Higher-resolution independent check
+
+Execution1275682 reuses build1275598 at levels6/7 and completed in3m02s.
+Independent verifier1275684 completed in13s and history/default-off audit
+1275685 in4s; both artifact manifests verify. Coverage is425832 leaves and
+1286316 subfaces. True N/Q relative residuals are9.877107017517772e-10 and
+9.945689120029024e-10. Independent phantom/force relative differences are
+2.7547590937258042e-15 and4.816368384189864e-17. Source difference is exactly
+zero; gas momentum remains zero, energy agrees to1.13e-16 relative, covered
+potential restriction to8.89e-16 and published force to1.43e-14 absolute.
+These are same-operator checks at a higher resolution, not yet continuum
+force convergence. That distinct measurement is recorded in
+rar_qumond_continuum_force_2026-11-07.md.
