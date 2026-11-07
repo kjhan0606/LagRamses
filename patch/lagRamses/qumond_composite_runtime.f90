@@ -3,7 +3,7 @@
 module qumond_composite_runtime
   use amr_commons
   use poisson_commons
-  use hydro_commons, only: uold,smallr,nvar
+  use hydro_commons, only: uold,smallr,nvar,courant_factor
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #include "amr_index.h"
   implicit none
