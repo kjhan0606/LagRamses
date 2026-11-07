@@ -45,7 +45,7 @@ subroutine read_hydro_params(nml_ok)
   !--------------------------------------------------
   ! Namelist definitions
   !--------------------------------------------------
-  namelist/init_params/filetype,initfile,multiple,grafic_nreaders,nregion,region_type &
+  namelist/init_params/filetype,initfile,multiple,grafic_nreaders,nregion,region_type,hydro_initial_condition &
        & ,x_center,y_center,z_center,aexp_ini &
        & ,length_x,length_y,length_z,exp_region &
 #if NENER>0

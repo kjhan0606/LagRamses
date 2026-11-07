@@ -31,6 +31,7 @@ module hydro_parameters
   real(dp)::mhd_seed(3)=0d0
   ! Analytic gas-only ICs exercise the same production CT solver.
   character(len=24)::mhd_initial_condition='uniform'
+  character(len=32)::hydro_initial_condition='region'
   integer::slope_mag_type=1,interpol_mag_type=1
   character(len=10)::riemann2d='hlld'
 #ifdef SOLVERmhd

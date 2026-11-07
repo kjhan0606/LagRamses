@@ -26,8 +26,6 @@ subroutine condinit(x,u,dx,nn)
 #if NENER>0 || NVAR>NHYDRO+NENER
   integer::ivar
 #endif
-  integer::i
-  real(dp)::twopi
   real(dp),dimension(1:nvector,1:nvar),save::q   ! Primitive variables
 
   select case (condinit_kind)
@@ -38,17 +36,6 @@ subroutine condinit(x,u,dx,nn)
 
   case('ana_disk_potential')
      call ana_disk_potential_condinit(x, q, dx, nn)
-
-  case('rar_periodic_wave')
-     ! Smooth moving-gas coupling fixture; region inputs set pressure/velocity.
-     call region_condinit(x,q,dx,nn)
-     twopi=2d0*acos(-1d0)/boxlen
-     do i=1,nn
-        q(i,1)=q(i,1)*(1d0+0.1d0*cos(twopi*x(i,1)))
-#if NDIM>1
-        q(i,1)=q(i,1)+d_region(1)*0.05d0*sin(twopi*x(i,2))
-#endif
-     enddo
 
   ! Add here, if you wish, some user-defined initial conditions
   ! ........

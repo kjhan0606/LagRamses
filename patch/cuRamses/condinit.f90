@@ -29,6 +29,20 @@ subroutine condinit(x,u,dx,nn)
 
   ! Call built-in initial condition generator
   call region_condinit(x,q,dx,nn)
+  if(hydro_initial_condition=='rar_periodic_wave')then
+     ! Smooth moving gas across native refinement interfaces; region inputs
+     ! retain their pressure and velocity. This selector is an explicit IC.
+     do i=1,nn
+        phase=2d0*acos(-1d0)*x(i,1)/boxlen
+        q(i,1)=q(i,1)*(1d0+0.1d0*cos(phase))
+#if NDIM>1
+        q(i,1)=q(i,1)+d_region(1)*0.05d0*sin(2d0*acos(-1d0)*x(i,2)/boxlen)
+#endif
+     enddo
+  else if(hydro_initial_condition/='region')then
+     write(*,*) 'ERROR: unsupported hydro initial condition ',trim(hydro_initial_condition)
+     call clean_stop
+  endif
   u=0d0
 #ifdef SOLVERmhd
   if(mhd_initial_condition/='uniform')then
