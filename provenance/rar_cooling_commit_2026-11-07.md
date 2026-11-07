@@ -1,0 +1,5 @@
+# Effective cooling/heating update diagnostic
+
+RAR_COOLING_COMMIT_LEDGER=1 records accepted thermal energy assignment for cooling enabled, equilibrium, non-isothermal calls. Fields: rank, level, cell, scale factor, cooling interval in seconds, code cell volume, effective thermal RHS times volume, measured gas total-energy change times volume, current energy-unit conversion to erg. Positive increments heat and negative increments cool. The RHS is after any delayed-cooling suppression, not raw radiative emissivity. The difference between measured change and effective RHS can include reconstruction/floor effects; it must be measured rather than assumed zero.
+
+Records are serialized across OpenMP workers and use current local unit conversion. Later velocity/energy-floor corrections are outside this record, as are non-equilibrium chemistry and isothermal updates. This is one operator boundary, not a full global energy ledger. The update logic is unchanged. Compilation/runtime validation remains pending. This worktree derives from f95adef and preserves both pending source trees.

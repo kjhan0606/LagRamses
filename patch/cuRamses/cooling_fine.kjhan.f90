@@ -141,6 +141,10 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
   real(kind=8),dimension(1:nvector)::T2min,Zsolar,boost
   real(kind=8),dimension(1:nvector)::delta_T2_eunha
   real(dp)::rdiff,old_max
+  real(dp)::rar_energy_before(nvector)
+  character(len=8)::rar_cooling_switch
+  integer::rar_cooling_status
+  logical::rar_cooling_record
 
 #ifdef grackle
   real(kind=8) gr_density(nvector), gr_energy(nvector), &
@@ -154,6 +158,10 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
      a_value=aexp
   endif
 #endif
+
+  rar_cooling_switch=''
+  call get_environment_variable('RAR_COOLING_COMMIT_LEDGER',rar_cooling_switch,status=rar_cooling_status)
+  rar_cooling_record=rar_cooling_status==0 .and. trim(rar_cooling_switch)=='1'
 
   ! Mesh spacing in that level
   dx=0.5D0**ilevel
@@ -482,6 +490,12 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
         end do
      endif
 
+     if(rar_cooling_record)then
+        do i=1,nleaf
+           rar_energy_before(i)=uold(ind_leaf(i),ndim+2)
+        enddo
+     endif
+
      ! Update total fluid energy
      if(isothermal)then
         do i=1,nleaf
@@ -491,6 +505,18 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
         do i=1,nleaf
            uold(ind_leaf(i),ndim+2) = T2(i) + T2min(i) + ekk(i) + err(i) + emag(i)
         end do
+     endif
+
+     ! Record the accepted thermal update before subsequent floor/velocity
+     ! corrections. delta_T2 is the effective RHS after delayed suppression.
+     if(rar_cooling_record .and. cooling .and. .not.neq_chem .and. .not.isothermal)then
+!$omp critical(rar_cooling_commit_output)
+        do i=1,nleaf
+           write(*,*) 'RAR_COOLING_COMMIT_V1',myid,ilevel,ind_leaf(i),aexp,dtcool,vol_loc, &
+                delta_T2(i)*vol_loc,(uold(ind_leaf(i),ndim+2)-rar_energy_before(i))*vol_loc, &
+                scale_d*scale_l**3*scale_v**2
+        enddo
+!$omp end critical(rar_cooling_commit_output)
      endif
 
      ! Update delayed cooling switch
