@@ -27,6 +27,7 @@ source "$(cat "$new/environment_setup_path.txt")" > "$out/compiler_environment.l
 set -u
 export OMP_NUM_THREADS=1 OMP_DYNAMIC=FALSE I_MPI_FABRICS=shm I_MPI_PMI_LIBRARY=/usr/lib64/libpmi2.so
 export LD_LIBRARY_PATH=/home/kjhan/local/hdf5/lib:/home/kjhan/local/lib:${LD_LIBRARY_PATH:-}
+unset RAR_QUMOND_COMPOSITE_EVOLVE RAR_QUMOND_GRAVITY_KICKS RAR_QUMOND_EVOLVE_DT
 for mode in old_off new_off new_on; do
  case_dir=$out/$mode
  mkdir "$case_dir"

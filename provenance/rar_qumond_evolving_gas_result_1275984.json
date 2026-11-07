@@ -1,0 +1,133 @@
+{
+  "schema": "rar_evolving_native_gas_v1",
+  "cases": {
+    "newtonian": {
+      "steps": 6,
+      "common_dt": 0.0002,
+      "endpoint": 0.0012,
+      "leaves": 5384,
+      "density_relative_change": 0.00012632548187546246,
+      "mass_relative_residual": 0.0,
+      "maximum_momentum_source_residual": 5.739156437416237e-17,
+      "maximum_energy_source_residual": 5.536258165230942e-16,
+      "maximum_half_phase_state_join": 0.0,
+      "snapshots": [
+        {
+          "time": 0.0006000000000000001,
+          "verification": "/gpfs/kjhan/RAR_QUMOND/audits/rar_evolving_gas_1275984/verify_newtonian_1.json"
+        },
+        {
+          "time": 0.0012000000000000001,
+          "verification": "/gpfs/kjhan/RAR_QUMOND/audits/rar_evolving_gas_1275984/verify_newtonian_2.json"
+        }
+      ]
+    },
+    "qumond": {
+      "steps": 6,
+      "common_dt": 0.0002,
+      "endpoint": 0.0012,
+      "leaves": 5384,
+      "density_relative_change": 0.00012515126068576821,
+      "mass_relative_residual": 2.220446049250313e-16,
+      "maximum_momentum_source_residual": 5.625654022484161e-17,
+      "maximum_energy_source_residual": 5.611525512923959e-16,
+      "maximum_half_phase_state_join": 0.0,
+      "snapshots": [
+        {
+          "time": 0.0006000000000000001,
+          "verification": "/gpfs/kjhan/RAR_QUMOND/audits/rar_evolving_gas_1275984/verify_qumond_1.json"
+        },
+        {
+          "time": 0.0012000000000000001,
+          "verification": "/gpfs/kjhan/RAR_QUMOND/audits/rar_evolving_gas_1275984/verify_qumond_2.json"
+        }
+      ]
+    },
+    "qumond_half": {
+      "steps": 12,
+      "common_dt": 0.0001,
+      "endpoint": 0.0012,
+      "leaves": 5384,
+      "density_relative_change": 0.00012514204616608022,
+      "mass_relative_residual": 2.220446049250313e-16,
+      "maximum_momentum_source_residual": 5.649370945007282e-17,
+      "maximum_energy_source_residual": 6.017677811132396e-16,
+      "maximum_half_phase_state_join": 0.0,
+      "snapshots": [
+        {
+          "time": 0.0006000000000000001,
+          "verification": "/gpfs/kjhan/RAR_QUMOND/audits/rar_evolving_gas_1275984/verify_qumond_half_1.json"
+        },
+        {
+          "time": 0.0012000000000000003,
+          "verification": "/gpfs/kjhan/RAR_QUMOND/audits/rar_evolving_gas_1275984/verify_qumond_half_2.json"
+        }
+      ]
+    }
+  },
+  "halved_timestep_relative_state_difference": {
+    "density": 7.825616039111481e-08,
+    "momentum": 1.2999454123135646e-07,
+    "energy": 2.3793576668430788e-08
+  },
+  "newtonian_vs_qumond_relative_state_difference": {
+    "density": 3.997569344021054e-06,
+    "momentum": 0.004394320052256419,
+    "energy": 0.00012020791654201173
+  },
+  "input_sha256": {
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/composite_epoch_00000_leaf.tsv": "3d1d08f0f4a157b3a797c57723767eed79892f0efd4aaf3c731867762a594522",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/composite_epoch_00001_leaf.tsv": "17170c99179817c5e1aeebd35e6c89a1bc251bae641edcb2f1c88fbfaf9ca1e5",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/composite_epoch_00002_leaf.tsv": "50b8559414a9892d4f0a94beda9d68418ecfd3070e09319e79daf5737ba0aafb",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/composite_epoch_00003_leaf.tsv": "c7673fccb87f68b1772062608933ecd408b4c806b570bea060fa2de468812d7b",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/composite_epoch_00004_leaf.tsv": "a59d8f889e200509c8a2f79be20d87b081f2c1b581b824d0425f8e34c2f72c16",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/composite_epoch_00005_leaf.tsv": "092e9f9498acdb69f9db26c2624db2e153c7d74cc517c3623621dccce790f115",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/composite_epoch_00006_leaf.tsv": "f789d4ca970e78206b8ee628b6003b5337d7c4b6ff3ec0f7be8323e768398e78",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/gravity_kicks_00000.tsv": "cccb26c2cc8d0a36b2e8c7dc51c430a4e423dbdebb7da09eb7018d562254bef4",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/gravity_kicks_00001.tsv": "e66f01c170dc6a333b13e93e4d7b98928b20c5890b350a120606682ba08b4fba",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/gravity_kicks_00002.tsv": "cd075994308b6851560f9c34e478ac7d25192fc7a3a6d9893ea97d98c5dcc1b0",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/gravity_kicks_00003.tsv": "03ef46bb4fd9f743eb8014ba7336717213c08cbe27ad69f983ba5c17846274fc",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/gravity_kicks_00004.tsv": "6bcd8bb199653efc074931391071bedf93dc5f12a55785d653c8dee8629a51bd",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/newtonian/gravity_kicks_00005.tsv": "3b33c0c316d726926bd33580610930f2b16bd8d70bf189b7a6574d7269dda843",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/composite_epoch_00000_leaf.tsv": "85e579f22ab76a8234ae8aef53865f35dc48cab25aa6d78d1698f5f1151edbca",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/composite_epoch_00001_leaf.tsv": "f2c0a15e2adc0d8fdd69b90bed5bfbc0efc4d62ca900a7a5f3b191c40c4d72d4",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/composite_epoch_00002_leaf.tsv": "9b75de617d3f7db2714a268a84197b828c7a7566e28fc7ac7ab266f9fd5c7d60",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/composite_epoch_00003_leaf.tsv": "6160afc139e664ba399b10ee86d8ce3a1aecf1037b828577e17430c75230e217",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/composite_epoch_00004_leaf.tsv": "840ec606b0f21da9f238d1571ad691a019ac4ae438513202de081327b4d3b089",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/composite_epoch_00005_leaf.tsv": "5bb7f9d716c264dfd961420cca4934915e87551b2fdbf55616d6dbdf1b92e37e",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/composite_epoch_00006_leaf.tsv": "a5a28d973afd68a744c775f4fcafe5778aa11c256241af93899fde04ef1e32e3",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/gravity_kicks_00000.tsv": "2e26ebfca5be9fde6c1110d6f694e0cc06cf2ce68f0b60ff871f9c71a1aaabd2",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/gravity_kicks_00001.tsv": "ebaa0b9835b4f3d996eab090bb6e40a5229e4f722bd4629d28357a687527c95d",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/gravity_kicks_00002.tsv": "9493d42677c40dbe100f7905aa51794b9b99bf9dd72206b4fb301b9d7b38b157",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/gravity_kicks_00003.tsv": "46e6043b1915cdfa66a04d79876a8864491f132c2de39666cb41addf2a2f98b2",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/gravity_kicks_00004.tsv": "8d58605855103eb50eef882916a87691bdc552950580ce574b48b590759cbe30",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond/gravity_kicks_00005.tsv": "088fe4f8a0d5ac82ff9267d1a70cf96ed1cb21e798a692536e3483a8c8fb06c1",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00000_leaf.tsv": "85e579f22ab76a8234ae8aef53865f35dc48cab25aa6d78d1698f5f1151edbca",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00001_leaf.tsv": "2aa3f90200d853b6ef2b1c78c5e1aa9284311e63f309c08433173d35d68c04d1",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00002_leaf.tsv": "b5363505b6e5049f8b9c78fabced1fc34000ec3a97f42e5eb64645a975974d7c",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00003_leaf.tsv": "c826a5794b55d00e995cbcd63d0dc6721764bf527a939aa47d37f83ca9b40be0",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00004_leaf.tsv": "2f92f13b59ce23b1fa8fa32cf34da34239299ddcbc92e97ed0a9c1c9de6a22cb",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00005_leaf.tsv": "b2346e533afa251340e39037316d4e650ad6e7f4d2cdfd219737849f204dca5a",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00006_leaf.tsv": "e7bbfefdce1bb9602550a7680d53aa37591d9b694a60477c9caaa9585f88e0ee",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00007_leaf.tsv": "48ff5dc0ef9fe3308a5f481432f268fdc73ca38ee6aed43256e1621d4a37b78c",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00008_leaf.tsv": "073e773550a5cb5c36214f1482b8143353047d0e744b485bd963b8137ff95fdc",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00009_leaf.tsv": "65cffb1d5b0bab4c0cfe74a8fcfb593c52ef8a444c00a650009a1eea5c3462a6",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00010_leaf.tsv": "dca00f03dd344ac6788dbe8c7b21e55cdd24fca95172e44e728d8789e1a3695d",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00011_leaf.tsv": "ee340e0354303534e62f26a5173c23f68b34e7290381c70d436d906a22e784e3",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/composite_epoch_00012_leaf.tsv": "18eef2bfc56c1211c0caf82f12d983ab53f4e2004bbca9dfa5b81ddbcd64e6f4",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/gravity_kicks_00000.tsv": "6254d1df9b1403dd3c34ab05441e2858691d648315aee08a5b564adc1f47aa32",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/gravity_kicks_00001.tsv": "f42f0a9245e7728cdc1430a9e42d572659d6161cffbf148573370d65de2c2288",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/gravity_kicks_00002.tsv": "d00c1e395d445e870314a980e98b28123ce66ce61ca726296cd9d89fde78618f",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/gravity_kicks_00003.tsv": "7ad67954103b708c448a619eb6d11c22fc22ee74b26220855ce085647d394f75",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/gravity_kicks_00004.tsv": "5107d8953d6ef2c5e8b7512c1a1262bbd7021a3bd253419879fc48c745f13f18",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/gravity_kicks_00005.tsv": "ebe5bd84bee39084043d4f00da52bc4846d24d08e456fb5b79cd6030fbbb5fb1",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/gravity_kicks_00006.tsv": "b22ad6bfa4ccbad90ba4cf8608fef617344a8b3d1ec2899c4e637b6c0efd231d",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/gravity_kicks_00007.tsv": "0b46193c8600fbfec086466f474579820048d3de5b092f572e449dd4b96b6c6e",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/gravity_kicks_00008.tsv": "5b32e96c33180f6a00f026830513410e36b3bf356af99d80d7ca8585fee3be0e",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/gravity_kicks_00009.tsv": "5588f14625fa628ac11e61fdcb29a72efe076bec34aaa0f32e2ee2cc4122a462",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/gravity_kicks_00010.tsv": "ca4321f5305a936f546ae2b3533e9619da2d281855508faab920d59baa03f130",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1275983/qumond_half/gravity_kicks_00011.tsv": "6de0cd011b82f30fea016157c1fbfc68d2729b84a75d44f8778237b0119f0f2a"
+  },
+  "scope": "Actual gas transport with old-density/old-force and new-density/new-force half sources, common hierarchy timestep and fixed native topology. Independent source-field snapshots and per-leaf momentum/kinetic-work accounting.",
+  "limits": "Noncosmological periodic smooth gas at one spatial resolution and short endpoint. No total QUMOND field-plus-gas energy conservation, exact self-force cancellation, particles/subgrid/MPI/regrid/restart or galaxy-formation readiness."
+}

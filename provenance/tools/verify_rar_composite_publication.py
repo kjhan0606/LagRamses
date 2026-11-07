@@ -4,9 +4,10 @@ import argparse,json,math,re
 from pathlib import Path
 import h5py
 import numpy as np
-p=argparse.ArgumentParser();p.add_argument('run',type=Path);p.add_argument('output',type=Path);p.add_argument('--case',default='new_on');p.add_argument('--snapshots',type=int,default=2);a=p.parse_args()
-case=a.run/a.case;leaf=np.loadtxt(case/'composite_leaf_state.tsv');face=np.loadtxt(case/'composite_faces.tsv')
-constants=np.array((case/'composite_leaf_state.tsv').read_text().splitlines()[0].split()[2:],float)
+p=argparse.ArgumentParser();p.add_argument('run',type=Path);p.add_argument('output',type=Path);p.add_argument('--case',default='new_on');p.add_argument('--snapshots',type=int,default=2)
+p.add_argument('--leaf-file',default='composite_leaf_state.tsv');p.add_argument('--snapshot-glob',default='output_*/data_*.h5');p.add_argument('--evolving',action='store_true');a=p.parse_args()
+case=a.run/a.case;leaf=np.loadtxt(case/a.leaf_file);face=np.loadtxt(case/'composite_faces.tsv')
+constants=np.array((case/a.leaf_file).read_text().splitlines()[0].split()[2:],float)
 fourpi,a0=constants[:2];external=constants[2:]
 if leaf.ndim!=2 or leaf.shape[1]!=13 or face.ndim!=2 or face.shape[1]!=5:raise ValueError('invalid export shape')
 if not np.isfinite(leaf).all() or not np.isfinite(face).all():raise ValueError('nonfinite export')
@@ -63,7 +64,10 @@ params=re.findall(r'(?im)^\s*gravity_params\s*=\s*([^\n]+)',nml)
 params=np.array([float(x.replace('d','e').replace('D','E')) for x in params[0].split(',')])
 params=np.pad(params,(0,10-len(params)))
 kind=int(scalar('gravity_type'))
-if kind==-1:
+if kind==0 and a.evolving:
+ # The independently saved gas snapshot supplies the source oracle below.
+ expected=source.copy()
+elif kind==-1:
  rad=np.linalg.norm(center-params[1:4],axis=1)
  cap=1/(params[0]*(1+params[0])**2)
  expected=scalar('d_region')+np.minimum(1/(np.maximum(rad,1e-300)*(1+rad)**2),cap)
@@ -94,7 +98,7 @@ lookup={k:i for i,k in enumerate(keys)}
 if len(lookup)!=n:raise ValueError('duplicate leaf positions')
 snapshots=[]
 offsets=np.array([[((child>>d)&1)-.5 for d in range(3)] for child in range(8)])
-for snapshot in sorted(case.glob('output_*/data_*.h5')):
+for snapshot in sorted(case.glob(a.snapshot_glob)):
  count=0;max_phi=0.;max_force=0.;covered_phi=0.;covered_force=0.;max_momentum=0.;energy_error=0.
  with h5py.File(snapshot) as h:
   saved={}
@@ -108,13 +112,24 @@ for snapshot in sorted(case.glob('output_*/data_*.h5')):
    count+=len(indices)
    max_phi=max(max_phi,float(np.max(abs(phi[leaf_mask]-pq[indices]))))
    max_force=max(max_force,float(np.max(abs(force[leaf_mask]-leaf[indices,10:13]))))
-   if not np.allclose(h[f'hydro/level_{lev}/uold_1'][:],scalar('d_region'),rtol=1e-13,atol=0):raise ValueError('gas density evolved')
+   density_saved=h[f'hydro/level_{lev}/uold_1'][:]
+   if a.evolving:
+    if kind!=0:raise ValueError('evolving source oracle only supports gas self-gravity')
+    if not np.isfinite(density_saved).all() or np.any(density_saved<=0):raise ValueError('invalid evolving density')
+    source_error=max(source_error,float(np.max(abs(density_saved[leaf_mask]-source[indices]))/np.max(abs(source[indices]))))
+    if source_error>1e-13:raise ValueError('evolving density/source epoch mismatch')
+   elif not np.allclose(density_saved,scalar('d_region'),rtol=1e-13,atol=0):raise ValueError('gas density evolved')
    for d in (2,3,4):
     max_momentum=max(max_momentum,float(np.max(abs(h[f'hydro/level_{lev}/uold_{d}'][:]))))
-   if max_momentum>1e-14:raise ValueError('gas received gravity kicks')
-   initial_energy=scalar('p_region')/(scalar('gamma')-1)
-   energy_error=max(energy_error,float(np.max(abs(h[f'hydro/level_{lev}/uold_5'][:]-initial_energy)))/initial_energy)
-   if energy_error>1e-13:raise ValueError('frozen gas energy changed')
+   if not a.evolving:
+    if max_momentum>1e-14:raise ValueError('gas received gravity kicks')
+    initial_energy=scalar('p_region')/(scalar('gamma')-1)
+    energy_error=max(energy_error,float(np.max(abs(h[f'hydro/level_{lev}/uold_5'][:]-initial_energy)))/initial_energy)
+    if energy_error>1e-13:raise ValueError('frozen gas energy changed')
+   else:
+    momenta=np.stack([h[f'hydro/level_{lev}/uold_{d}'][:] for d in (2,3,4)],axis=1)
+    internal=h[f'hydro/level_{lev}/uold_5'][:]-np.sum(momenta**2,axis=1)/(2*density_saved)
+    if not np.isfinite(internal).all() or np.any(internal<=0):raise ValueError('nonpositive evolving internal energy')
    saved[lev]=(grids,centers,leaf_mask,phi,force)
   lo,hi=min(saved),max(saved)
   grids,_,_,phi_hi,force_hi=saved[hi]
@@ -126,7 +141,8 @@ for snapshot in sorted(case.glob('output_*/data_*.h5')):
    covered_phi=max(covered_phi,abs(phi_lo[idx]-child_phi[j]));covered_force=max(covered_force,float(np.max(abs(force_lo[idx]-child_force[j]))))
  if count!=n or max_phi>1e-11*max(np.max(abs(pq)),1) or max_force>1e-11*max(np.max(abs(leaf[:,10:13])),1):raise ValueError('published leaf fields differ')
  if max(covered_phi,covered_force)>1e-12:raise ValueError('covered-cell restriction mismatch')
- snapshots.append({'snapshot':str(snapshot),'leaves':count,'phi_max_difference':max_phi,'force_max_difference':max_force,'covered_phi_difference':covered_phi,'covered_force_difference':covered_force,'gas_max_momentum':max_momentum,'gas_energy_relative_difference':energy_error})
+ snapshots.append({'snapshot':str(snapshot),'leaves':count,'phi_max_difference':max_phi,'force_max_difference':max_force,'covered_phi_difference':covered_phi,'covered_force_difference':covered_force,'gas_max_momentum':max_momentum,'gas_energy_relative_difference':None if a.evolving else energy_error})
 if len(snapshots)!=a.snapshots:raise ValueError('incorrect snapshot coverage')
 a.output.write_text(json.dumps({'schema':'rar_composite_publication_independent_v1','leaves':n,'subfaces':len(face),'newtonian_relative_residual':resn,'qumond_relative_residual':resq,'phantom_relative_difference':ph_error,'force_relative_difference':force_error,'source_relative_difference':source_error,'snapshots':snapshots,
- 'limits':'Independent reconstruction of the declared native discrete operator and frozen-source publication. Continuum resolution, particle coupling and evolving MPI/restart remain open.'},indent=2,allow_nan=False)+'\n')
+ 'gas_state_mode':'evolving' if a.evolving else 'fixed',
+ 'limits':'Independent native operator/source/field snapshot reconstruction. Transport/source accounting, continuum accuracy, particles and evolving MPI/restart require their own evidence.'},indent=2,allow_nan=False)+'\n')
