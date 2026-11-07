@@ -284,8 +284,16 @@ contains
     internal_limit = max(internal_old, &
          (temperature_cap/scale_t2)/(gamma-1d0)*staged(1))
     if (.not. ieee_is_finite(internal_limit)) return
-    staged(5) = nonthermal + kinetic_new + min(internal_trial, internal_limit)
-    deferred_energy = max(0d0, trial_energy-staged(5))*volume
+    if (internal_trial <= internal_limit) then
+       ! Preserve the accepted total exactly when no cap is active. Rebuilding
+       ! it from internal+kinetic energy can create a roundoff-sized deferred
+       ! reservoir, which incorrectly selects saved-energy replay next step.
+       staged(5) = trial_energy
+       deferred_energy = 0d0
+    else
+       staged(5) = nonthermal + kinetic_new + internal_limit
+       deferred_energy = max(0d0, trial_energy-staged(5))*volume
+    end if
     if (.not. ieee_is_finite(staged(5)) .or. .not. ieee_is_finite(deferred_energy)) then
        deferred_energy = 0d0
        return
