@@ -1,0 +1,5 @@
+# AGN accepted gas-deposition record
+
+RAR_AGN_COMMIT_LEDGER=1 emits RAR_AGN_COMMIT_V1 only after agn_deposit_material succeeds and the row is assigned to uold. Fields: rank, local cell, volume, requested extensive mass, requested extensive momentum (3), requested extensive energy, deferred extensive energy, measured nvar extensive gas-row differences. All quantities use current code units. Deferred energy follows the temperature-cap return from agn_deposit_cell. Compare requested energy to accepted gas energy plus deferred energy; verify the helper's protected/magnetic energy and kinetic handling before asserting general closure.
+
+The same helper covers the threaded normal receivers and serial fallback. A critical region serializes stdout. The diagnostic preserves the physical update and rejection logic. It covers receiver deposition only: donor withdrawal, sink budgets, scale-factor conversion, global synchronization, and cooling remain separate accounting items. Records lack persistent sink-event identity and must not be used for restart deduplication. Compilation and runtime validation remain pending.

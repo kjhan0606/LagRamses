@@ -7625,12 +7625,25 @@ contains
     real(dp), intent(in) :: drho,dmomentum(3),denergy,volume,fractions(nscalar)
     real(dp), intent(out) :: deferred
     integer, intent(out) :: ierr
-    real(dp) :: row(nvar)
+    real(dp) :: row(nvar), before_row(nvar)
+    character(len=8) :: accounting_switch
+    integer :: accounting_status
 
     row=uold(cell,1:nvar)
+    before_row=row
     call agn_deposit_material(row,scalar_fields,metal_slot,fractions,drho,dmomentum,denergy, &
          volume,gamma,scale_T2,T2maxAGNz,deferred,ierr,magnetic_energy(uold(cell,:)))
-    if(ierr==0)uold(cell,1:nvar)=row
+    if(ierr==0)then
+       uold(cell,1:nvar)=row
+       accounting_switch=''
+       call get_environment_variable('RAR_AGN_COMMIT_LEDGER',accounting_switch,status=accounting_status)
+       if(accounting_status==0 .and. trim(accounting_switch)=='1')then
+!$omp critical(rar_agn_commit_output)
+          write(*,*) 'RAR_AGN_COMMIT_V1',myid,cell,volume, &
+               drho*volume,dmomentum*volume,denergy*volume,deferred,(row-before_row)*volume
+!$omp end critical(rar_agn_commit_output)
+       endif
+    endif
   end subroutine deposit_agn_cell
 end subroutine AGN_blast
 !################################################################
