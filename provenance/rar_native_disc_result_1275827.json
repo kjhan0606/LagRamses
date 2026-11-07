@@ -1,0 +1,86 @@
+{
+  "schema": "rar_native_disc_comparison_v1",
+  "low": {
+    "leaves": 59312,
+    "levelmax": 6,
+    "source_commit": "f0a51296ddd8e25602e51f08ad3ed98311634c2b",
+    "baryon_source_bitwise_equal": true,
+    "q_first_stage_relative_difference": 0.0,
+    "sampled_source_integrals": {
+      "newtonian_baryon": 0.07965881582647566,
+      "newtonian_halo": 0.47699264982694833,
+      "qumond_baryon": 0.07965881582647566
+    },
+    "inputs": {
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275759/newtonian_baryon/source_commit.txt": "4db4ca90df50313cac23ac00af6013c3fedbf1cbf8637cb61f57d40904fd149d",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275759/newtonian_baryon/effective.nml": "510f242ef7ce4e7597825e08633140df711c490562c71d4cf7ceaaebcb5913cd",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275759/newtonian_baryon/composite_leaf_state.tsv": "6aef2618598bb42acc26c81112eff8bc6b46d692bb944d5f791a165e9cd0b1e3",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275759/newtonian_baryon/composite_faces.tsv": "97981628dce2abfb3bff40080e7ac56b3b0351c33ea720f7a68b507e2f8b8018",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275759/newtonian_halo/source_commit.txt": "4db4ca90df50313cac23ac00af6013c3fedbf1cbf8637cb61f57d40904fd149d",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275759/newtonian_halo/effective.nml": "ca7c6e7e87cd94017ffa51e1d85cb9c2d988e1ee5b2b1e606e2179acfaecc1b6",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275759/newtonian_halo/composite_leaf_state.tsv": "4c1dd508390ca834f4fe032fb046775b7d9cdb097db2b16c4c6e7916148e1a1f",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275759/newtonian_halo/composite_faces.tsv": "97981628dce2abfb3bff40080e7ac56b3b0351c33ea720f7a68b507e2f8b8018",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275759/qumond_baryon/source_commit.txt": "4db4ca90df50313cac23ac00af6013c3fedbf1cbf8637cb61f57d40904fd149d",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275759/qumond_baryon/effective.nml": "abf7d61e036b89047a57ce67b834fb1390b474a750cf53fafee30d8deefd0074",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275759/qumond_baryon/composite_leaf_state.tsv": "9aa6e456226e8361e76c4a606e1f5f2a60b280664eeb3299ec7e369f9c9e1036",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275759/qumond_baryon/composite_faces.tsv": "97981628dce2abfb3bff40080e7ac56b3b0351c33ea720f7a68b507e2f8b8018"
+    }
+  },
+  "high": {
+    "leaves": 425832,
+    "levelmax": 7,
+    "source_commit": "f0a51296ddd8e25602e51f08ad3ed98311634c2b",
+    "baryon_source_bitwise_equal": true,
+    "q_first_stage_relative_difference": 0.0,
+    "sampled_source_integrals": {
+      "newtonian_baryon": 0.07971474203751605,
+      "newtonian_halo": 0.4789051372804839,
+      "qumond_baryon": 0.07971474203751605
+    },
+    "inputs": {
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275760/newtonian_baryon/source_commit.txt": "4db4ca90df50313cac23ac00af6013c3fedbf1cbf8637cb61f57d40904fd149d",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275760/newtonian_baryon/effective.nml": "aceb02a14a34b360e28cbc188300794bc25e73c3c5cc32cbe87305a04b634ce4",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275760/newtonian_baryon/composite_leaf_state.tsv": "cdba7ce40ef31f8ee4d209aeb2f84d191d6809d20719b766af3492daa37de8e5",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275760/newtonian_baryon/composite_faces.tsv": "06b1465ab3509a4a0ad8debb53829b568a0e38ec4dc721493a71b9bd5e68d21e",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275760/newtonian_halo/source_commit.txt": "4db4ca90df50313cac23ac00af6013c3fedbf1cbf8637cb61f57d40904fd149d",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275760/newtonian_halo/effective.nml": "78bcd7d9dce0dcd86648d3c42c7eda7ae48eafa79d9efe9e0e8cffc154455bd6",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275760/newtonian_halo/composite_leaf_state.tsv": "2d99e0d5e9695db338e181a099428b231b087b7eeeb212b07e46fd8dd39e978a",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275760/newtonian_halo/composite_faces.tsv": "06b1465ab3509a4a0ad8debb53829b568a0e38ec4dc721493a71b9bd5e68d21e",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275760/qumond_baryon/source_commit.txt": "4db4ca90df50313cac23ac00af6013c3fedbf1cbf8637cb61f57d40904fd149d",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275760/qumond_baryon/effective.nml": "7235dba883b382807d07c8d1fc58367d334c7235d16fc8f4012c8f0af82044b9",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275760/qumond_baryon/composite_leaf_state.tsv": "41be55f24b392519dd5a8353cfd69314964d164f4d4b7ffc254d732792d25678",
+      "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_disc_1275760/qumond_baryon/composite_faces.tsv": "06b1465ab3509a4a0ad8debb53829b568a0e38ec4dc721493a71b9bd5e68d21e"
+    }
+  },
+  "radius_range_kpc": [
+    0.625,
+    2.5
+  ],
+  "a0_cgs": 1.1999999999999998e-08,
+  "force_resolution_changes": {
+    "newtonian_baryon": {
+      "relative_rms": 0.009809292899103067,
+      "relative_max_abs": 0.024914167814926502
+    },
+    "newtonian_halo": {
+      "relative_rms": 0.013511104195306092,
+      "relative_max_abs": 0.032763051649022934
+    },
+    "qumond_baryon": {
+      "relative_rms": 0.008878988920253385,
+      "relative_max_abs": 0.022887548906815214
+    }
+  },
+  "qumond_vs_algebraic_simple_nu_dex": {
+    "mean": -0.016677816627077867,
+    "rms": 0.018103589207900665,
+    "max_abs": 0.03252352627962311
+  },
+  "lcdm_vs_qumond_force_ratio_range": [
+    1.779231309363429,
+    4.036793455223968
+  ],
+  "sampling": "32 common radii, 128 azimuths each; symmetric fine z planes averaged to the midplane, followed by bilinear xy interpolation. Scatter is numerical azimuthal variation, not an intrinsic population RAR scatter.",
+  "scope": "Same prescribed stellar/gas discs. Newtonian baryon+truncated NFW is the CDM-halo comparison; Newtonian baryon-only provides gbar. QUMOND uses the solved field, not an algebraic boost.",
+  "limits": "Synthetic fixed periodic 10 kpc source; finite thickness, resolution and image/background effects. Halo is prescribed, not fitted or cosmologically formed. No observational model selection, self-consistent galaxy formation, population RAR scatter, MPI/evolving/restart claim."
+}

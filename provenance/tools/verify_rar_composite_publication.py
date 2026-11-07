@@ -4,8 +4,8 @@ import argparse,json,math,re
 from pathlib import Path
 import h5py
 import numpy as np
-p=argparse.ArgumentParser();p.add_argument('run',type=Path);p.add_argument('output',type=Path);a=p.parse_args()
-case=a.run/'new_on';leaf=np.loadtxt(case/'composite_leaf_state.tsv');face=np.loadtxt(case/'composite_faces.tsv')
+p=argparse.ArgumentParser();p.add_argument('run',type=Path);p.add_argument('output',type=Path);p.add_argument('--case',default='new_on');p.add_argument('--snapshots',type=int,default=2);a=p.parse_args()
+case=a.run/a.case;leaf=np.loadtxt(case/'composite_leaf_state.tsv');face=np.loadtxt(case/'composite_faces.tsv')
 constants=np.array((case/'composite_leaf_state.tsv').read_text().splitlines()[0].split()[2:],float)
 fourpi,a0=constants[:2];external=constants[2:]
 if leaf.ndim!=2 or leaf.shape[1]!=13 or face.ndim!=2 or face.shape[1]!=5:raise ValueError('invalid export shape')
@@ -60,13 +60,35 @@ def scalar(name):
  if len(v)!=1:raise ValueError('missing/ambiguous '+name)
  return float(v[0].replace('d','e').replace('D','E'))
 params=re.findall(r'(?im)^\s*gravity_params\s*=\s*([^\n]+)',nml)
-params=np.array([float(x) for x in params[0].split(',')])
-rad=np.linalg.norm(center-params[1:4],axis=1)
-cap=1/(params[0]*(1+params[0])**2)
-expected=scalar('d_region')+np.minimum(1/(np.maximum(rad,1e-300)*(1+rad)**2),cap)
+params=np.array([float(x.replace('d','e').replace('D','E')) for x in params[0].split(',')])
+params=np.pad(params,(0,10-len(params)))
+kind=int(scalar('gravity_type'))
+if kind==-1:
+ rad=np.linalg.norm(center-params[1:4],axis=1)
+ cap=1/(params[0]*(1+params[0])**2)
+ expected=scalar('d_region')+np.minimum(1/(np.maximum(rad,1e-300)*(1+rad)**2),cap)
+elif kind in (-2,-3):
+ xyz=center-.5*scalar('boxlen');rad=np.linalg.norm(xyz[:,:2],axis=1)
+ expected=np.full(n,scalar('d_region'))
+ discs=np.zeros(n)
+ for mass,scale,height in (params[:3],params[3:6]):
+  discs+=mass/(4*np.pi*scale**2*height)*np.exp(-rad/scale)/np.cosh(xyz[:,2]/height)**2
+ if params[9]>0:
+  def taper(r):return .5*(1+np.cos(np.pi*np.clip((r-.8*params[9])/(.2*params[9]),0,1)))
+  discs*=taper(rad)*taper(abs(xyz[:,2]))
+ expected+=discs
+ if kind==-3:
+  rr=np.linalg.norm(xyz,axis=1);c=params[8]/params[7];u=rr/params[7]
+  normalization=params[6]/(4*np.pi*params[7]**3*(np.log1p(c)-c/(1+c)))
+  expected+=np.where(rr<=params[8],normalization/(u*(1+u)**2),0)
+else:raise ValueError('unsupported independent source oracle')
 source_error=np.max(abs(source-expected))/np.max(abs(expected))
-if scalar('gravity_type')!=-1 or source_error>1e-13:raise ValueError('physical analytic source mismatch')
-if not math.isclose(a0,scalar('a0_mond')*scalar('units_time')**2/scalar('units_length'),rel_tol=1e-14):raise ValueError('MOND units mismatch')
+if source_error>1e-13:raise ValueError('physical analytic source mismatch')
+mond=re.findall(r'(?im)^\s*use_mond\s*=\s*(\.[a-z]+\.)',nml)
+if len(mond)!=1:raise ValueError('missing gravity model declaration')
+expected_a0=scalar('a0_mond')*scalar('units_time')**2/scalar('units_length') if mond[0].lower()=='.true.' else 0.
+if not math.isclose(a0,expected_a0,rel_tol=1e-14):raise ValueError('MOND units/model mismatch')
+if expected_a0==0 and (np.any(ph!=0) or np.any(pn!=pq) or np.any(external!=0)):raise ValueError('Newtonian control acquired a MOND contribution')
 keys=[(int(lev),*np.rint(c*2**(int(lev)+1)).astype(int)) for lev,c in zip(levels,center)]
 lookup={k:i for i,k in enumerate(keys)}
 if len(lookup)!=n:raise ValueError('duplicate leaf positions')
@@ -105,6 +127,6 @@ for snapshot in sorted(case.glob('output_*/data_*.h5')):
  if count!=n or max_phi>1e-11*max(np.max(abs(pq)),1) or max_force>1e-11*max(np.max(abs(leaf[:,10:13])),1):raise ValueError('published leaf fields differ')
  if max(covered_phi,covered_force)>1e-12:raise ValueError('covered-cell restriction mismatch')
  snapshots.append({'snapshot':str(snapshot),'leaves':count,'phi_max_difference':max_phi,'force_max_difference':max_force,'covered_phi_difference':covered_phi,'covered_force_difference':covered_force,'gas_max_momentum':max_momentum,'gas_energy_relative_difference':energy_error})
-if len(snapshots)!=2:raise ValueError('incorrect snapshot coverage')
+if len(snapshots)!=a.snapshots:raise ValueError('incorrect snapshot coverage')
 a.output.write_text(json.dumps({'schema':'rar_composite_publication_independent_v1','leaves':n,'subfaces':len(face),'newtonian_relative_residual':resn,'qumond_relative_residual':resq,'phantom_relative_difference':ph_error,'force_relative_difference':force_error,'source_relative_difference':source_error,'snapshots':snapshots,
  'limits':'Independent reconstruction of the declared native discrete operator and frozen-source publication. Continuum resolution, particle coupling and evolving MPI/restart remain open.'},indent=2,allow_nan=False)+'\n')
