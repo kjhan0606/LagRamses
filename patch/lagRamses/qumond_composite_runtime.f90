@@ -23,6 +23,7 @@ contains
        call composite_native_build(qh_composite_mesh,ierr)
        if(ierr/=0)call fail('native geometry')
     endif
+    if(nstep_coarse==0)call continuum_check()
     associate(mesh=>qh_composite_mesh)
     allocate(density(mesh%n),rhs(mesh%n),pn(mesh%n),pq(mesh%n),phantom(mesh%n),gradient(3,mesh%n))
     density=max(uold(mesh%cell,1),smallr)
@@ -161,6 +162,52 @@ contains
       enddo
     end subroutine
   end subroutine qumond_publish_fixed_source
+
+  subroutine continuum_check()
+    ! Smooth periodic continuum solution: phi_N=cos(k*x)/k, g_N=sin(k*x).
+    ! A constant transverse external field keeps nu smooth at internal zeros.
+    ! The internal QUMOND force is then (nu*sin(k*x),0,0), with zero mean.
+    ! Sources come from the analytic Laplacian, not composite_apply(exact).
+    real(dp),allocatable::exact(:),rhs(:),pn(:),pq(:),ph(:),grad(:,:),gx(:),fq(:)
+    real(dp)::k,resn,resq,en,egn,egq,external(3),removed
+    integer::status,ierr,itn,itq
+    character(len=8)::env
+    env=''
+    call get_environment_variable('RAR_QUMOND_COMPOSITE_CONTINUUM',env,status=status)
+    if(status/=0.or.trim(env)/='1')return
+    associate(mesh=>qh_composite_mesh)
+    allocate(exact(mesh%n),rhs(mesh%n),pn(mesh%n),pq(mesh%n),ph(mesh%n),grad(3,mesh%n),gx(mesh%n),fq(mesh%n))
+    k=2d0*acos(-1d0)/mesh%box
+    exact=cos(k*mesh%center(1,:))/k
+    rhs=-k*k*exact
+    removed=sum(rhs*mesh%volume)/sum(mesh%volume)
+    rhs=rhs-removed
+    exact=exact-sum(exact*mesh%volume)/sum(mesh%volume)
+    pn=0d0
+    call composite_solve(mesh,rhs,pn,1d-9,1200,40,itn,resn,ierr)
+    if(ierr/=0)call fail('continuum Newtonian solve')
+    en=sqrt(sum(mesh%volume*(pn-exact)**2)/sum(mesh%volume*exact**2))
+    gx=sin(k*mesh%center(1,:))
+    call composite_slopes(mesh,pn,grad,ierr)
+    if(ierr/=0)call fail('continuum Newtonian force')
+    grad(1,:)=grad(1,:)+gx
+    egn=sqrt(sum(mesh%volume*sum(grad**2,dim=1))/sum(mesh%volume*gx**2))
+    external=[0d0,1d0,0d0]
+    call composite_phantom(mesh,pn,1d0,4d0*acos(-1d0),external,ph,ierr)
+    if(ierr/=0)call fail('continuum phantom source')
+    rhs=rhs+4d0*acos(-1d0)*ph
+    rhs=rhs-sum(rhs*mesh%volume)/sum(mesh%volume)
+    pq=pn
+    call composite_solve(mesh,rhs,pq,1d-9,1200,40,itq,resq,ierr)
+    if(ierr/=0)call fail('continuum QUMOND solve')
+    fq=0.5d0*(1d0+sqrt(1d0+4d0/sqrt(1d0+gx**2)))*gx
+    call composite_slopes(mesh,pq,grad,ierr)
+    if(ierr/=0)call fail('continuum QUMOND force')
+    grad(1,:)=grad(1,:)+fq
+    egq=sqrt(sum(mesh%volume*sum(grad**2,dim=1))/sum(mesh%volume*fq**2))
+    write(*,*) 'RAR_QUMOND_CONTINUUM_V1',mesh%n,itn,itq,resn,resq,en,egn,egq,removed
+    end associate
+  end subroutine continuum_check
 
   subroutine qumond_restore_published()
     if(.not.allocated(saved_phi).or.published_epoch/=nstep_coarse)call fail('stale publication')
