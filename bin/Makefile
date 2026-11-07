@@ -839,3 +839,4 @@ endif
 
 qumond_composite_runtime.o: poisson_commons.o hydro_commons.o
 amr_step.jaehyun.o: qumond_composite_runtime.o
+adaptive_loop.jaehyun.o: poisson_commons.o

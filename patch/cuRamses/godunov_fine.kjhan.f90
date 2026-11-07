@@ -438,7 +438,7 @@ subroutine add_gravity_source_terms(ilevel)
 #ifdef DUST_DYNAMICS
   integer::phase_status
 #endif
-  real(dp)::d,u,v,w,e_kin,e_prim,d_old,fact
+  real(dp)::d,u,v,w,e_kin,e_prim,d_old,fact,kick_p(3),kick_e
 
   if(numbtot(1,ilevel)==0)return
   if(verbose)write(*,111)ilevel
@@ -447,7 +447,7 @@ subroutine add_gravity_source_terms(ilevel)
 ! do ind=1,twotondim
 !    iskip=ncoarse+(ind-1)*ngridmax
 !    do i=1,active(ilevel)%ngrid
-!$omp parallel do private(ind,i,ind_cell,d,u,v,w,e_kin,d_old,e_prim,fact) &
+!$omp parallel do private(ind,i,ind_cell,d,u,v,w,e_kin,d_old,e_prim,fact,kick_p,kick_e) &
 #ifdef DUST_DYNAMICS
 !$omp& private(phase_status) &
 #endif
@@ -463,6 +463,9 @@ subroutine add_gravity_source_terms(ilevel)
         endif
 #endif
         d=max(unew(ind_cell,1),smallr)
+        if(qh_kick_unit/=0.and.son(ind_cell)==0)then
+           kick_p=unew(ind_cell,2:4);kick_e=unew(ind_cell,5)
+        endif
         u=0.0; v=0.0; w=0.0
         if(ndim>0)u=unew(ind_cell,2)/d
         if(ndim>1)v=unew(ind_cell,3)/d
@@ -485,6 +488,10 @@ subroutine add_gravity_source_terms(ilevel)
         endif
         e_kin=0.5*d*(u**2+v**2+w**2)
         unew(ind_cell,ndim+2)=e_prim+e_kin
+        if(qh_kick_unit/=0.and.son(ind_cell)==0)then
+           call qumond_record_kick(0,ind_cell,ilevel,d_old,d,0.5d0*dtnew(ilevel),f(ind_cell,:), &
+                kick_p,kick_e,unew(ind_cell,2:4),unew(ind_cell,5))
+        endif
      end do
   end do
 

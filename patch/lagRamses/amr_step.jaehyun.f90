@@ -9,7 +9,8 @@ recursive subroutine amr_step(ilevel,icount)
   use pm_commons
   use hydro_commons
   use poisson_commons
-  use qumond_composite_runtime, only: qumond_publish_fixed_source,qumond_restore_published
+  use qumond_composite_runtime, only: qumond_publish_fixed_source,qumond_restore_published, &
+       qumond_evolution_begin,qumond_evolution_end
   use pbh_commons, only: use_pbh, pbh_mark_level
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_enrichment_config, only: use_channel_resolved_feedback
@@ -148,7 +149,7 @@ recursive subroutine amr_step(ilevel,icount)
   ! Make new refinements and update boundaries
   !-------------------------------------------
                                call timer('refine','start')
-  if(levelmin.lt.nlevelmax .and..not. static)then
+  if(levelmin.lt.nlevelmax .and..not.static.and..not.qh_evolve)then
      if(ilevel==levelmin.or.icount>1)then
         do i=ilevel,nlevelmax
            if(i>levelmin)then
@@ -264,7 +265,7 @@ recursive subroutine amr_step(ilevel,icount)
         call flush(6)
      end if
   end if
-  if(levelmin.lt.nlevelmax)then
+  if(levelmin.lt.nlevelmax.and..not.qh_evolve)then
      if(ilevel==levelmin)then
         if(lb_force_remap)then
            if(myid==1) write(*,'(A,I0)') &
@@ -340,7 +341,7 @@ recursive subroutine amr_step(ilevel,icount)
      if((nstep_coarse>0.and.mod(nstep_coarse,foutput)==0).or. &
           & aexp>=aout(iout).or.t>=tout(iout).or.output_now_all.EQV..true.)then
                                call timer('io','start')
-        if(.not.ok_defrag)then
+        if(.not.ok_defrag.and..not.qh_evolve)then
            call defrag
         endif
 
@@ -458,7 +459,7 @@ recursive subroutine amr_step(ilevel,icount)
      call qumond_history_enter(1,ilevel)
      if(.not.qh_publish)call save_phi_old(ilevel)
      if(timer_report_interval>0) call timer('rho','start')
-     call rho_fine(ilevel,icount)
+     if(.not.qh_evolve)call rho_fine(ilevel,icount)
      if(ilevel==levelmin) call diag_check_nan('post_rho')
   endif
 
@@ -493,7 +494,11 @@ recursive subroutine amr_step(ilevel,icount)
 
      if(qh_publish)then
         if(ilevel==levelmin)then
-           call qumond_publish_fixed_source()
+           if(qh_evolve)then
+              call qumond_evolution_begin()
+           else
+              call qumond_publish_fixed_source()
+           endif
         else
            call qumond_restore_published()
         endif
@@ -815,7 +820,7 @@ recursive subroutine amr_step(ilevel,icount)
   ! Compute new time step
   !----------------------
                                call timer('courant','start')
-  call newdt_fine(ilevel)
+  if(.not.qh_evolve)call newdt_fine(ilevel)
   if(ilevel>levelmin)then
      dtnew(ilevel)=MIN(dtnew(ilevel-1)/real(nsubcycle(ilevel-1)),dtnew(ilevel))
   end if
@@ -912,7 +917,7 @@ recursive subroutine amr_step(ilevel,icount)
   ! The legacy set_uold wrapper adds a full gravity source even when the
   ! static Godunov solver returns immediately. Frozen-source publication
   ! must bypass this whole update, not just the explicit half kicks.
-  if(hydro.and..not.qh_publish)then
+  if(hydro.and.(.not.qh_publish.or.qh_evolve))then
 
      ! Hyperbolic solver
                                call timer('hydro - godunov','start')
@@ -1129,7 +1134,8 @@ recursive subroutine amr_step(ilevel,icount)
      call make_virtual_fine_dp(psi_im(1),ilevel)
      if(timer_report_interval>0) call timer('flag','start')
   end if
-  if(.not.static) call flag_fine(ilevel,icount)
+  if(qh_evolve.and.ilevel==levelmin)call qumond_evolution_end()
+  if(.not.static.and..not.qh_evolve) call flag_fine(ilevel,icount)
 
   ! Accumulate exclusive rank x level work only on sparse sample steps.
   ! Count actual leaf cells, not all children of every AMR grid.

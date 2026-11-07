@@ -5,7 +5,8 @@ module poisson_commons
 
   ! Experimental fixed-hierarchy history path; the shared solver state remains
   ! authoritative unless explicitly enabled. This does not repair AMR source loss.
-  logical :: qh_checked=.false.,qh_enabled=.false.,qh_publish=.false.
+  logical :: qh_checked=.false.,qh_enabled=.false.,qh_publish=.false.,qh_evolve=.false.
+  integer :: qh_kick_unit=0
   integer :: qh_stage=0
   type(composite_mesh_t) :: qh_composite_mesh
   real(dp),allocatable :: qh_current(:,:),qh_previous(:,:),qh_rho_newton(:)
@@ -110,36 +111,65 @@ module poisson_commons
 
 contains
 
+  subroutine qumond_history_configure()
+    character(len=8)::env
+    integer::status
+    if(qh_checked)return
+    env=''
+    call get_environment_variable('RAR_QUMOND_STAGE_HISTORY',env,status=status)
+    qh_enabled=status==0.and.trim(env)=='1'
+    env=''
+    call get_environment_variable('RAR_QUMOND_COMPOSITE_PUBLISH',env,status=status)
+    qh_publish=status==0.and.trim(env)=='1'
+    env=''
+    call get_environment_variable('RAR_QUMOND_COMPOSITE_EVOLVE',env,status=status)
+    qh_evolve=status==0.and.trim(env)=='1'
+    if((qh_publish.and..not.qh_enabled).or.(qh_evolve.and..not.qh_publish))then
+       write(*,*) 'QUMOND composite publication/evolution requires stage history and publication'
+       call clean_stop
+    endif
+    qh_checked=.true.
+  end subroutine qumond_history_configure
+
+  subroutine qumond_record_kick(phase,cell,lev,source,receiver,halfdt,force,oldp,olde,newp,newe)
+    integer,intent(in)::phase,cell,lev
+    real(dp),intent(in)::source,receiver,halfdt,force(3),oldp(3),olde,newp(3),newe
+    if(qh_kick_unit==0)return
+!$omp critical(rar_gravity_kick_record)
+    write(qh_kick_unit,'(3(I0,1X),14(ES24.16,1X))') phase,cell,lev,source,receiver,halfdt, &
+         force,oldp,olde,newp,newe
+!$omp end critical(rar_gravity_kick_record)
+  end subroutine qumond_record_kick
+
   subroutine qumond_history_enter(stage,ilevel)
 #include "amr_index.h"
     integer,intent(in)::stage,ilevel
     character(len=8)::env
     integer::status,lev,g,grid,child,cell
     integer,allocatable::levels(:)
-    if(.not.qh_checked)then
-       env=''
-       call get_environment_variable('RAR_QUMOND_STAGE_HISTORY',env,status=status)
-       qh_enabled=status==0.and.trim(env)=='1'
-       env=''
-       call get_environment_variable('RAR_QUMOND_COMPOSITE_PUBLISH',env,status=status)
-       qh_publish=status==0.and.trim(env)=='1'
-       if(qh_publish.and..not.qh_enabled)then
-          write(*,*) 'QUMOND composite publication requires stage-history activation'
-          call clean_stop
-       endif
-       qh_checked=.true.
-    endif
+    call qumond_history_configure()
     if(.not.qh_enabled)return
     if(stage<1.or.stage>2)call clean_stop
 #ifdef HYDRO_CUDA
     write(*,*) 'QUMOND stage history: GPU build unsupported'
     call clean_stop
 #endif
-    if(ncpu/=1.or.cosmo.or.nrestart/=0.or.nremap/=0.or..not.static.or. &
+    if(ncpu/=1.or.cosmo.or.nrestart/=0.or.nremap/=0.or.(.not.static.and..not.qh_evolve).or. &
          (.not.use_mond.and..not.qh_publish).or.mond_type/=1.or.bimond_twin_matter.or. &
          nlevelmax/=levelmin+1.or.any(nsubcycle(levelmin:nlevelmax)/=1).or..not.use_fftw)then
        write(*,*) 'QUMOND stage history requires serial fixed two-level static CPU FFTW, no restart/remap/subcycling'
        call clean_stop
+    endif
+    if(qh_evolve)then
+       if(static.or.remap_thresh>0d0.or.lb_force_remap.or.use_sgs.or.pressure_fix.or. &
+            eeos_poly_coeff>0d0.or.simple_boundary)then
+          write(*,*) 'QUMOND evolving gas requires nonstatic fixed topology, no remap/SGS/pressure fix/eEOS/boundary'
+          call clean_stop
+       endif
+#ifdef SOLVERmhd
+       write(*,*) 'QUMOND evolving gas does not support MHD'
+       call clean_stop
+#endif
     endif
     if(qh_publish)then
        if(.not.hydro.or.pic.or.star.or.sink.or.cooling.or.neq_chem.or.rt.or.T2_star>0d0.or. &

@@ -133,6 +133,7 @@ subroutine adaptive_loop
   end if
 #endif
 
+  call qumond_history_configure()
   if(myid==1)write(*,*)'Starting time integration'
 
   do ! Main time loop
@@ -153,7 +154,8 @@ subroutine adaptive_loop
 #endif
 
      ! Make new refinements
-     if(levelmin.lt.nlevelmax.and.(.not.static.or.(nstep_coarse_old.eq.nstep_coarse.and.restart_remap)))then
+     if(levelmin.lt.nlevelmax.and..not.qh_evolve.and. &
+          & (.not.static.or.(nstep_coarse_old.eq.nstep_coarse.and.restart_remap)))then
         call refine_coarse
         do ilevel=1,levelmin
            call build_comm(ilevel)
@@ -228,10 +230,12 @@ subroutine adaptive_loop
         end do
         
         ! Build refinement map
+        if(.not.qh_evolve)then
         do ilevel=levelmin-1,1,-1
            call flag_fine(ilevel,2)
         end do
         call flag_coarse
+        endif
 !		if(lightcone) then
 !			call output_cone_hydro(1)
 !			call output_cone_part(1)

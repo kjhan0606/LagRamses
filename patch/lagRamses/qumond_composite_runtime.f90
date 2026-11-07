@@ -3,13 +3,18 @@
 module qumond_composite_runtime
   use amr_commons
   use poisson_commons
-  use hydro_commons, only: uold,smallr
+  use hydro_commons, only: uold,smallr,nvar
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #include "amr_index.h"
   implicit none
   private
   public :: qumond_publish_fixed_source,qumond_restore_published
+  public :: qumond_evolution_begin,qumond_evolution_end
   real(dp),allocatable :: saved_phi(:),saved_force(:,:),saved_rho(:)
+  real(dp),allocatable :: saved_gas(:)
+  real(dp) :: saved_time=-huge(1d0),physical_rho_max=0d0,evolution_start=0d0,evolution_dt=0d0
+  logical :: evolution_open=.false.
+  integer :: export_count=0,evolution_epoch=-1
   integer :: published_epoch=-1
 contains
   subroutine qumond_publish_fixed_source()
@@ -18,6 +23,7 @@ contains
     real(dp)::scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2,res_n,res_q,balance
     integer::i,j,k,lev,ids(nvector),ierr,it_n,it_q,cell,export_status,unit
     character(len=8)::export_env
+    character(len=80)::leaf_file
     if(.not.qh_publish)call clean_stop
     if(qh_composite_mesh%n==0)then
        call composite_native_build(qh_composite_mesh,ierr)
@@ -25,6 +31,19 @@ contains
     endif
     if(nstep_coarse==0)call continuum_check()
     associate(mesh=>qh_composite_mesh)
+    if(qh_evolve.and.saved_time==t.and.allocated(saved_gas))then
+       if(any(uold(mesh%cell,1)/=saved_gas))call fail('completed endpoint gas source changed')
+       published_epoch=nstep_coarse
+       qh_epoch(:,levelmin:nlevelmax)=nstep_coarse
+       call qumond_restore_published()
+       return
+    endif
+    if(qh_evolve)then
+       if(.not.all(ieee_is_finite(uold(mesh%cell,:))).or.any(uold(mesh%cell,1)<smallr)) &
+            call fail('invalid raw evolving gas before density floor')
+       if(any(uold(mesh%cell,5)-0.5d0*sum(uold(mesh%cell,2:4)**2,dim=2)/uold(mesh%cell,1)<=0d0)) &
+            call fail('nonpositive raw evolving gas internal energy')
+    endif
     allocate(density(mesh%n),rhs(mesh%n),pn(mesh%n),pq(mesh%n),phantom(mesh%n),gradient(3,mesh%n))
     density=max(uold(mesh%cell,1),smallr)
     if(gravity_type<0)then
@@ -41,6 +60,7 @@ contains
        enddo
     endif
     if(.not.all(ieee_is_finite(density)))call fail('source is nonfinite')
+    physical_rho_max=maxval(abs(density))
     fourpi=4d0*acos(-1d0)
     mean_density=sum(density*mesh%volume)/sum(mesh%volume)
     rhs=fourpi*(density-mean_density)
@@ -128,21 +148,30 @@ contains
        enddo
     enddo
     published_epoch=nstep_coarse
+    saved_time=t
+    if(qh_evolve)then
+       if(.not.allocated(saved_gas))allocate(saved_gas(mesh%n))
+       saved_gas=uold(mesh%cell,1)
+    endif
     call qumond_restore_published()
     write(*,*) 'RAR_COMPOSITE_MODEL_V1',use_mond,gravity_type
     write(*,*) 'RAR_QUMOND_PUBLICATION_V1',nstep_coarse,t,mesh%n,it_n,it_q,res_n,res_q,balance, &
          sum(saved_phi(mesh%cell)*mesh%volume),sqrt(sum(mesh%volume*sum(gradient**2,dim=1)))
     export_env=''
     call get_environment_variable('RAR_QUMOND_COMPOSITE_EXPORT',export_env,status=export_status)
-    if(export_status==0.and.trim(export_env)=='1'.and.nstep_coarse==0)then
-       open(newunit=unit,file='composite_leaf_state.tsv',status='new',action='write',iostat=ierr)
+    if(export_status==0.and.trim(export_env)=='1'.and.(nstep_coarse==0.or.qh_evolve))then
+       leaf_file='composite_leaf_state.tsv'
+       if(qh_evolve)write(leaf_file,'("composite_epoch_",I5.5,"_leaf.tsv")')export_count
+       open(newunit=unit,file=trim(leaf_file),status='new',action='write',iostat=ierr)
        if(ierr/=0)call fail('leaf export exists or cannot be created')
        write(unit,'(A,5(1X,ES24.16))') '# constants',fourpi,a0,external
+       if(qh_evolve)write(unit,'(A,1X,I0,1X,ES24.16)') '# epoch',nstep_coarse,t
        do i=1,mesh%n
           write(unit,'(2(I0,1X),11(ES24.16,1X))') mesh%cell(i),mesh%level(i),mesh%center(:,i), &
                mesh%width(i),density(i),pn(i),pq(i),phantom(i),-gradient(:,i)
        enddo
        close(unit)
+       if(.not.qh_evolve.or.export_count==0)then
        open(newunit=unit,file='composite_faces.tsv',status='new',action='write',iostat=ierr)
        if(ierr/=0)call fail('face export exists or cannot be created')
        do i=1,mesh%nface
@@ -150,6 +179,8 @@ contains
                mesh%area(i),mesh%distance(i)
        enddo
        close(unit)
+       endif
+       export_count=export_count+1
     endif
     end associate
   contains
@@ -222,6 +253,102 @@ contains
     write(*,*) 'RAR_QUMOND_CONTINUUM_V1',mesh%n,itn,itq,resn,resq,en,egn,egq,removed
     end associate
   end subroutine continuum_check
+
+  subroutine qumond_evolution_begin()
+    real(dp)::dt,amax,old_dt
+    integer::lev,status,ios
+    character(len=80)::env,filename
+    if(.not.qh_evolve.or.evolution_open)call fail('invalid evolution begin phase')
+    call restrict_gas_and_ghosts()
+    call qumond_publish_fixed_source()
+    call refresh_gas_and_gravity_ghosts()
+    old_dt=dtnew(levelmin)
+    if(any(dtnew(levelmin:nlevelmax)/=old_dt))call fail('previous hierarchy timestep differs')
+    rho_max(levelmin:nlevelmax)=max(physical_rho_max,tiny(1d0))
+    do lev=levelmin,nlevelmax
+       call newdt_fine(lev)
+    enddo
+    dt=minval(dtnew(levelmin:nlevelmax))
+    amax=maxval(sqrt(sum(saved_force(qh_composite_mesh%cell,:)**2,dim=2)))
+    if(amax>0d0)dt=min(dt,courant_factor*sqrt(minval(qh_composite_mesh%width)/amax))
+    env=''
+    call get_environment_variable('RAR_QUMOND_EVOLVE_DT',env,status=status)
+    if(status==0.and.len_trim(env)>0)then
+       read(env,*,iostat=ios)old_dt
+       if(ios/=0)call fail('invalid evolution timestep cap')
+       if(.not.ieee_is_finite(old_dt).or.old_dt<=0d0)call fail('invalid evolution timestep cap')
+       dt=min(dt,old_dt)
+    endif
+    if(.not.ieee_is_finite(dt).or.dt<=0d0.or.t+dt<=t)call fail('invalid common evolution timestep')
+    dtnew(levelmin:nlevelmax)=dt
+    evolution_start=t;evolution_dt=dt;evolution_epoch=nstep_coarse;evolution_open=.true.
+    env=''
+    call get_environment_variable('RAR_QUMOND_GRAVITY_KICKS',env,status=status)
+    if(status==0.and.trim(env)=='1')then
+       write(filename,'("gravity_kicks_",I5.5,".tsv")')nstep_coarse
+       open(newunit=qh_kick_unit,file=trim(filename),status='new',action='write',iostat=ios)
+       if(ios/=0)call fail('gravity kick diagnostic exists or cannot be created')
+       write(qh_kick_unit,'(A)') '# phase cell level rho_source rho_receiver halfdt force[3] oldp[3] oldE newp[3] newE'
+    endif
+    write(*,*) 'RAR_QUMOND_EVOLVE_BEGIN_V1',nstep_coarse,t,dt,saved_time,qh_composite_mesh%n
+  end subroutine qumond_evolution_begin
+
+  subroutine qumond_evolution_end()
+    integer::i,j,n,ids(nvector),lev
+    real(dp)::oldp(nvector,3),olde(nvector),clock_error
+    if(.not.evolution_open.or.evolution_epoch/=nstep_coarse)call fail('invalid evolution end phase')
+    clock_error=abs(t-(evolution_start+evolution_dt))
+    if(clock_error>16d0*spacing(max(abs(t),abs(evolution_start),evolution_dt))) &
+         call fail('hierarchy clock did not advance exactly once')
+    if(any(dtnew(levelmin:nlevelmax)/=evolution_dt))call fail('recursive hierarchy timestep changed')
+    call restrict_gas_and_ghosts()
+    call qumond_history_enter(1,levelmin)
+    call qumond_publish_fixed_source()
+    associate(mesh=>qh_composite_mesh)
+    do i=1,mesh%n,nvector
+       n=min(nvector,mesh%n-i+1);ids=0;ids(1:n)=mesh%cell(i:i+n-1)
+       oldp(1:n,:)=uold(ids(1:n),2:4);olde(1:n)=uold(ids(1:n),5)
+       call synchydrofine1(ids,n,0.5d0*evolution_dt)
+       if(qh_kick_unit/=0)then
+          do j=1,n
+             lev=mesh%level(i+j-1)
+             call qumond_record_kick(1,ids(j),lev,uold(ids(j),1),uold(ids(j),1), &
+                  0.5d0*evolution_dt,f(ids(j),:),oldp(j,:),olde(j),uold(ids(j),2:4),uold(ids(j),5))
+          enddo
+       endif
+    enddo
+    if(qh_kick_unit/=0)then
+       close(qh_kick_unit);qh_kick_unit=0
+    endif
+    if(.not.all(ieee_is_finite(uold(mesh%cell,:))))call fail('nonfinite gas after endpoint kick')
+    write(*,*) 'RAR_QUMOND_EVOLVE_END_V1',nstep_coarse,evolution_start,t,evolution_dt, &
+         sum(uold(mesh%cell,1)*mesh%volume)
+    end associate
+    call restrict_gas_and_ghosts()
+    evolution_open=.false.
+  end subroutine qumond_evolution_end
+
+  subroutine restrict_gas_and_ghosts()
+    integer::lev
+    do lev=nlevelmax-1,1,-1
+       call upload_fine(lev)
+    enddo
+    call refresh_gas_and_gravity_ghosts()
+  end subroutine restrict_gas_and_ghosts
+
+  subroutine refresh_gas_and_gravity_ghosts()
+    integer::lev,v,d
+    do lev=1,nlevelmax
+       if(numbtot(1,lev)==0)cycle
+       do v=1,nvar
+          call make_virtual_fine_dp(uold(1,v),lev)
+       enddo
+       call make_virtual_fine_dp(phi(1),lev)
+       do d=1,3
+          call make_virtual_fine_dp(f(1,d),lev)
+       enddo
+    enddo
+  end subroutine refresh_gas_and_gravity_ghosts
 
   subroutine qumond_restore_published()
     if(.not.allocated(saved_phi).or.published_epoch/=nstep_coarse)call fail('stale publication')
