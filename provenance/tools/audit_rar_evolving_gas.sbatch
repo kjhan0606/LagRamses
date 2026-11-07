@@ -17,7 +17,11 @@ mkdir "$out"
 cp "${BASH_SOURCE[0]}" "$out/job.sbatch"
 cp /home/kjhan/BackUP/rar/scripts/audit_rar_evolving_gas.py "$out/audit.py"
 cp /home/kjhan/BackUP/rar/scripts/verify_rar_composite_publication.py "$out/verify.py"
+cp /home/kjhan/BackUP/rar/scripts/rar_evolving_thermal.py "$out/rar_evolving_thermal.py"
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
-/home/kjhan/miniconda3/bin/python3 "$out/audit.py" "$run" "$out" "$out/verify.py"
-(cd "$out" && sha256sum result.json verify_*.json audit.py verify.py job.sbatch >artifacts.sha256 && sha256sum -c artifacts.sha256)
+thermal_args=()
+if [ "${RAR_EVOLVE_COOLING:-0}" = 1 ];then thermal_args+=(--cooling);fi
+if [ "${RAR_EVOLVE_THERMAL_ACCURACY:-0}" = 1 ];then thermal_args+=(--thermal-accuracy --thermal-energy-tolerance 0.001);fi
+/home/kjhan/miniconda3/bin/python3 "$out/audit.py" "$run" "$out" "$out/verify.py" "${thermal_args[@]}"
+(cd "$out" && sha256sum result.json verify_*.json audit.py verify.py rar_evolving_thermal.py job.sbatch >artifacts.sha256 && sha256sum -c artifacts.sha256)
 printf '%s\n' 'EVOLVING_GAS_SOURCE_CLOCK_MASS_AND_KICK_BUDGET_CHECKED_NOT_PRODUCTION' > "$out/COMPLETE"

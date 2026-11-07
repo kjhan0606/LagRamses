@@ -16,10 +16,13 @@ out=$base/runs/rar_evolving_gas_${SLURM_JOB_ID:?}
 test -f "$build/COMPLETE"
 (cd "$build/source/bin" && sha256sum -c "$build/executable.sha256")
 free_bytes=$(df -B1 "$base" | awk 'END {print $4}')
-test "$free_bytes" -gt 1610612736
+if [ "${RAR_EVOLVE_COOLING:-0}" = 1 ];then test "$free_bytes" -gt 2147483648;else test "$free_bytes" -gt 1610612736;fi
 mkdir "$out"
 cp "${BASH_SOURCE[0]}" "$out/job.sbatch"
 printf '%s\n' 'purpose=bounded evolving gas, native AMR common-time gravity; no particles/subgrid/dust/RT' 'cases=newtonian,qumond,qumond_half; steps=6,6,12; dt_caps=0.0002,0.0002,0.0001; expected_common_endpoint=0.0012; noutput=1;aout=1.1;tout=1e100;foutput=3,3,6;fbackup=1e9;expected_full_dumps_per_case=2;upper_dump_bytes=16777216;expected_total_dump_bytes=100663296;reserve_including_exports_and_kick_records=536870912' "free_bytes_before=$free_bytes" > "$out/output_policy.txt"
+if [ "${RAR_EVOLVE_COOLING:-0}" = 1 ];then
+ printf '%s\n' 'thermal_profile_overrides=5 cases plus optional precision replay; newtonian/qumond/qumond_half cooling on, qumond_off cooling off, qumond_heating cool/heating on at lower initial pressure; at most 12 snapshots; upper_total_dump_bytes=201326592; reserve_all_outputs_bytes=1073741824' 'cooling=original; UV=code haardt_madau flag/default Courty model at fixed aexp1/z0; metal=true initial Z0.002; shielding=false; Jeans/eEOS/isothermal/delayed/neq/RT/dust off; T2max=1e10; source table T2_min_fix=1e-2' "cooling_varmax=${RAR_EVOLVE_COOLING_VARMAX:-4}; precision_replay=${RAR_EVOLVE_THERMAL_ACCURACY:-0}" >> "$out/output_policy.txt"
+fi
 set +u
 source "$(cat "$build/environment_setup_path.txt")" > "$out/compiler_environment.log" 2>&1
 set -u
@@ -27,13 +30,21 @@ export OMP_NUM_THREADS=1 OMP_DYNAMIC=FALSE I_MPI_FABRICS=shm I_MPI_PMI_LIBRARY=/
 export LD_LIBRARY_PATH=/home/kjhan/local/hdf5/lib:/home/kjhan/local/lib:${LD_LIBRARY_PATH:-}
 export RAR_QUMOND_STAGE_HISTORY=1 RAR_QUMOND_COMPOSITE_PUBLISH=1 RAR_QUMOND_COMPOSITE_EVOLVE=1 RAR_QUMOND_COMPOSITE_EXPORT=1 RAR_QUMOND_GRAVITY_KICKS=1
 unset RAR_QUMOND_COMPOSITE_OPERATOR RAR_QUMOND_COMPOSITE_SOLVER RAR_QUMOND_COMPOSITE_CONTINUUM
-for mode in newtonian qumond qumond_half;do
+modes='newtonian qumond qumond_half'
+if [ "${RAR_EVOLVE_COOLING:-0}" = 1 ];then
+ modes="$modes qumond_off qumond_heating"
+ if [ "${RAR_EVOLVE_THERMAL_ACCURACY:-0}" = 1 ];then modes="$modes qumond_accuracy";fi
+ export RAR_COOLING_COMMIT_LEDGER=1 RAR_GLOBAL_INVENTORY=1
+else
+ unset RAR_COOLING_COMMIT_LEDGER RAR_GLOBAL_INVENTORY
+fi
+for mode in $modes;do
  d=$out/$mode
  mkdir "$d"
  cp "$build/source/bin/ramses_final3d" "$d/ramses_final3d"
  cp "$build/source_commit.txt" "$d/source_commit.txt"
  python3 - "$project/configs/qumond_amr_gate/qumond.nml" "$d/effective.nml" "$mode" <<'PY'
-import re,sys
+import os,re,sys
 from pathlib import Path
 s=Path(sys.argv[1]).read_text();mode=sys.argv[3]
 changes={'static':'.false.','use_mond':'.false.' if mode=='newtonian' else '.true.','levelmin':'4','levelmax':'5','void_refine_min_level':'5','r_refine':'0.25','ngridtot':'30000','nstepmax':'12' if mode=='qumond_half' else '6','nsubcycle':'1,1','use_fftw':'.true.','gpu_fft':'.false.','gravity_type':'0','d_region':'1.0','p_region':'1.0','courant_factor':'0.1','foutput':'6' if mode=='qumond_half' else '3'}
@@ -41,6 +52,16 @@ for key,value in changes.items():
  s,n=re.subn(r'(?im)^\s*'+key+r'\s*=.*$',f' {key}={value}',s);assert n==1
 s=s.replace('&RUN_PARAMS','&RUN_PARAMS\n remap_thresh=0.0')
 s=s.replace('&INIT_PARAMS',"&INIT_PARAMS\n hydro_initial_condition='rar_periodic_wave'\n u_region=0.2\n v_region=0.1\n w_region=0.05")
+if os.environ.get('RAR_EVOLVE_COOLING','0')=='1':
+ thermal='.false.' if mode=='qumond_off' else '.true.'
+ s=s.replace('&PHYSICS_PARAMS',f"&PHYSICS_PARAMS\n cooling={thermal}\n metal=.true.\n haardt_madau=.true.\n J21=0.0\n z_ave=0.1\n n_star=0.1\n T2_star=0.0\n jeans_ncells=0.0\n isothermal=.false.\n delayed_cooling=.false.\n neq_chem=.false.\n self_shielding=.false.\n cooling_method='original'\n T2max=1.0d10")
+ s=s.replace('&INIT_PARAMS','&INIT_PARAMS\n var_region=0.002')
+ if 'RAR_EVOLVE_COOLING_VARMAX' in os.environ:
+  accuracy=float(os.environ['RAR_EVOLVE_COOLING_VARMAX']);assert accuracy>=4
+  if mode=='qumond_accuracy':accuracy*=2
+  s=s.replace('&PHYSICS_PARAMS',f'&PHYSICS_PARAMS\n cooling_varmax={accuracy:.17g}')
+ if mode=='qumond_heating':
+  s,n=re.subn(r'(?im)^\s*p_region\s*=.*$',' p_region=0.001',s);assert n==1
 for key,value in {'cosmo':'.false.','pic':'.false.','hydro':'.true.','poisson':'.true.','sink':'.false.','noutput':'1','aout':'1.1','tout':'1.0d100','fbackup':'1000000000','nremap':'0','remap_thresh':'0.0'}.items():
  vals=re.findall(r'(?im)^\s*'+key+r'\s*=\s*([^!\n]+)',s);assert len(vals)==1 and vals[0].strip().lower()==value
 Path(sys.argv[2]).write_text(s)
