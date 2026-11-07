@@ -277,3 +277,76 @@ subroutine diag_check_nan(label)
           ' d<=0_cells=', dzero_loc
   end if
 end subroutine diag_check_nan
+
+! Coarse-stage physical inventory. Cloud masses are diagnostic only: the
+! replicated sink catalogue supplies BH mass once globally, never per cloud.
+subroutine diag_rar_global_inventory(label)
+  use amr_commons
+  use hydro_commons
+  use pm_commons
+#include "amr_index.h"
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  character(len=*),intent(in)::label
+  character(len=8)::enabled
+  integer::status,lev,g,grid,child,cell,part,j,info
+  real(dp)::local(nvar+12),total(nvar+12),volume
+  logical,allocatable::seen(:)
+  enabled=''
+  call get_environment_variable('RAR_GLOBAL_INVENTORY',enabled,status=status)
+  if(status/=0.or.trim(enabled)/='1')return
+  if(.not.hydro)return
+  local=0d0
+  allocate(seen(size(idp)));seen=.false.
+  do lev=levelmin,nlevelmax
+     volume=(boxlen/dble(icoarse_max-icoarse_min+1)*0.5d0**lev)**ndim
+     do g=1,active(lev)%ngrid
+        grid=active(lev)%igrid(g)
+        do child=1,twotondim
+           cell=ICELL_OF(grid,child)
+           if(son(cell)/=0)cycle
+           local(1:nvar)=local(1:nvar)+uold(cell,1:nvar)*volume
+           local(nvar+1)=local(nvar+1)+1d0
+        enddo
+        part=headp(grid)
+        do j=1,numbp(grid)
+           if(part<1.or.part>size(idp))then
+              local(nvar+10)=local(nvar+10)+1d0
+              exit
+           endif
+           if(seen(part))then
+              local(nvar+9)=local(nvar+9)+1d0
+           else
+              seen(part)=.true.
+              select case(ptypep(part))
+              case(PTYPE_DM)
+                 local(nvar+2)=local(nvar+2)+1d0
+                 local(nvar+3)=local(nvar+3)+mp(part)
+              case(PTYPE_STAR)
+                 local(nvar+4)=local(nvar+4)+1d0
+                 local(nvar+5)=local(nvar+5)+mp(part)
+              case(PTYPE_SINK)
+                 local(nvar+6)=local(nvar+6)+1d0
+                 local(nvar+7)=local(nvar+7)+mp(part)
+              case default
+                 local(nvar+11)=local(nvar+11)+mp(part)
+              end select
+           endif
+           part=nextp(part)
+        enddo
+     enddo
+  enddo
+  deallocate(seen)
+  if(myid==1.and.nsink>0)then
+     local(nvar+8)=sum(msink(1:nsink))
+     local(nvar+12)=real(nsink,dp)
+  endif
+#ifndef WITHOUTMPI
+  call MPI_ALLREDUCE(local,total,nvar+12,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+#else
+  total=local
+#endif
+  if(myid==1)write(*,*) 'RAR_GLOBAL_INVENTORY_V1',trim(label),nstep_coarse,aexp,nvar,total
+end subroutine diag_rar_global_inventory

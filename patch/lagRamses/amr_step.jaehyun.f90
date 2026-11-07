@@ -419,7 +419,9 @@ recursive subroutine amr_step(ilevel,icount)
 
      call timer('sinks','start')
      call system_clock(sk_t1)
+     if(sink)call diag_rar_global_inventory('before_agn')
      if(sink .and. sink_AGN)call AGN_feedback
+     if(sink)call diag_rar_global_inventory('after_agn')
      if(sink .and. sink_AGN)call diag_check_eint('AGN_fb',0)
      call diag_check_nan('post_agnfb')
      call system_clock(sk_t2)
