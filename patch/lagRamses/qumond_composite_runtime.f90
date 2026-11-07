@@ -16,7 +16,8 @@ contains
     real(dp),allocatable :: density(:),rhs(:),pn(:),pq(:),phantom(:),gradient(:,:),draft_n(:)
     real(dp)::xx(nvector,3),dd(nvector),mean_density,mean_source,fourpi,a0,external(3)
     real(dp)::scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2,res_n,res_q,balance
-    integer::i,j,k,lev,ids(nvector),ierr,it_n,it_q,cell
+    integer::i,j,k,lev,ids(nvector),ierr,it_n,it_q,cell,export_status,unit
+    character(len=8)::export_env
     if(.not.qh_publish)call clean_stop
     if(qh_composite_mesh%n==0)then
        call composite_native_build(qh_composite_mesh,ierr)
@@ -116,6 +117,25 @@ contains
     call qumond_restore_published()
     write(*,*) 'RAR_QUMOND_PUBLICATION_V1',nstep_coarse,t,mesh%n,it_n,it_q,res_n,res_q,balance, &
          sum(saved_phi(mesh%cell)*mesh%volume),sqrt(sum(mesh%volume*sum(gradient**2,dim=1)))
+    export_env=''
+    call get_environment_variable('RAR_QUMOND_COMPOSITE_EXPORT',export_env,status=export_status)
+    if(export_status==0.and.trim(export_env)=='1'.and.nstep_coarse==0)then
+       open(newunit=unit,file='composite_leaf_state.tsv',status='new',action='write',iostat=ierr)
+       if(ierr/=0)call fail('leaf export exists or cannot be created')
+       write(unit,'(A,5(1X,ES24.16))') '# constants',fourpi,a0,external
+       do i=1,mesh%n
+          write(unit,'(2(I0,1X),11(ES24.16,1X))') mesh%cell(i),mesh%level(i),mesh%center(:,i), &
+               mesh%width(i),density(i),pn(i),pq(i),phantom(i),-gradient(:,i)
+       enddo
+       close(unit)
+       open(newunit=unit,file='composite_faces.tsv',status='new',action='write',iostat=ierr)
+       if(ierr/=0)call fail('face export exists or cannot be created')
+       do i=1,mesh%nface
+          write(unit,'(3(I0,1X),2(ES24.16,1X))') mesh%left(i),mesh%right(i),mesh%axis(i), &
+               mesh%area(i),mesh%distance(i)
+       enddo
+       close(unit)
+    endif
     end associate
   contains
     subroutine add_analytic(n,dx)
