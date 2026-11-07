@@ -91,3 +91,5 @@ visually inspected. Final PDF: figures/rar_native_disc_rotation_rar.pdf.
 The original audit and figure remain preserved. Runners, source oracle,
 analysis and independent rendering script are recorded under provenance/tools.
 The manuscript checkout already had unrelated local changes and was not edited.
+
+The tracked CSV normalizes line endings to LF; its parsed fields/rows were checked identical to the original CRLF audit artifact. Original numerical artifacts and hashes are preserved. Future CSV exports explicitly use LF.

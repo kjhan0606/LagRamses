@@ -69,7 +69,7 @@ for mode in modes:
  columns['fractional_force_resolution_change_'+mode]=changes[mode]
  columns['azimuth_relative_std_'+mode]=hc[mode]['azimuth_std']/hc[mode]['mean']
 with (a.out/'rotation_rar.csv').open('w') as f:
- writer=csv.writer(f);writer.writerow(columns);writer.writerows(zip(*columns.values()))
+ writer=csv.writer(f,lineterminator="\n");writer.writerow(columns);writer.writerows(zip(*columns.values()))
 result={'schema':'rar_native_disc_comparison_v1','low':metal,'high':metah,'radius_range_kpc':[float(columns['radius_kpc'][0]),float(columns['radius_kpc'][-1])],
  'a0_cgs':a0h*unit_l/unit_t**2,'force_resolution_changes':{mode:{'relative_rms':float(np.sqrt(np.mean(v*v))),'relative_max_abs':float(np.max(abs(v)))} for mode,v in changes.items()},
  'qumond_vs_algebraic_simple_nu_dex':{'mean':float(delta.mean()),'rms':float(np.sqrt(np.mean(delta*delta))),'max_abs':float(np.max(abs(delta)))},
