@@ -1,6 +1,6 @@
 subroutine interpol_phi(ind_cell,phi_int,ncell,ilevel,icount)
   use amr_commons
-  use poisson_commons, only:phi,phi_old
+  use poisson_commons, only:phi,phi_old,qumond_history_value
   implicit none
   integer::ncell,ilevel,icount
   integer ,dimension(1:nvector)::ind_cell
@@ -72,10 +72,10 @@ subroutine interpol_phi(ind_cell,phi_int,ncell,ilevel,icount)
         do i=1,ncell
            indice=nbors_father_cells(i,ind_father)
            if (indice==0) then 
-              add=coeff*(phi(ind_cell(i))+(phi(ind_cell(i))-phi_old(ind_cell(i)))*tfrac)
+              add=coeff*qumond_history_value(ind_cell(i),ilevel-1,tfrac)
               ! add=coeff*(-3d0/8d0*dx**2*boxlen*rho(ind_cell(i))+phi(ind_cell(i)))
            else
-              add=coeff*(phi(indice)+(phi(indice)-phi_old(indice))*tfrac)
+              add=coeff*qumond_history_value(indice,ilevel-1,tfrac)
               ! add=coeff*(-3d0/8d0*dx**2*boxlen*rho(indice)+phi(indice)) 
            endif
            phi_int(i,ind)=phi_int(i,ind)+add

@@ -454,6 +454,7 @@ recursive subroutine amr_step(ilevel,icount)
   if(poisson)then
                                call timer('poisson','start')
      !save old potential for time-extrapolation at level boundaries
+     call qumond_history_enter(1,ilevel)
      call save_phi_old(ilevel)
      if(timer_report_interval>0) call timer('rho','start')
      call rho_fine(ilevel,icount)
@@ -613,6 +614,7 @@ recursive subroutine amr_step(ilevel,icount)
 !    call MPI_BARRIER(MPI_COMM_WORLD,mpi_err)
      if(bimond_twin_matter)bimond_epot_before=epot_tot
      call force_fine(ilevel,icount)
+     call qumond_history_capture(1,ilevel)
      if(bimond_twin_matter)then
         bimond_phi_difference=phi
         bimond_f_difference=f
@@ -639,6 +641,7 @@ recursive subroutine amr_step(ilevel,icount)
            if(bimond_twin_matter)call bimond_prepare_ordinary(ilevel)
            call make_virtual_fine_dp(rho(1),ilevel)
 
+           call qumond_history_enter(2,ilevel)
            if(ilevel>levelmin)then
               if(ilevel .ge. cg_levelmin) then
                  call phi_fine_cg(ilevel,icount)
@@ -650,6 +653,7 @@ recursive subroutine amr_step(ilevel,icount)
            end if
 
            call force_fine(ilevel,icount)
+           call qumond_history_capture(2,ilevel)
            if(bimond_twin_matter)call bimond_finish_fields(ilevel)
 
         else if(mond_type == 2) then

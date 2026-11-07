@@ -2,6 +2,17 @@ module poisson_commons
   use amr_commons
   use poisson_parameters
 
+  ! Experimental fixed-hierarchy history path; the shared solver state remains
+  ! authoritative unless explicitly enabled. This does not repair AMR source loss.
+  logical :: qh_checked=.false.,qh_enabled=.false.
+  integer :: qh_stage=0
+  real(dp),allocatable :: qh_current(:,:),qh_previous(:,:)
+  real(dp),allocatable :: qh_time(:,:),qh_old_time(:,:)
+  integer,allocatable :: qh_epoch(:,:)
+  logical,allocatable :: qh_valid(:,:)
+  integer,allocatable :: qh_cell_level(:),qh_grid_level(:),qh_son(:)
+  real(dp),allocatable :: qh_xg(:,:)
+
   real(dp),allocatable,dimension(:)  ::phi,phi_old       ! Potential
   real(dp),allocatable,dimension(:)  ::rho               ! Density
   real(dp),allocatable,dimension(:)  ::rho_star          ! Star density
@@ -96,6 +107,147 @@ module poisson_commons
   real(dp),dimension(1:ndim+1)::multipole
 
 contains
+
+  subroutine qumond_history_enter(stage,ilevel)
+#include "amr_index.h"
+    integer,intent(in)::stage,ilevel
+    character(len=8)::env
+    integer::status,lev,g,grid,child,cell
+    integer,allocatable::levels(:)
+    if(.not.qh_checked)then
+       env=''
+       call get_environment_variable('RAR_QUMOND_STAGE_HISTORY',env,status=status)
+       qh_enabled=status==0.and.trim(env)=='1'
+       qh_checked=.true.
+    endif
+    if(.not.qh_enabled)return
+    if(stage<1.or.stage>2)call clean_stop
+#ifdef HYDRO_CUDA
+    write(*,*) 'QUMOND stage history: GPU build unsupported'
+    call clean_stop
+#endif
+    if(ncpu/=1.or.cosmo.or.nrestart/=0.or.nremap/=0.or..not.static.or. &
+         .not.use_mond.or.mond_type/=1.or.bimond_twin_matter.or. &
+         nlevelmax/=levelmin+1.or.any(nsubcycle(levelmin:nlevelmax)/=1).or..not.use_fftw)then
+       write(*,*) 'QUMOND stage history requires serial fixed two-level static CPU FFTW, no restart/remap/subcycling'
+       call clean_stop
+    endif
+    allocate(levels(size(xg,1)));levels=0
+    do lev=levelmin,nlevelmax
+       do g=1,active(lev)%ngrid
+          levels(active(lev)%igrid(g))=lev
+       enddo
+    enddo
+    if(.not.allocated(qh_current))then
+       allocate(qh_current(size(phi),2),qh_previous(size(phi),2))
+       allocate(qh_time(2,nlevelmax),qh_old_time(2,nlevelmax),qh_valid(2,nlevelmax),qh_epoch(2,nlevelmax))
+       allocate(qh_cell_level(size(phi)),qh_grid_level(size(xg,1)),qh_son(size(son)),qh_xg(size(xg,1),ndim))
+       qh_current=0d0;qh_previous=0d0;qh_time=0d0;qh_old_time=0d0;qh_valid=.false.
+       qh_epoch=-1
+       qh_grid_level=levels;qh_son=son;qh_xg=0d0;qh_cell_level=0
+       do lev=levelmin,nlevelmax
+          do g=1,active(lev)%ngrid
+             grid=active(lev)%igrid(g)
+             qh_xg(grid,:)=xg(grid,:)
+             do child=1,twotondim
+                cell=ICELL_OF(grid,child)
+                qh_cell_level(cell)=lev
+             enddo
+          enddo
+       enddo
+    else
+       if(size(phi)/=size(qh_current,1).or.size(xg,1)/=size(qh_grid_level))then
+          write(*,*) 'QUMOND stage history: allocation changed; reconstruction not implemented'
+          call clean_stop
+       endif
+       if(any(levels/=qh_grid_level))then
+          write(*,*) 'QUMOND stage history: hierarchy changed; reconstruction not implemented'
+          call clean_stop
+       endif
+       do grid=1,size(levels)
+          if(levels(grid)==0)cycle
+          if(any(xg(grid,:)/=qh_xg(grid,:)))then
+             write(*,*) 'QUMOND stage history: grid relocation unsupported'
+             call clean_stop
+          endif
+       enddo
+       do cell=1,size(phi)
+          if(qh_cell_level(cell)==0)cycle
+          if(son(cell)/=qh_son(cell))then
+             write(*,*) 'QUMOND stage history: refinement changed; reconstruction not implemented'
+             call clean_stop
+          endif
+       enddo
+    endif
+    deallocate(levels)
+    qh_stage=stage
+  end subroutine qumond_history_enter
+
+  subroutine qumond_history_capture(stage,ilevel)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    integer,intent(in)::stage,ilevel
+    integer::cell
+    logical::first
+    real(dp)::gauge,amplitude
+    if(.not.qh_enabled)return
+    if(qh_stage/=stage)call clean_stop
+    first=.not.qh_valid(stage,ilevel)
+    if(.not.first)then
+       if(t<qh_time(stage,ilevel))then
+          write(*,*) 'QUMOND stage history: time reversal'
+          call clean_stop
+       endif
+       if(t>qh_time(stage,ilevel))then
+          where(qh_cell_level==ilevel)qh_previous(:,stage)=qh_current(:,stage)
+          qh_old_time(stage,ilevel)=qh_time(stage,ilevel)
+       endif
+    endif
+    do cell=1,size(phi)
+       if(qh_cell_level(cell)/=ilevel)cycle
+       if(.not.ieee_is_finite(phi(cell)))then
+          write(*,*) 'QUMOND stage history: nonfinite solved potential'
+          call clean_stop
+       endif
+       qh_current(cell,stage)=phi(cell)
+       if(first)qh_previous(cell,stage)=phi(cell)
+    enddo
+    if(ilevel==levelmin)then
+       gauge=sum(pack(qh_current(:,stage),qh_cell_level==ilevel))/ &
+            real(count(qh_cell_level==ilevel),dp)
+       amplitude=maxval(abs(pack(qh_current(:,stage),qh_cell_level==ilevel)))
+       if(abs(gauge)>1d-10*max(amplitude,tiny(1d0)))then
+          write(*,*) 'QUMOND stage history: base periodic gauge is not canonical',gauge,amplitude
+          call clean_stop
+       endif
+    endif
+    qh_epoch(stage,ilevel)=nstep_coarse
+    if(first)qh_old_time(stage,ilevel)=t
+    qh_time(stage,ilevel)=t;qh_valid(stage,ilevel)=.true.
+    write(*,*) 'RAR_QUMOND_HISTORY_V1',stage,ilevel,t,qh_old_time(stage,ilevel),first
+  end subroutine qumond_history_capture
+
+  real(dp) function qumond_history_value(cell,level,tfrac) result(value)
+    integer,intent(in)::cell,level
+    real(dp),intent(in)::tfrac
+    integer::stage
+    if(.not.qh_enabled)then
+       value=phi(cell)+(phi(cell)-phi_old(cell))*tfrac
+       return
+    endif
+    stage=qh_stage
+    if(stage<1.or.stage>2.or.level<levelmin.or.level>nlevelmax)call clean_stop
+    if(cell<1.or.cell>size(phi))call clean_stop
+    if(qh_cell_level(cell)/=level.or..not.qh_valid(stage,level))then
+       write(*,*) 'QUMOND stage history: unavailable same-stage coarse value',stage,level,cell
+       call clean_stop
+    endif
+    if(qh_epoch(stage,level)/=nstep_coarse)then
+       write(*,*) 'QUMOND stage history: stale coarse epoch'
+       call clean_stop
+    endif
+    value=qh_current(cell,stage)+(qh_current(cell,stage)-qh_previous(cell,stage))*tfrac
+  end function qumond_history_value
+
 
   subroutine bimond_source_mean(ilevel)
 #include "amr_index.h"
