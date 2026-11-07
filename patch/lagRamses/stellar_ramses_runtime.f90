@@ -1264,6 +1264,18 @@ contains
             age_code, volume, particle_mass_before_code-mp_after, &
             scale_mass, scale_momentum, scale_energy, &
             (proposed_row-current_row)*volume
+       do element = 1, n_stellar_elements
+          ! Gross source masses are in solar masses; compare with measured
+          ! extensive gas changes in code mass using the recorded conversion.
+          ledger_remaining_code = source%ejected_mass(element)/scale_mass
+          if(enable_snia)ledger_remaining_code = ledger_remaining_code + &
+               snia_budget%ejected_mass(element)/scale_mass
+          write(*,*) 'RAR_STELLAR_ELEMENT_V1', myid, ilevel, ipart, target_cell, &
+               age_code, element, runtime_field_map%element_index(element), &
+               ledger_remaining_code, &
+               (proposed_row(runtime_field_map%element_index(element))- &
+               current_row(runtime_field_map%element_index(element)))*volume
+       enddo
 !$omp end critical(rar_stellar_commit_output)
     end if
   end subroutine deposit_one_star
