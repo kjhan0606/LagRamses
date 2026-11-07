@@ -162,7 +162,7 @@ contains
     endif
     if(qh_evolve)then
        if(static.or.remap_thresh>0d0.or.lb_force_remap.or.use_sgs.or.pressure_fix.or. &
-            eeos_poly_coeff>0d0.or.simple_boundary)then
+            eeos_poly_coeff>0d0.or.simple_boundary.or.jeans_ncells>0d0.or.isothermal.or.delayed_cooling)then
           write(*,*) 'QUMOND evolving gas requires nonstatic fixed topology, no remap/SGS/pressure fix/eEOS/boundary'
           call clean_stop
        endif
@@ -170,9 +170,19 @@ contains
        write(*,*) 'QUMOND evolving gas does not support MHD'
        call clean_stop
 #endif
+       if(cooling.and.cooling_method/='original')then
+          write(*,*) 'QUMOND evolving cooling requires original thermal operator'
+          call clean_stop
+       endif
+#ifdef grackle
+       if(cooling)then
+          write(*,*) 'QUMOND evolving cooling does not support Grackle build'
+          call clean_stop
+       endif
+#endif
     endif
     if(qh_publish)then
-       if(.not.hydro.or.pic.or.star.or.sink.or.cooling.or.neq_chem.or.rt.or.T2_star>0d0.or. &
+       if(.not.hydro.or.pic.or.star.or.sink.or.(cooling.and..not.qh_evolve).or.neq_chem.or.rt.or.T2_star>0d0.or. &
             use_fR.or.use_nDGP.or.use_symmetron.or.use_dilaton.or.use_galileon.or.use_adm.or.use_fdm.or. &
             mond_mu_type/=1)then
           write(*,*) 'QUMOND composite publication supports fixed gas/analytic source only; no evolution or extra gravity'

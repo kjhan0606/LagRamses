@@ -102,6 +102,7 @@ end subroutine sub_cooling_fine
 !###########################################################
 !###########################################################
 subroutine coolfine1(ind_grid,ngrid,ilevel)
+  use poisson_commons, only: qh_evolve
 #ifdef DUST_DYNAMICS
   use dust_phase_state, only: dust_phase_kinetic
 #endif
@@ -325,10 +326,12 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
         do i=1,nleaf
            T2min(i) = nH(i)*polytropic_constant*scale_T2
         end do
-     else
+     else if(T2_star>0d0)then
         do i=1,nleaf
            T2min(i) = T2_star*(nH(i)/nISM)**(g_star-1.0)
         end do
+     else
+        T2min(1:nleaf)=0d0
      endif
 
      if(cooling)then
@@ -512,9 +515,15 @@ subroutine coolfine1(ind_grid,ngrid,ilevel)
      if(rar_cooling_record .and. cooling .and. .not.neq_chem .and. .not.isothermal)then
 !$omp critical(rar_cooling_commit_output)
         do i=1,nleaf
+           if(qh_evolve)then
+           write(*,*) 'RAR_COOLING_COMMIT_V2',myid,ilevel,ind_leaf(i),nstep_coarse,t,aexp,dtcool,vol_loc, &
+                delta_T2(i)*vol_loc,(uold(ind_leaf(i),ndim+2)-rar_energy_before(i))*vol_loc, &
+                scale_d*scale_l**3*scale_v**2
+           else
            write(*,*) 'RAR_COOLING_COMMIT_V1',myid,ilevel,ind_leaf(i),aexp,dtcool,vol_loc, &
                 delta_T2(i)*vol_loc,(uold(ind_leaf(i),ndim+2)-rar_energy_before(i))*vol_loc, &
                 scale_d*scale_l**3*scale_v**2
+           endif
         enddo
 !$omp end critical(rar_cooling_commit_output)
      endif

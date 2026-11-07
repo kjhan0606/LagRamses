@@ -281,6 +281,19 @@ end subroutine diag_check_nan
 ! Coarse-stage physical inventory. Cloud masses are diagnostic only: the
 ! replicated sink catalogue supplies BH mass once globally, never per cloud.
 subroutine diag_rar_global_inventory(label)
+  implicit none
+  character(len=*),intent(in)::label
+  call diag_rar_inventory_core(label,0)
+end subroutine diag_rar_global_inventory
+
+subroutine diag_rar_cooling_inventory(label,ilevel)
+  implicit none
+  character(len=*),intent(in)::label
+  integer,intent(in)::ilevel
+  call diag_rar_inventory_core(label,ilevel)
+end subroutine diag_rar_cooling_inventory
+
+subroutine diag_rar_inventory_core(label,call_level)
   use amr_commons
   use hydro_commons
   use pm_commons
@@ -290,6 +303,7 @@ subroutine diag_rar_global_inventory(label)
   include 'mpif.h'
 #endif
   character(len=*),intent(in)::label
+  integer,intent(in)::call_level
   character(len=8)::enabled
   integer::status,lev,g,grid,child,cell,part,j,info
   real(dp)::local(nvar+12),total(nvar+12),volume
@@ -299,7 +313,9 @@ subroutine diag_rar_global_inventory(label)
   if(status/=0.or.trim(enabled)/='1')return
   if(.not.hydro)return
   local=0d0
-  allocate(seen(size(idp)));seen=.false.
+  if(pic)then
+     allocate(seen(size(idp)));seen=.false.
+  endif
   do lev=levelmin,nlevelmax
      volume=(boxlen/dble(icoarse_max-icoarse_min+1)*0.5d0**lev)**ndim
      do g=1,active(lev)%ngrid
@@ -310,6 +326,7 @@ subroutine diag_rar_global_inventory(label)
            local(1:nvar)=local(1:nvar)+uold(cell,1:nvar)*volume
            local(nvar+1)=local(nvar+1)+1d0
         enddo
+        if(pic)then
         part=headp(grid)
         do j=1,numbp(grid)
            if(part<1.or.part>size(idp))then
@@ -336,9 +353,10 @@ subroutine diag_rar_global_inventory(label)
            endif
            part=nextp(part)
         enddo
+        endif
      enddo
   enddo
-  deallocate(seen)
+  if(allocated(seen))deallocate(seen)
   if(myid==1.and.nsink>0)then
      local(nvar+8)=sum(msink(1:nsink))
      local(nvar+12)=real(nsink,dp)
@@ -348,5 +366,11 @@ subroutine diag_rar_global_inventory(label)
 #else
   total=local
 #endif
-  if(myid==1)write(*,*) 'RAR_GLOBAL_INVENTORY_V1',trim(label),nstep_coarse,aexp,nvar,total
-end subroutine diag_rar_global_inventory
+  if(myid==1)then
+     if(call_level>0)then
+        write(*,*) 'RAR_GLOBAL_INVENTORY_V2',trim(label),nstep_coarse,t,aexp,call_level,nvar,total
+     else
+        write(*,*) 'RAR_GLOBAL_INVENTORY_V1',trim(label),nstep_coarse,aexp,nvar,total
+     endif
+  endif
+end subroutine diag_rar_inventory_core
