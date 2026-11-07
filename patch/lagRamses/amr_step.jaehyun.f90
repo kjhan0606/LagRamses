@@ -981,7 +981,9 @@ recursive subroutine amr_step(ilevel,icount)
                                call timer('cooling','start')
      if(neq_chem.or.cooling.or.T2_star>0.0)then
         cool_t1=omp_get_wtime()
+        if(ilevel==levelmin)call diag_rar_global_inventory('before_cooling')
         call cooling_fine(ilevel)
+        if(ilevel==levelmin)call diag_rar_global_inventory('after_cooling')
         cool_fine_wall=cool_fine_wall+omp_get_wtime()-cool_t1
      endif
   endif
@@ -1004,7 +1006,9 @@ recursive subroutine amr_step(ilevel,icount)
                                call timer('cooling','start')
   if(neq_chem.or.cooling.or.T2_star>0.0)then
      cool_t1=omp_get_wtime()
+     if(ilevel==levelmin)call diag_rar_global_inventory('before_cooling')
      call cooling_fine(ilevel)
+     if(ilevel==levelmin)call diag_rar_global_inventory('after_cooling')
      cool_fine_wall=cool_fine_wall+omp_get_wtime()-cool_t1
   endif
   call diag_check_eint('cooling',ilevel)
