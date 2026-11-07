@@ -50,8 +50,15 @@ contains
     if(ierr/=0)call fail('Newtonian solve did not converge')
     call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
     a0=a0_mond*scale_t**2/scale_l;external=g_ext_mond*scale_t**2/scale_l
-    call composite_phantom(mesh,pn,a0,fourpi,external,phantom,ierr)
-    if(ierr/=0)call fail('phantom source')
+    if(.not.use_mond)then
+       a0=0d0;external=0d0
+    endif
+    if(use_mond)then
+       call composite_phantom(mesh,pn,a0,fourpi,external,phantom,ierr)
+       if(ierr/=0)call fail('phantom source')
+    else
+       phantom=0d0
+    endif
     balance=abs(sum(phantom*mesh%volume))/max(sum(abs(phantom)*mesh%volume),tiny(1d0))
     if(balance>1d-12)call fail('phantom flux is not conservative')
     rhs=rhs+fourpi*phantom
@@ -59,8 +66,14 @@ contains
     rhs=rhs-mean_source
     pq=pn
     if(all(qh_valid(2,levelmin:nlevelmax)))pq=qh_current(mesh%cell,2)
-    call composite_solve(mesh,rhs,pq,1d-9,1200,40,it_q,res_q,ierr)
-    if(ierr/=0)call fail('QUMOND solve did not converge')
+    if(use_mond)then
+       call composite_solve(mesh,rhs,pq,1d-9,1200,40,it_q,res_q,ierr)
+       if(ierr/=0)call fail('QUMOND solve did not converge')
+    else
+       ! A matched Newtonian control uses precisely the same native operator.
+       ! The second history slot mirrors N; it is not a second physics solve.
+       pq=pn;it_q=0;res_q=res_n
+    endif
     call composite_slopes(mesh,pq,gradient,ierr)
     if(ierr/=0)call fail('force reconstruction')
     if(.not.allocated(saved_phi))then
@@ -116,6 +129,7 @@ contains
     enddo
     published_epoch=nstep_coarse
     call qumond_restore_published()
+    write(*,*) 'RAR_COMPOSITE_MODEL_V1',use_mond,gravity_type
     write(*,*) 'RAR_QUMOND_PUBLICATION_V1',nstep_coarse,t,mesh%n,it_n,it_q,res_n,res_q,balance, &
          sum(saved_phi(mesh%cell)*mesh%volume),sqrt(sum(mesh%volume*sum(gradient**2,dim=1)))
     export_env=''

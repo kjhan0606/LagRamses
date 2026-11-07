@@ -136,7 +136,7 @@ contains
     call clean_stop
 #endif
     if(ncpu/=1.or.cosmo.or.nrestart/=0.or.nremap/=0.or..not.static.or. &
-         .not.use_mond.or.mond_type/=1.or.bimond_twin_matter.or. &
+         (.not.use_mond.and..not.qh_publish).or.mond_type/=1.or.bimond_twin_matter.or. &
          nlevelmax/=levelmin+1.or.any(nsubcycle(levelmin:nlevelmax)/=1).or..not.use_fftw)then
        write(*,*) 'QUMOND stage history requires serial fixed two-level static CPU FFTW, no restart/remap/subcycling'
        call clean_stop
