@@ -882,6 +882,7 @@ recursive subroutine amr_step(ilevel,icount)
   ! Thermal feedback from stars (also call if no feedback, for bookkeeping)
   if(hydro.and.star) then
                                call timer('feedback','start')
+     if(ilevel==levelmin)call diag_rar_global_inventory('before_stellar_transport')
      call thermal_feedback(ilevel)
   endif
 
@@ -951,6 +952,7 @@ recursive subroutine amr_step(ilevel,icount)
 #endif
                                call timer('hydro - set uold','start')
      call set_uold(ilevel)
+     if(star.and.ilevel==levelmin)call diag_rar_global_inventory('after_stellar_transport')
 
      ! Add gravity source term with half time step and old force
      ! in order to complete the time step 
