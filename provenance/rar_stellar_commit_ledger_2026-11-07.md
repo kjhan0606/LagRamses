@@ -1,0 +1,9 @@
+# RAR stellar accepted-transaction diagnostic
+
+`RAR_STELLAR_COMMIT_LEDGER=1` enables one stdout record per accepted stellar deposition transaction. Default execution emits no records. The diagnostic follows the complete gas/particle/progress commit and lock release; it does not change the accepted row, particle mass, source clocks or physics. An OpenMP critical region keeps each record together. A failed output stream is not a rollback mechanism; missing/truncated records invalidate an audit.
+
+The list-directed record begins `RAR_STELLAR_COMMIT_V1`, then rank, AMR level, local particle index, receiver cell, stellar age in code units, receiver volume, particle mass debit in code units, mass conversion to solar masses, momentum conversion to cgs, energy conversion to erg, and nvar extensive gas-row changes `(proposed_row-current_row)*volume`. Read the run's compiled field map and nvar to identify total metal and element slots. Local particle index is not a persistent cross-restart particle identity. The energy entry is total gas energy, including ejecta transport, and is not purely thermal feedback energy.
+
+The row copies were taken under the receiver lock. No shared gas row is reread after unlocking. Virtual/reception rows can occur and undergo later reverse exchange: sum source transactions once, without adding reception and owner copies twice. This is a stellar transaction ledger, not a global endpoint inventory, AGN deposition ledger, cooling ledger or complete conservation proof.
+
+Static validation: git diff --check passes and particle_mass_before_code is assigned from mp before the commit. Compilation and bounded Slurm runtime verification remain required. The existing exploratory runner still requires unsupported global before/after inventories; this addition intentionally does not falsely satisfy those gates. No new physical prescription or conservation update is introduced.

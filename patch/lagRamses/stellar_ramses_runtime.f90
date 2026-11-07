@@ -694,6 +694,8 @@ contains
     integer :: snia_accounting_ierr
     integer :: source_ierr, target_cell, element, lock_index
     integer :: progress_ierr, units_ierr
+    integer :: accounting_status
+    character(len=8) :: accounting_switch
     logical :: located, should_deposit
     type(stellar_progress_t) :: progress
     type(snia_event_budget_t) :: snia_budget
@@ -1249,6 +1251,21 @@ contains
     mp(ipart) = mp_after
     indtab(ipart) = next_indtab
     call omp_unset_lock(stellar_feedback_locks(lock_index))
+
+    ! Diagnostic of this accepted transaction only. Local row copies retain
+    ! the measured difference even if another thread subsequently updates it.
+    ! Reception/virtual contributions still require the normal reverse exchange;
+    ! these records must not be counted again as separate owner-cell sources.
+    accounting_switch = ''
+    call get_environment_variable('RAR_STELLAR_COMMIT_LEDGER', accounting_switch, status=accounting_status)
+    if (accounting_status == 0 .and. trim(accounting_switch) == '1') then
+!$omp critical(rar_stellar_commit_output)
+       write(*,*) 'RAR_STELLAR_COMMIT_V1', myid, ilevel, ipart, target_cell, &
+            age_code, volume, particle_mass_before_code-mp_after, &
+            scale_mass, scale_momentum, scale_energy, &
+            (proposed_row-current_row)*volume
+!$omp end critical(rar_stellar_commit_output)
+    end if
   end subroutine deposit_one_star
 
   subroutine locate_star_cell(ilevel, parent_grid, ipart, target_cell, volume, located)
