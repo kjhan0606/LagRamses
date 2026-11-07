@@ -7555,7 +7555,7 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
                     endif
                     if(dm_cell>0d0 .or. de_cell/=0d0)then
                        call deposit_agn_cell(ind_cell(i),dm_cell,dp_cell,de_cell,vol_loc, &
-                            cloadAGN(iAGN,:),deferred_cell,cell_ierr)
+                            cloadAGN(iAGN,:),deferred_cell,cell_ierr,[x,y,z])
                        TEsaveAGN(iAGN)=TEsaveAGN(iAGN)+deferred_cell
                        deposition_error=max(deposition_error,cell_ierr)
                     endif
@@ -7620,7 +7620,8 @@ subroutine AGN_blast(xAGN,vAGN,dMsmbh_AGN,dMBH_AGN,dMEd_AGN,mAGN,jAGN,ind_blast,
 
 contains
 
-  subroutine deposit_agn_cell(cell,drho,dmomentum,denergy,volume,fractions,deferred,ierr)
+  subroutine deposit_agn_cell(cell,drho,dmomentum,denergy,volume,fractions,deferred,ierr,direct_position)
+    real(dp), intent(in), optional :: direct_position(3)
     integer, intent(in) :: cell
     real(dp), intent(in) :: drho,dmomentum(3),denergy,volume,fractions(nscalar)
     real(dp), intent(out) :: deferred
@@ -7647,6 +7648,9 @@ contains
           diagnostic_position=(xg(diagnostic_grid,1:3)-skip_loc)*scale+ &
                diagnostic_offset*diagnostic_width
 !$omp critical(rar_agn_commit_output)
+          if(present(direct_position))then
+             write(*,*) 'RAR_AGN_COORD_CHECK_V1',myid,cell,aexp,diagnostic_position,direct_position
+          endif
           write(*,*) 'RAR_AGN_COMMIT_V1',myid,cell,volume, &
                drho*volume,dmomentum*volume,denergy*volume,deferred,(row-before_row)*volume
           write(*,*) 'RAR_AGN_LOCATION_V1',myid,cell,aexp,diagnostic_position, &
