@@ -1,5 +1,5 @@
 ! Native periodic leaf/subface geometry and conservative scalar operators.
-! No gravity publication or composite elliptic convergence is implied here.
+! composite_solve reports its residual; hierarchy force publication is separate.
 module qumond_composite
   use amr_commons
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -251,7 +251,8 @@ contains
   end subroutine
 
   ! Restarted flexible GMRES for L phi = rhs on the volume-weighted zero-mean
-  ! space. Face-Jacobi is an initial preconditioner, not a claimed AMR MG solve.
+  ! space. A two-point face diagonal preconditions the reconstructed operator;
+  ! this is not an AMR multigrid preconditioner.
   ! Success requires the independently recomputed, unpreconditioned residual.
   subroutine composite_solve(mesh,rhs,x,rtol,maxiter,restart,iterations,relative_residual,ierr)
     type(composite_mesh_t),intent(in)::mesh
