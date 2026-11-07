@@ -100,8 +100,10 @@ subroutine create_sink
   t_stage=omp_get_wtime()
   do ilevel=1,nlevelmax
      call make_tree_fine(ilevel)
-     call kill_tree_fine(ilevel)
+     ! Receive migrated parents before descending their particles. Receiving
+     ! after kill_tree_fine stranded incoming clouds on coarse MPI levels.
      call virtual_tree_fine(ilevel)
+     call kill_tree_fine(ilevel)
   end do
   t_tree_rebuild=t_tree_rebuild+omp_get_wtime()-t_stage
   call rar_sink_cloud_census('after_rebuild')
