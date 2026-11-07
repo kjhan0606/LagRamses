@@ -7988,11 +7988,27 @@ subroutine kjhan_update_sink_position_velocity
   integer::isink,idim,size_mpi,info,nx_loc
   real(dp)::vdum,ncloud,scale
   real(dp),dimension(1:3)::xbound
+  character(len=8)::diagnostic_env
+  integer::diagnostic_status,diagnostic_level
+  logical::diagnostic_enabled
 
   ! Mesh spacing in that level
   xbound(1:3)=(/dble(nx),dble(ny),dble(nz)/)
   nx_loc=(icoarse_max-icoarse_min+1)
   scale=boxlen/dble(nx_loc)
+
+  ! Opt-in diagnostics preserve the reduction and position update unchanged.
+  diagnostic_env=''
+  call get_environment_variable('RAR_SINK_POSITION_LEDGER',diagnostic_env,status=diagnostic_status)
+  diagnostic_enabled=diagnostic_status==0.and.trim(diagnostic_env)=='1'
+  if(diagnostic_enabled)then
+     do isink=1,nsink
+        do diagnostic_level=levelmin,nlevelmax
+           write(*,*) 'RAR_SINK_STAT_LOCAL_V1',myid,nstep_coarse,aexp,isink,diagnostic_level, &
+                xsink(isink,1:ndim),sink_stat(isink,diagnostic_level,1:ndim*2+1)
+        enddo
+     enddo
+  endif
 
   ! update the sink particle position based on total sink particles
 #ifndef WITHOUTMPI
@@ -8021,6 +8037,14 @@ subroutine kjhan_update_sink_position_velocity
         enddo
      endif
   enddo
+
+  if(diagnostic_enabled)then
+     do isink=1,nsink
+        write(*,*) 'RAR_SINK_STAT_GLOBAL_V1',myid,nstep_coarse,aexp,isink, &
+             xsink(isink,1:ndim),vsink(isink,1:ndim), &
+             sum(sink_stat_all(isink,levelmin:nlevelmax,ndim*2+1))
+     enddo
+  endif
 
 end subroutine kjhan_update_sink_position_velocity
 
