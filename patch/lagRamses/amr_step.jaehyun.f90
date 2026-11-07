@@ -9,6 +9,7 @@ recursive subroutine amr_step(ilevel,icount)
   use pm_commons
   use hydro_commons
   use poisson_commons
+  use qumond_composite_runtime, only: qumond_publish_fixed_source,qumond_restore_published
   use pbh_commons, only: use_pbh, pbh_mark_level
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_enrichment_config, only: use_channel_resolved_feedback
@@ -455,7 +456,7 @@ recursive subroutine amr_step(ilevel,icount)
                                call timer('poisson','start')
      !save old potential for time-extrapolation at level boundaries
      call qumond_history_enter(1,ilevel)
-     call save_phi_old(ilevel)
+     if(.not.qh_publish)call save_phi_old(ilevel)
      if(timer_report_interval>0) call timer('rho','start')
      call rho_fine(ilevel,icount)
      if(ilevel==levelmin) call diag_check_nan('post_rho')
@@ -490,6 +491,13 @@ recursive subroutine amr_step(ilevel,icount)
   if(poisson)then
      call timer('poisson','start')
 
+     if(qh_publish)then
+        if(ilevel==levelmin)then
+           call qumond_publish_fixed_source()
+        else
+           call qumond_restore_published()
+        endif
+     else
      if(ilevel==levelmin) call diag_check_nan('pre_sync1')
 
      ! Remove gravity source term with half time step and old force
@@ -793,6 +801,7 @@ recursive subroutine amr_step(ilevel,icount)
         if(simple_boundary)call make_boundary_hydro(ilevel)
 
      end if
+     end if ! legacy gravity versus fixed-source composite publication
   end if
 
 #ifdef RT
@@ -962,7 +971,7 @@ recursive subroutine amr_step(ilevel,icount)
      ! in order to complete the time step 
 !    call MPI_BARRIER(MPI_COMM_WORLD,mpi_err)
                                call timer('poisson','start')
-     if(poisson)call synchro_hydro_fine(ilevel,+0.5*dtnew(ilevel))
+     if(poisson.and..not.qh_publish)call synchro_hydro_fine(ilevel,+0.5*dtnew(ilevel))
      call diag_check_eint('godunov+sync',ilevel)
 
      ! Restriction operator

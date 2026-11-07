@@ -5,7 +5,7 @@ module poisson_commons
 
   ! Experimental fixed-hierarchy history path; the shared solver state remains
   ! authoritative unless explicitly enabled. This does not repair AMR source loss.
-  logical :: qh_checked=.false.,qh_enabled=.false.
+  logical :: qh_checked=.false.,qh_enabled=.false.,qh_publish=.false.
   integer :: qh_stage=0
   type(composite_mesh_t) :: qh_composite_mesh
   real(dp),allocatable :: qh_current(:,:),qh_previous(:,:),qh_rho_newton(:)
@@ -120,6 +120,13 @@ contains
        env=''
        call get_environment_variable('RAR_QUMOND_STAGE_HISTORY',env,status=status)
        qh_enabled=status==0.and.trim(env)=='1'
+       env=''
+       call get_environment_variable('RAR_QUMOND_COMPOSITE_PUBLISH',env,status=status)
+       qh_publish=status==0.and.trim(env)=='1'
+       if(qh_publish.and..not.qh_enabled)then
+          write(*,*) 'QUMOND composite publication requires stage-history activation'
+          call clean_stop
+       endif
        qh_checked=.true.
     endif
     if(.not.qh_enabled)return
@@ -133,6 +140,14 @@ contains
          nlevelmax/=levelmin+1.or.any(nsubcycle(levelmin:nlevelmax)/=1).or..not.use_fftw)then
        write(*,*) 'QUMOND stage history requires serial fixed two-level static CPU FFTW, no restart/remap/subcycling'
        call clean_stop
+    endif
+    if(qh_publish)then
+       if(.not.hydro.or.pic.or.star.or.sink.or.cooling.or.neq_chem.or.rt.or.T2_star>0d0.or. &
+            use_fR.or.use_nDGP.or.use_symmetron.or.use_dilaton.or.use_galileon.or.use_adm.or.use_fdm.or. &
+            mond_mu_type/=1)then
+          write(*,*) 'QUMOND composite publication supports fixed gas/analytic source only; no evolution or extra gravity'
+          call clean_stop
+       endif
     endif
     allocate(levels(size(xg,1)));levels=0
     do lev=levelmin,nlevelmax

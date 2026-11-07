@@ -320,7 +320,7 @@ VPATH = $(PATCH):../patch/cuda:../patch/oct_tree:../patch/cuRamses:../$(SOLVER):
 #############################################################################
 # All objects
 MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons.o amr_index.o random.o pm_parameters.o pm_commons.o poisson_parameters.o \
-	 qumond_composite.o poisson_commons.o hydro_parameters.o hydro_commons.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
+	 qumond_composite.o poisson_commons.o hydro_parameters.o hydro_commons.o qumond_composite_runtime.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
 	 cosmic_ray_physics.o dust_mass_physics.o dust_phase_state.o dust_drag.o dust_multifluid.o \
@@ -836,3 +836,6 @@ endif
 amr_constants.o: amr_parameters.jaehyun.o
 slope_types.o: amr_parameters.jaehyun.o
 endif
+
+qumond_composite_runtime.o: poisson_commons.o hydro_commons.o
+amr_step.jaehyun.o: qumond_composite_runtime.o
