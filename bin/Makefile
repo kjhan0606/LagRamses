@@ -743,7 +743,8 @@ dust_mass_smoke: dust_multifluid.o dust_iron_material.o dust_pah_atomization.o d
 	  dust_pah_live_model.o dust_pah_mixed.o snrt_dust_material.o -lstdc++ -o $@
 cosmic_ray_smoke: cosmic_ray_physics.o ../patch/lagRamses/cosmic_ray_smoke.f90
 	$(F90) -fpp -I. ../patch/lagRamses/cosmic_ray_smoke.f90 cosmic_ray_physics.o -o $@
-poisson_commons.o: poisson_parameters.o
+qumond_composite.o: amr_commons.kjhan.o amr_index.o
+poisson_commons.o: poisson_parameters.o qumond_composite.o
 stellar_enrichment_contract.o: stellar_enrichment_config.o
 stellar_snia_dtd.o: stellar_enrichment_config.o
 stellar_snia_population_contract.o: stellar_enrichment_config.o stellar_snia_dtd.o
