@@ -163,7 +163,6 @@ contains
     call validate()
     if(.not.step_open.or..not.drifted)call fail('invalid physical sink endpoint kick')
     vsink(:nb,:)=half_v+0.5d0*dt*accel
-    call sync_central_coordinates()
     call native_sinks_sync_clouds(.true.)
     env='';call get_environment_variable('RAR_QUMOND_GRAVITY_KICKS',env,status=status)
     if(status==0.and.trim(env)=='1')then
@@ -178,30 +177,6 @@ contains
     close(unit)
     endif
     step_open=.false.;drifted=.false.
-  end subroutine
-
-  subroutine sync_central_coordinates()
-    ! The serial tree preserves particle slots. Scalar proxy drift and array
-    ! physical-body drift can round differently. Preserve the known central
-    ! proxy exactly before legacy cloud removal; never select a nearest cloud
-    ! or repair a finite displacement silently.
-    real(dp) :: delta(3)
-    integer :: i,p
-    if(nb==0)return
-    if(.not.allocated(canonical_sink_part))call fail('missing central cloud map')
-    if(size(canonical_sink_part)<nb)call fail('incomplete central cloud map')
-    do i=1,nb
-       p=canonical_sink_part(i)
-       if(p<1.or.p>size(idp))call fail('invalid central cloud slot')
-       if(ptypep(p)/=PTYPE_SINK.or.idp(p)/=-int(i,i8b))call fail('central cloud identity changed')
-       delta=xp(p,:)-xsink(i,:)
-       delta=delta-anint(delta/domain_width)*domain_width
-       if(.not.all(ieee_is_finite(delta)).or.maxval(abs(delta))>32d0*epsilon(1d0)*domain_width) &
-            call fail('central cloud separated from physical body')
-       write(*,'(A,1X,3(I0,1X),4(ES24.16,1X))') &
-            'RAR_NATIVE_SINK_CENTRE_V1',nstep_coarse,identities(i),p,t,delta
-       xp(p,:)=xsink(i,:)
-    enddo
   end subroutine
 
   subroutine native_sinks_sync_clouds(canonical)

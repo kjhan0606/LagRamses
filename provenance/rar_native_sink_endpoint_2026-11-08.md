@@ -43,13 +43,18 @@ because the legacy cloud rebuild found no exact central proxy. The scheduler
 correctly marked the runners failed despite the executable's clean-stop exit
 code zero. No successful native sink evolution or feedback result is claimed.
 
-The bounded repair retains the known central particle slot across the serial
-KDK step, requires its periodic displacement from the physical body to be at
-most 32 machine epsilons of the box, records that displacement, and restores
-exact equality before legacy cloud removal. This handles possible scalar/
-array rounding without accepting a displaced body or selecting a nearest
-cloud. The next execution must confirm the measured discrepancy and whether
-this resolves the failure. Opt-in accretion receipts record donor states,
+Build 1279509 / commit `a2a5c43`, runs 1279511 and 1279512, ruled out the
+initial rounding hypothesis: central-proxy coordinate differences were
+exactly zero and the same failure persisted. The unnecessary coordinate
+repair was removed. The actual list precondition was violated: SSP leaves
+particles partitioned by level, whereas `create_sink` begins by repartitioning
+base lists and clearing all child headers. Merge to canonical base lists
+before invoking `create_sink`; verify cloud mass before and after the source
+transaction. This preserves the existing cloud construction and Bondi rules.
+The no-sink stellar regression 1279513 completed on build 1279509; independent
+audit 1279517 was submitted separately.
+
+Opt-in accretion receipts record donor states,
 gross/retained mass, efficiency, radiative energy and retained momentum for
 independent accounting. They do not change the accretion prescription.
 

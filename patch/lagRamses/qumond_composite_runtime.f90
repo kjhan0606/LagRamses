@@ -407,6 +407,13 @@ contains
     call restrict_gas_and_ghosts()
     call diag_rar_global_inventory('after_native_return')
     if(qh_sink_sources)then
+       ! SSP used partitioned level-local lists. create_sink starts by
+       ! repartitioning canonical base lists and clears child headers, so
+       ! restore that precondition before entering it.
+       do lev=nlevelmax,levelmin,-1
+          call merge_tree_fine(lev)
+       enddo
+       call native_sinks_sync_clouds(.true.)
        call native_sinks_inventory(mesh,'before_creation')
        call create_sink
        call native_sinks_inventory(mesh,'after_creation')
