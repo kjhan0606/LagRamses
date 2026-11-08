@@ -56,3 +56,32 @@ Grammar render `1279417` completed and the replacement PDF/PNG passed visual
 inspection. The CSV is byte-identical to the analysis input. The figures are
 tracked as `provenance/figures/rar_ngc2403_compiled512_holdout.pdf` and `.png`;
 their digests and render source revision are recorded in the result bundle.
+
+## Why agreement with the reference does not reproduce the observed curve
+
+Grammar postprocessing job `1279459` completed in 9 s using source
+`bec88445555928415db829d5f88ad942f5adbf11`. It reads the checksum-pinned
+64-radius CSV from `1279415`; no force calculation or fit was repeated.
+Let `f(g)` be the plotted empirical reference, `g_b` the computed baryonic
+field, and `g_s` the SPARC baryonic acceleration. At each radius,
+
+`log10(g_Q/g_obs) = log10(g_Q/f(g_b)) + log10(f(g_b)/f(g_s)) + log10(f(g_s)/g_obs)`.
+
+| Term | Mean over all 64 radii (dex) | Mean over 13.42--20.87 kpc (dex) |
+|---|---:|---:|
+| QUMOND minus reference at computed baryonic field | -0.019146 | -0.001266 |
+| Reference shift between the two baryonic inputs | -0.033875 | -0.072037 |
+| Reference at SPARC baryonic acceleration minus observed | -0.032320 | -0.058308 |
+| QUMOND minus observed | -0.085341 | -0.131611 |
+
+The identity closes to `7.64e-17 dex`. These equal-weight arithmetic means
+add; the individual medians do not generally add. The decomposition explains
+the apparent coexistence of agreement with the reference and an offset from
+NGC 2403. It is algebraic accounting, not a causal attribution or an error
+budget. In particular, the second term is not the response of a new QUMOND
+solution with a SPARC-matched source, and the first term does not isolate
+boundary or discretization errors. The observed points belong to this one
+galaxy. The result does not measure population intrinsic scatter.
+
+All per-radius terms, statistics, immutable input, analysis source and
+checksums are retained in `results/rar_ngc2403_residual_split_1279459/`.

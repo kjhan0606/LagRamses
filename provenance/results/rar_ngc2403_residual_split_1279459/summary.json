@@ -1,0 +1,166 @@
+{
+  "scope": "Exact decomposition of existing fixed-source 512-cubed fields sampled at the same 64 radii; no refit or new field solve.",
+  "input_sha256": "702aa0a4c46f78d61f8c0971983163073bc99d3fc4106d68622965f3307544db",
+  "reference": "f(g)=g/[1-exp(-sqrt(g/1.2e-10 m s^-2))]",
+  "identity": "log10(gQ/gobs)=log10(gQ/f(gbar_model))+log10(f(gbar_model)/f(gbar_SPARC))+log10(f(gbar_SPARC)/gobs)",
+  "identity_max_abs_error_dex": 7.632783294297951e-17,
+  "all_radii": {
+    "qumond_minus_reference_at_model_gbar_dex": {
+      "mean_dex": -0.019146269498691647,
+      "median_dex": -0.018496809727299494,
+      "min_dex": -0.05131015544883636,
+      "max_dex": 0.001465857034891592
+    },
+    "reference_shift_between_baryon_inputs_dex": {
+      "mean_dex": -0.033874654986303876,
+      "median_dex": -0.01848944015287473,
+      "min_dex": -0.09643718702351001,
+      "max_dex": -0.0020777417643356093
+    },
+    "reference_at_sparc_gbar_minus_observed_dex": {
+      "mean_dex": -0.032320061253515546,
+      "median_dex": -0.04604286720667909,
+      "min_dex": -0.07699354891517678,
+      "max_dex": 0.041175237146678485
+    },
+    "total": {
+      "mean_dex": -0.08534098573851107,
+      "median_dex": -0.11039053061660402,
+      "min_dex": -0.1593909173230282,
+      "max_dex": 0.009218627081617272
+    }
+  },
+  "radial_blocks": [
+    {
+      "fold": 0,
+      "radius_kpc": [
+        1.06,
+        2.57
+      ],
+      "qumond_minus_reference_at_model_gbar_dex": {
+        "mean_dex": -0.03520401081101791,
+        "median_dex": -0.03231058521299038,
+        "min_dex": -0.05131015544883636,
+        "max_dex": -0.025339522232183304
+      },
+      "reference_shift_between_baryon_inputs_dex": {
+        "mean_dex": -0.004267117817989081,
+        "median_dex": -0.0042572410339396585,
+        "min_dex": -0.005894885422849977,
+        "max_dex": -0.0020777417643356093
+      },
+      "reference_at_sparc_gbar_minus_observed_dex": {
+        "mean_dex": -0.01945726515851936,
+        "median_dex": -0.020301942353951597,
+        "min_dex": -0.06850255024446439,
+        "max_dex": 0.04037056999359984
+      },
+      "total": {
+        "mean_dex": -0.058928393787526345,
+        "median_dex": -0.05723255473234938,
+        "min_dex": -0.11897917834597202,
+        "max_dex": 0.009218627081617272
+      }
+    },
+    {
+      "fold": 1,
+      "radius_kpc": [
+        2.68,
+        4.97
+      ],
+      "qumond_minus_reference_at_model_gbar_dex": {
+        "mean_dex": -0.02462997280887108,
+        "median_dex": -0.02498515180074131,
+        "min_dex": -0.02853270632779437,
+        "max_dex": -0.018143563077555862
+      },
+      "reference_shift_between_baryon_inputs_dex": {
+        "mean_dex": -0.009504496248654268,
+        "median_dex": -0.009181991709315773,
+        "min_dex": -0.01722900479712245,
+        "max_dex": -0.005100349600386644
+      },
+      "reference_at_sparc_gbar_minus_observed_dex": {
+        "mean_dex": 0.0008492233844141373,
+        "median_dex": 0.012913804411947359,
+        "min_dex": -0.056948026924721847,
+        "max_dex": 0.041175237146678485
+      },
+      "total": {
+        "mean_dex": -0.03328524567311121,
+        "median_dex": -0.022255982925456733,
+        "min_dex": -0.08974636905517905,
+        "max_dex": 0.006818677647251124
+      }
+    },
+    {
+      "fold": 2,
+      "radius_kpc": [
+        5.47,
+        12.92
+      ],
+      "qumond_minus_reference_at_model_gbar_dex": {
+        "mean_dex": -0.015484842084663249,
+        "median_dex": -0.01729319825244556,
+        "min_dex": -0.01860760729485565,
+        "max_dex": -0.008101951591304434
+      },
+      "reference_shift_between_baryon_inputs_dex": {
+        "mean_dex": -0.0496904611756611,
+        "median_dex": -0.052409865789411564,
+        "min_dex": -0.07528566819433918,
+        "max_dex": -0.019749875508627005
+      },
+      "reference_at_sparc_gbar_minus_observed_dex": {
+        "mean_dex": -0.05236373121008553,
+        "median_dex": -0.05585670019937472,
+        "min_dex": -0.073395244298466,
+        "max_dex": -0.03162410788642571
+      },
+      "total": {
+        "mean_dex": -0.11753903447040989,
+        "median_dex": -0.11763590736751084,
+        "min_dex": -0.12984164894819716,
+        "max_dex": -0.10126092558457632
+      }
+    },
+    {
+      "fold": 3,
+      "radius_kpc": [
+        13.42,
+        20.87
+      ],
+      "qumond_minus_reference_at_model_gbar_dex": {
+        "mean_dex": -0.001266252290214356,
+        "median_dex": -0.0012209468397413087,
+        "min_dex": -0.006333689116035625,
+        "max_dex": 0.001465857034891592
+      },
+      "reference_shift_between_baryon_inputs_dex": {
+        "mean_dex": -0.07203654470291104,
+        "median_dex": -0.06914374930770442,
+        "min_dex": -0.09643718702351001,
+        "max_dex": -0.0648220806049414
+      },
+      "reference_at_sparc_gbar_minus_observed_dex": {
+        "mean_dex": -0.058308472029871425,
+        "median_dex": -0.05723432612405649,
+        "min_dex": -0.07699354891517678,
+        "max_dex": -0.04488016256338526
+      },
+      "total": {
+        "mean_dex": -0.1316112690229968,
+        "median_dex": -0.12586801992021476,
+        "min_dex": -0.1593909173230282,
+        "max_dex": -0.11415149887546108
+      }
+    }
+  ],
+  "limits": [
+    "Arithmetic means over the same 64 radii add; individual medians generally do not.",
+    "This is an algebraic accounting identity, not a causal attribution or an uncertainty budget.",
+    "The baryon-input term transports a source difference through the empirical reference; it is not a QUMOND rerun with the SPARC source.",
+    "QUMOND-minus-reference combines interpolation-function, geometry, boundary and numerical effects; it is not an isolated numerical error.",
+    "Reference-minus-observed describes one galaxy, not population intrinsic scatter or statistical model rejection."
+  ]
+}
