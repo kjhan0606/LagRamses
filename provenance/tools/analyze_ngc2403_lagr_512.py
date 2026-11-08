@@ -13,6 +13,21 @@ args=parser.parse_args();root=args.root;n=args.n
 output=args.output if args.output is not None else root/'analysis.json'
 if output.exists():raise FileExistsError(output)
 if n != 512: raise ValueError('this audit is defined for a uniform 512^3 grid')
+# Check historical log compatibility before allocating the large field arrays.
+# This run predates post-second-Poisson telemetry. Its saved force/source
+# equations are independently reconstructed below; absent telemetry is not
+# relabelled as a measured post-solve source trace.
+diags,post_diags,fft_diags=parse_log((root/'qumond/run.log').read_text(),allow_source_only=True)
+if len(diags)!=2 or [(d['step'],d['level']) for d in diags]!=[(0,9),(1,9)]:
+    raise ValueError('unexpected fixed-source diagnostic call coverage')
+for d in diags:
+    if not (d['cells']==n**3 and d['updated_cells']==n**3 and d['skipped_cells']==0 and d['missing_face_links']==0):
+        raise ValueError('incomplete phantom source cell coverage')
+    if set(d['fields'])!={'newtonian_source','phantom_source','combined_source'}:
+        raise ValueError('incomplete historical source statistics')
+    if not all(math.isfinite(v) for field in d['fields'].values() for v in field.values()):
+        raise ValueError('nonfinite historical source statistics')
+    if d['fields']['phantom_source']['rms']<=1e-6:raise ValueError('missing nonzero phantom source')
 level=int(math.log2(n)); T=lambda x:torch.as_tensor(x,device='cuda',dtype=torch.float64)
 if not torch.cuda.is_available():raise SystemExit('GPU required')
 inputs=root/'star_profile_code.dat',root/'hi_profile_code.dat',root/'source_contract.json'
@@ -80,11 +95,9 @@ for label,reference in [('newtonian',newt),('qumond',qref)]:
         if metric>1e-6:raise ValueError(f'source gate failed: {metric}')
         del xg,child,xyz,pos,ijk,p,pt,lap,diff
     del measured,coords,v,norm,R,mask,errors
-diags,_=parse_log((root/'qumond/run.log').read_text());assert diags
-for d in diags:
-    assert d['cells']==n**3 and d['updated_cells']==n**3 and d['skipped_cells']==0 and d['missing_face_links']==0
-    assert d['fields']['phantom_source']['rms']>1e-6
 result={'status':'PERIODIC_SOURCE_AND_FORCE_GATE_PASS','cases':rec,'qumond_diagnostic_calls':len(diags),
+        'diagnostic_scope':'source_only' if not post_diags else 'source_and_post_second_poisson',
+        'post_second_poisson_diagnostic_calls':len(post_diags),'fft_diagnostic_calls':len(fft_diags),
         'scope':'NGC 2403 THINGS-like fixed baryon source; uniform periodic QUMOND, no CDM halo or cosmological evolution',
         'grid':{'nmesh':n,'box_kpc':64.0,'cell_width_kpc':64.0/n},
         'stellar_ml':float(meta['stellar_ml']),

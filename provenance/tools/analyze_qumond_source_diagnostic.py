@@ -35,7 +35,13 @@ def parse_four_values(line: str) -> dict[str, float]:
     return dict(zip(("mean", "rms", "minimum", "maximum"), map(parse_number, values)))
 
 
-def parse_log(log: str) -> tuple[list[dict], list[dict], list[dict]]:
+def parse_log(log: str, *, allow_source_only: bool = False) -> tuple[list[dict], list[dict], list[dict]]:
+    """Keep post-Poisson matching strict unless all later telemetry is absent.
+
+    The explicit compatibility mode reads historical source-only logs. It
+    does not certify the missing post-Poisson/FFT diagnostics, and must not
+    accept a partially recorded set of those diagnostics.
+    """
     source_records: list[dict] = []
     post_p2_records: list[dict] = []
     fft_records: list[dict] = []
@@ -115,6 +121,12 @@ def parse_log(log: str) -> tuple[list[dict], list[dict], list[dict]]:
             if not fft_records:
                 raise ValueError(f"FFT RHS values appear before header: {line}")
             fft_records[-1]["packed_rhs"] = parse_four_values(line)
+
+    if allow_source_only and not post_p2_records and not fft_records:
+        for source in source_records:
+            source['post_second_poisson'] = None
+            source['telemetry_scope'] = 'historical_source_only_no_post_poisson_or_fft_records'
+        return source_records, post_p2_records, fft_records
 
     for source in source_records:
         post_p2 = next((
