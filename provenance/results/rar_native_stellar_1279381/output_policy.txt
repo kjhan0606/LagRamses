@@ -1,0 +1,6 @@
+purpose=short noncosmological native stellar endpoint integration; synthetic cap stress, not calibrated star formation
+model=QUMOND; fixed levels3,4; periodic; baryons only; initially no particles; original cooling/heating and channel-resolved SSP feedback; no sinks/AGN/dust/RT
+steps=4;dt_cap=0.002;maximum_end_time=0.008;eps_star=1000 deliberately stresses the accepted 50-percent depletion cap;star_mass_quantum=1e-5 code units
+noutput=1;aout=1.1;tout=1e100;foutput=2;fbackup=1e9;expected_full_dumps=2;upper_dump_bytes=16777216;expected_total_dump_bytes=33554432;reserve_including_copied_SSP_tables_exports_and_ledgers=1073741824
+free_bytes_before=151984581640192
+effective_namelist=/gpfs/kjhan/RAR_QUMOND/runs/rar_native_stellar_1279399/effective.nml

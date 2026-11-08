@@ -72,7 +72,8 @@ star-formation prescription is not a conserved stellar thermal reservoir.
 
 ## Validation scope
 
-Compilation and runtime validation are pending at implementation commit.
+Compilation and runtime validation were pending at implementation commit
+`0248da63cd5b9e4a6a90c6ce4e1fc3ad5876e6ba`; measured follow-up is recorded below.
 Use an isolated Grammar CPU build and one bounded native source fixture with
 actual births, SSP return, cooling and both refinement levels. Check return
 mass/momentum/energy/elements, accepted birth debit/credit, age progression,
@@ -86,3 +87,61 @@ Preserve all outputs and the already measured nonzero AMR particle self force.
 Sink admission stays closed. Sink clouds have repeated negative sink IDs and
 are rebuilt by `create_sink`; the next sink implementation needs a separate
 physical sink-mass adapter and explicit body/cloud motion and accretion budget.
+
+## Measured implementation follow-up
+
+Grammar build `1279381` completed in 3m26s with PHASE0 stellar enrichment,
+CPU FFTW and HDF5, without dust or RT. Source `0248da6` was pushed after
+compilation and bounded execution; it was not described as fully validated
+before the independent audits below.
+
+Run `1279399` completed in 1m07s (53.1s simulation time). It starts with no
+particles and evolves a smooth moving baryonic gas on 960 physical leaves,
+levels 3 and 4, in a periodic box. Four intervals of 0.002 code time produce
+599 actual newborns at the first endpoint, followed by 599 return events at
+each later endpoint. Both levels contain births and feedback receivers.
+The deliberately large `eps_star=1000` is a synthetic depletion stress, not
+a proposed physical efficiency. The accepted star-mass quantum is 1e-5;
+the maximum donor depletion fraction is 0.499901676, below the 50% bound.
+
+Independent audit `1279402` passed. Audit `1279406` additionally verifies the
+two gas gravity half-kicks and exactly one post-source generation per time
+step, using the same preserved outputs without rerunning the simulation.
+
+| Check | Measured result |
+|---|---:|
+| Birth mass | 0.383810 code mass |
+| Accepted return events | 1,797 |
+| Stellar mass returned | 0.000581735384183595 code mass |
+| Maximum gas-plus-star mass difference over all nine fields | 6.67e-16 code mass |
+| Maximum individual return mass mismatch | 1.09e-19 code mass |
+| Maximum whole return gas-inventory mismatch | 8.54e-16 code units |
+| Eleven-element return receipts | 19,767 |
+| Maximum element request/accepted-deposit difference | 2.12e-22 code mass |
+| Old-roster KDK residual | 0 at exported precision |
+| Maximum gas gravity transaction residual | 5.21e-17 code units |
+| Cooling/heating leaf records | 1,797 / 2,043 |
+| Maximum cooling-call energy receipt mismatch | 5.38e-17 code energy |
+
+The independent particle-cloud integration, N/Q subface equations, phantom
+source and gathered forces pass at all nine field epochs. Both full dumps
+(after steps 2 and 4) agree with the post-source gas, particle masses,
+positions, velocities, birth masses/times, committed SSP ages and gravity
+fields. Newborns are absent from the preceding KDK roster and remain at their
+donor-cell centres with the donor's synchronized velocity. No third gas
+gravity kick occurs at the stellar endpoint. The unitless small residuals
+describe this numerical fixture, not the accuracy of a galaxy force model.
+
+Regression run `1279401` and audit `1279404` pass the existing five-case
+particle/cooling Newtonian and QUMOND checks, including matched half steps.
+Legacy source run `1279403` and audit `1279405` pass SSP elemental receipts,
+AGN physical-mass inventory and cooling reconciliation. Native sink/AGN
+admission remains closed: the legacy regression is not evidence for native
+sink coupling. No deterministic timestep-convergence claim is made for the
+new stochastic birth history.
+
+The effective namelist, result JSON, field checks, regression summaries,
+input/output hashes and exact remote paths are preserved in
+`provenance/results/rar_native_stellar_1279381/`. New run/audit scripts and
+their helpers are under `provenance/tools/`. Both full snapshots and all
+raw logs remain in `/gpfs/kjhan/RAR_QUMOND`; nothing was removed.

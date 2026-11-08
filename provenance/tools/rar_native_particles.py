@@ -4,18 +4,21 @@ import h5py
 import numpy as np
 
 
-def epoch(path, leaves):
+def epoch(path, leaves, role='diagnostic'):
     path = Path(path)
     header = path.read_text().splitlines()[0].split()
-    if header[:2] != ['#', 'cloud_width'] or header[3] != 'diagnostic':
-        raise ValueError('missing diagnostic cloud contract')
+    if len(header) != 4 or header[:2] != ['#', 'cloud_width'] or header[3] != role:
+        raise ValueError('missing or mismatched particle source-role contract')
     width = float(header[2])
-    rows = np.loadtxt(path, ndmin=2)
+    has_rows = any(line.strip() and not line.lstrip().startswith('#') for line in path.read_text().splitlines())
+    rows = np.loadtxt(path, ndmin=2) if has_rows else np.empty((0, 13))
     rows = rows[np.argsort(rows[:, 1])]
     if rows.shape[1] != 13 or not np.isfinite(rows).all():
         raise ValueError('invalid particle export')
     if len(np.unique(rows[:, 1])) != len(rows) or np.any(rows[:, 3] < 0):
         raise ValueError('invalid particle roster/mass')
+    if role == 'baryon' and np.any(rows[:, 2] != 1):
+        raise ValueError('baryon source includes a nonstellar particle')
     if not 0 < width <= 1 or np.any(rows[:, 4:7] < 0) or np.any(rows[:, 4:7] >= 1):
         raise ValueError('cloud width/periodic position')
     center, cell_width = leaves[:, 2:5], leaves[:, 5]
@@ -29,15 +32,15 @@ def epoch(path, leaves):
             lengths += np.maximum(0., np.minimum(hi, position + shift + width / 2)
                                   - np.maximum(lo, position + shift - width / 2))
         weights.append(np.prod(lengths, axis=1) / width**3)
-    weights = np.asarray(weights)
-    weight_error = float(np.max(abs(weights.sum(axis=1) - 1)))
+    weights = np.asarray(weights).reshape(len(rows), len(leaves))
+    weight_error = float(np.max(abs(weights.sum(axis=1) - 1), initial=0.))
     if weight_error > 1e-12 or np.any(weights < 0):
         raise ValueError('cloud partition is not positive/unit sum')
     density = rows[:, 3] @ weights / cell_width**3
     mass_error = float(abs(np.sum(density * cell_width**3) - np.sum(rows[:, 3])))
     gathered = weights @ leaves[:, 10:13]
-    force_error = float(np.max(abs(gathered - rows[:, 10:13])))
-    if mass_error > 1e-13 or force_error > 1e-12 * max(1., np.max(abs(gathered))):
+    force_error = float(np.max(abs(gathered - rows[:, 10:13]), initial=0.))
+    if mass_error > 1e-13 or force_error > 1e-12 * max(1., np.max(abs(gathered), initial=0.)):
         raise ValueError('particle mass or force gather mismatch')
     return rows, density, {'weight_sum_error': weight_error, 'deposited_mass_error': mass_error,
                            'force_gather_error': force_error, 'cloud_width': width}

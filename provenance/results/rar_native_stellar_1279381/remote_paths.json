@@ -1,0 +1,11 @@
+{
+  "build": "/gpfs/kjhan/RAR_QUMOND/builds/rar_effective_ssp_1279381",
+  "native_run": "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_stellar_1279399",
+  "native_audit_first": "/gpfs/kjhan/RAR_QUMOND/audits/rar_native_stellar_1279402",
+  "native_audit_final": "/gpfs/kjhan/RAR_QUMOND/audits/rar_native_stellar_1279406",
+  "particle_cooling_run": "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1279401",
+  "particle_cooling_audit": "/gpfs/kjhan/RAR_QUMOND/audits/rar_evolving_gas_1279404",
+  "legacy_source_run": "/gpfs/kjhan/RAR_QUMOND/runs/rar_stellar_commit_1279403",
+  "legacy_source_audit": "/gpfs/kjhan/RAR_QUMOND/audits/rar_source_regression_1279405",
+  "raw_outputs": "preserved"
+}

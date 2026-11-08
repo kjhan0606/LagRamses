@@ -1,0 +1,28 @@
+{
+  "schema": "rar_cooling_whole_operator_v1",
+  "epochs": [
+    {
+      "step": 0,
+      "aexp": 0.05063094256628325,
+      "records": 32768,
+      "effective_rhs_code": 2.7952549956523694e-14,
+      "accepted_thermal_code": 2.7952549956525066e-14,
+      "whole_operator_code": 2.7952549956309228e-14,
+      "unaccounted_final_correction_code": -2.158386545557106e-25,
+      "tolerance": 9.412699896076728e-24,
+      "within_tolerance": true
+    },
+    {
+      "step": 1,
+      "aexp": 0.05126984760442417,
+      "records": 32768,
+      "effective_rhs_code": -1.0827161610174997e-08,
+      "accepted_thermal_code": -1.0827161610174998e-08,
+      "whole_operator_code": -1.0827161610174939e-08,
+      "unaccounted_final_correction_code": 5.955700410381799e-23,
+      "tolerance": 1.0835631939647541e-18,
+      "within_tolerance": true
+    }
+  ],
+  "limits": "Effective thermal source and whole cooling call, including final floors; no cosmic gravitational or stellar energy closure."
+}

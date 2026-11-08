@@ -5,7 +5,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 p=argparse.ArgumentParser();p.add_argument('run',type=Path);p.add_argument('output',type=Path);p.add_argument('--case',default='new_on');p.add_argument('--snapshots',type=int,default=2)
-p.add_argument('--leaf-file',default='composite_leaf_state.tsv');p.add_argument('--snapshot-glob',default='output_*/data_*.h5');p.add_argument('--evolving',action='store_true');p.add_argument('--particles',action='store_true');a=p.parse_args()
+p.add_argument('--leaf-file',default='composite_leaf_state.tsv');p.add_argument('--snapshot-glob',default='output_*/data_*.h5');p.add_argument('--evolving',action='store_true');p.add_argument('--particles',action='store_true');p.add_argument('--particle-role',choices=['diagnostic','baryon','cdm'],default='diagnostic');a=p.parse_args()
 case=a.run/a.case;leaf=np.loadtxt(case/a.leaf_file);face=np.loadtxt(case/'composite_faces.tsv')
 constants=np.array((case/a.leaf_file).read_text().splitlines()[0].split()[2:],float)
 fourpi,a0=constants[:2];external=constants[2:]
@@ -49,7 +49,7 @@ if a.particles:
  from rar_native_particles import epoch
  index=re.fullmatch(r'composite_epoch_(\d+)_leaf.tsv',a.leaf_file)
  if not a.evolving or index is None:raise ValueError('particles require an evolving field epoch')
- _,particle_density,particle_report=epoch(case/f'particles_epoch_{int(index[1]):05d}.tsv',leaf)
+ _,particle_density,particle_report=epoch(case/f'particles_epoch_{int(index[1]):05d}.tsv',leaf,role=a.particle_role)
 gn=gradient(pn);gq=gradient(pq);fn=faces(pn,gn);fq=faces(pq,gq)
 rhsn=fourpi*(source-np.sum(volume*source)/volume.sum())
 resn=norm(divergence(fn[np.arange(len(face)),axis])-rhsn)/norm(rhsn)
