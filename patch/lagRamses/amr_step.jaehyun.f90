@@ -10,7 +10,7 @@ recursive subroutine amr_step(ilevel,icount)
   use hydro_commons
   use poisson_commons
   use qumond_composite_runtime, only: qumond_publish_fixed_source,qumond_restore_published, &
-       qumond_evolution_begin,qumond_evolution_end
+       qumond_evolution_begin,qumond_evolution_end,qumond_stellar_endpoint
   use pbh_commons, only: use_pbh, pbh_mark_level
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_enrichment_config, only: use_channel_resolved_feedback
@@ -902,7 +902,7 @@ recursive subroutine amr_step(ilevel,icount)
   endif
 
   ! Thermal feedback from stars (also call if no feedback, for bookkeeping)
-  if(hydro.and.star) then
+  if(hydro.and.star.and..not.qh_stellar_sources) then
                                call timer('feedback','start')
      if(ilevel==levelmin)call diag_rar_global_inventory('before_stellar_transport')
      call thermal_feedback(ilevel)
@@ -977,7 +977,7 @@ recursive subroutine amr_step(ilevel,icount)
 #endif
                                call timer('hydro - set uold','start')
      call set_uold(ilevel)
-     if(star.and.ilevel==levelmin)call diag_rar_global_inventory('after_stellar_transport')
+     if(star.and.ilevel==levelmin.and..not.qh_stellar_sources)call diag_rar_global_inventory('after_stellar_transport')
 
      ! Add gravity source term with half time step and old force
      ! in order to complete the time step 
@@ -1004,7 +1004,7 @@ recursive subroutine amr_step(ilevel,icount)
      ! Still need a chemistry call if RT is defined but not
      ! actually doing radiative transfer (i.e. rt==false):
                                call timer('cooling','start')
-     if(neq_chem.or.cooling.or.T2_star>0.0)then
+     if((neq_chem.or.cooling.or.T2_star>0.0).and..not.qh_stellar_sources)then
         cool_t1=omp_get_wtime()
         if(qh_evolve)then
         call diag_rar_cooling_inventory('before_cooling',ilevel)
@@ -1037,7 +1037,7 @@ recursive subroutine amr_step(ilevel,icount)
   endif
 #else
                                call timer('cooling','start')
-  if(neq_chem.or.cooling.or.T2_star>0.0)then
+  if((neq_chem.or.cooling.or.T2_star>0.0).and..not.qh_stellar_sources)then
      cool_t1=omp_get_wtime()
      if(qh_evolve)then
         call diag_rar_cooling_inventory('before_cooling',ilevel)
@@ -1106,7 +1106,7 @@ recursive subroutine amr_step(ilevel,icount)
   ! Star formation in leaf cells only
   !----------------------------------
                                call timer('feedback','start')
-  if(hydro.and.star)call star_formation(ilevel)
+  if(hydro.and.star.and..not.qh_stellar_sources)call star_formation(ilevel)
 
   ! Compute Bondi-Hoyle accretion parameters
                                call timer('sinks','start')
@@ -1190,6 +1190,7 @@ recursive subroutine amr_step(ilevel,icount)
   ! All child lists have merged into the canonical base lists here. Advance
   ! particles once, publish the new source, then synchronize gas and particles.
   if(qh_evolve.and.ilevel==levelmin)call qumond_evolution_end()
+  if(qh_stellar_sources.and.ilevel==levelmin)call qumond_stellar_endpoint()
 
   !---------------
   ! Radiation step

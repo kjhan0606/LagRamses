@@ -7,6 +7,7 @@ subroutine star_formation(ilevel)
   use pm_commons
   use hydro_commons
   use poisson_commons
+  use qumond_composite_particles, only: native_stellar_identity
   use cooling_module, ONLY: XH=>X, rhoc, mH , twopi
   use random
 #include "amr_index.h"
@@ -33,7 +34,7 @@ subroutine star_formation(ilevel)
   integer ::ncache,nnew,ivar,irad,ngrid,icpu,ilun
 !  integer ::ncache,nnew,ivar,irad,ngrid,icpu,index_star,ilun
 ! integer ::ncache,nnew,ivar,irad,ngrid,icpu,ilun
-  integer(i8b):: index_star
+  integer(i8b):: index_star,particle_identity
   integer ::igrid,ix,iy,iz,ind,i,j,n,istar,inew,nx_loc,ielt
   integer ::ntot,intot,jntot,ntot_all,info,nstar_corrected,ideb,ndeb,ncell
   logical ::ok_free,ok_all
@@ -66,6 +67,9 @@ subroutine star_formation(ilevel)
   character(len=15)::starlog_format
   logical::file_exist
   integer::birth_io_status,birth_cmd_status
+  integer::birth_ledger_status
+  character(len=8)::birth_ledger_env
+  logical::birth_ledger
   character(len=80),save::birth_directory_ready=''
   integer, dimension(:), allocatable:: threadnnew, cumulnnew
   real(dp):: imstar_lost, imstar_tot,jmstar_lost, jmstar_tot
@@ -76,6 +80,9 @@ subroutine star_formation(ilevel)
   if(.not. hydro)return
   if(ndim.ne.3)return
   if(static)return
+  birth_ledger_env=''
+  call get_environment_variable('RAR_STELLAR_BIRTH_LEDGER',birth_ledger_env,status=birth_ledger_status)
+  birth_ledger=birth_ledger_status==0.and.trim(birth_ledger_env)=='1'
 
   if(verbose)write(*,*)' +Entering star_formation'
 
@@ -348,6 +355,8 @@ subroutine star_formation(ilevel)
         ! Calculate new star particle and modify gas density
         do i=1,nnew
            index_star=index_star+1
+           particle_identity=index_star
+           if(qh_stellar_sources)particle_identity=native_stellar_identity()
 
            ! Get gas variables
            n=flag2(ind_cell_new(i))
@@ -362,11 +371,12 @@ subroutine star_formation(ilevel)
            if(metal)zg=uold(ind_cell_new(i),imetal)
            tpp(ind_part(i))=texp ! Birth epoch proper
            mp0(ind_part(i))=n*mstar
+           indtab(ind_part(i))=0d0 ! A reused slot must not retain another SSP's age progress.
 
            if(sf_birth_properties) then
               if(sf_virial)then
                  !writing to binary starlog
-                 write(ilun)index_star
+                 write(ilun)particle_identity
                  write(ilun)ilevel
                  write(ilun)birth_epoch
                  write(ilun)texp
@@ -386,7 +396,7 @@ subroutine star_formation(ilevel)
                  enddo
               else
                  !writing to binary starlog
-                 write(ilun)index_star
+                 write(ilun)particle_identity
                  write(ilun)ilevel
                  write(ilun)birth_epoch
                  write(ilun)texp
@@ -413,7 +423,7 @@ subroutine star_formation(ilevel)
            ptypep(ind_part(i))=PTYPE_STAR  ! Mark as star
            mp(ind_part(i))=n*mstar      ! Mass
            levelp(ind_part(i))=ilevel   ! Level
-           idp(ind_part(i))=index_star  ! Star identity
+           idp(ind_part(i))=particle_identity ! Native births share the live DM/stellar ID namespace.
            xp(ind_part(i),1)=x
            xp(ind_part(i),2)=y
            xp(ind_part(i),3)=z
@@ -422,17 +432,18 @@ subroutine star_formation(ilevel)
            vp(ind_part(i),3)=w
            if(metal)zp(ind_part(i))=zg  ! Initial star metallicity
 
+           ! Debit the same accepted event that was credited to this particle.
+           ! Other primitive gas quantities are unchanged until sub3 restores
+           ! conservative variables. The sampler already enforces this cap.
+           uold(ind_cell_new(i),1)=max(d-n*dstar*(1d0+f_w),0.5d0*d)
+           if(birth_ledger)then
+              write(*,'(A,1X,4(I0,1X),9(ES24.16,1X))') 'RAR_STELLAR_BIRTH_V1', &
+                   nstep_coarse,ilevel,ind_cell_new(i),particle_identity, &
+                   texp,vol_loc,mp(ind_part(i)),d,uold(ind_cell_new(i),1),u,v,w,uold(ind_cell_new(i),5)
+           endif
+
         end do
         ! End loop over new star particles
-
-        ! Modify gas density according to mass depletion
-        do i=1,ngrid
-           if(flag2(ind_cell(i))>0)then
-              n=flag2(ind_cell(i))
-              d=uold(ind_cell(i),1)
-              uold(ind_cell(i),1)=max(d-n*dstar*(1.0+f_w),0.5*d)
-           endif
-        end do
 
      end do
      ! End loop over cells
@@ -990,10 +1001,11 @@ subroutine sub2_star_formation(ilevel, igrid,ngrid,ntot,imstar_lost,imstar_tot)
            ! Compute Poisson realisation
            call poissdev(cell_seed,PoissMean,nstar(i))
            ! Compute depleted gas mass
-           mgas=nstar(i)*mstar
-           ! Security to prevent more than 90% of gas depletion
-           if (mgas > 0.9*mcell) then
-              nstar_corrected=int(0.9*mcell/mstar)
+           mgas=nstar(i)*mstar*(1d0+f_w)
+           ! Apply the existing 50% gas-depletion cap BEFORE crediting stars.
+           ! The old 90% sampling cap followed by a 50% gas clamp created mass.
+           if (mgas > 0.5d0*mcell) then
+              nstar_corrected=int(0.5d0*mcell/(mstar*(1d0+f_w)))
               imstar_lost=imstar_lost+(nstar(i)-nstar_corrected)*mstar
               nstar(i)=nstar_corrected
            endif

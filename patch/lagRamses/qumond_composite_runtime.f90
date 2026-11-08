@@ -1,22 +1,27 @@
 ! Native serial periodic fixed-mesh gravity publication and common-time evolution.
-! Controlled gas/particle evolution excludes source creation and extra gravity.
+! Stellar endpoint transactions are separately enabled; sink gravity remains excluded.
 module qumond_composite_runtime
   use amr_commons
   use poisson_commons
   use qumond_composite_particles
-  use hydro_commons, only: uold,smallr,nvar,courant_factor
+  use hydro_commons, only: uold,unew,smallr,nvar,courant_factor
+#ifdef PHASE0_STELLAR_ENRICHMENT
+  use stellar_enrichment_config, only: use_channel_resolved_feedback
+#endif
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #include "amr_index.h"
   implicit none
   private
   public :: qumond_publish_fixed_source,qumond_restore_published
   public :: qumond_evolution_begin,qumond_evolution_end
+  public :: qumond_stellar_endpoint
   real(dp),allocatable :: saved_phi(:),saved_force(:,:),saved_rho(:)
   real(dp),allocatable :: saved_gas(:)
   real(dp) :: saved_time=-huge(1d0),physical_rho_max=0d0,evolution_start=0d0,evolution_dt=0d0
   logical :: evolution_open=.false.
   integer :: export_count=0,evolution_epoch=-1
   integer :: published_epoch=-1
+  integer :: source_generation=0,published_generation=-1
 contains
   subroutine qumond_publish_fixed_source()
     real(dp),allocatable :: density(:),rhs(:),pn(:),pq(:),phantom(:),gradient(:,:),draft_n(:)
@@ -25,6 +30,7 @@ contains
     integer::i,j,k,lev,ids(nvector),ierr,it_n,it_q,cell,export_status,unit
     character(len=8)::export_env
     character(len=80)::leaf_file
+    logical :: same_time_refresh
     if(.not.qh_publish)call clean_stop
     if(qh_composite_mesh%n==0)then
        call composite_native_build(qh_composite_mesh,ierr)
@@ -32,7 +38,13 @@ contains
     endif
     if(nstep_coarse==0)call continuum_check()
     associate(mesh=>qh_composite_mesh)
-    if(qh_evolve.and.saved_time==t.and.allocated(saved_gas))then
+    same_time_refresh=qh_evolve.and.saved_time==t.and.allocated(saved_gas).and. &
+         source_generation/=published_generation
+    if(same_time_refresh)then
+       if(.not.qh_stellar_sources.or.evolution_open.or.source_generation/=published_generation+1) &
+            call fail('unauthorized same-time physical source replacement')
+    endif
+    if(qh_evolve.and.saved_time==t.and.allocated(saved_gas).and..not.same_time_refresh)then
        if(any(uold(mesh%cell,1)/=saved_gas))call fail('completed endpoint gas source changed')
        if(pic)then
           if(.not.native_particles_cached())call fail('completed endpoint particle source changed')
@@ -131,12 +143,12 @@ contains
        do i=1,size(phi)
           if(qh_cell_level(i)/=lev)cycle
           if(qh_valid(1,lev))then
-             qh_previous(i,1)=qh_current(i,1)
+             if(.not.same_time_refresh)qh_previous(i,1)=qh_current(i,1)
           else
              qh_previous(i,1)=draft_n(i)
           endif
           if(qh_valid(2,lev))then
-             qh_previous(i,2)=qh_current(i,2)
+             if(.not.same_time_refresh)qh_previous(i,2)=qh_current(i,2)
           else
              qh_previous(i,2)=saved_phi(i)
           endif
@@ -145,7 +157,7 @@ contains
        enddo
        do k=1,2
           if(qh_valid(k,lev))then
-             qh_old_time(k,lev)=qh_time(k,lev)
+             if(.not.same_time_refresh)qh_old_time(k,lev)=qh_time(k,lev)
           else
              qh_old_time(k,lev)=t
           endif
@@ -154,6 +166,7 @@ contains
        enddo
     enddo
     published_epoch=nstep_coarse
+    published_generation=source_generation
     saved_time=t
     if(qh_evolve)then
        if(.not.allocated(saved_gas))allocate(saved_gas(mesh%n))
@@ -161,6 +174,8 @@ contains
     endif
     call qumond_restore_published()
     write(*,*) 'RAR_COMPOSITE_MODEL_V1',use_mond,gravity_type
+    if(qh_stellar_sources)write(*,*) 'RAR_QUMOND_SOURCE_GENERATION_V1', &
+         nstep_coarse,t,source_generation,same_time_refresh
     write(*,*) 'RAR_QUMOND_PUBLICATION_V1',nstep_coarse,t,mesh%n,it_n,it_q,res_n,res_q,balance, &
          sum(saved_phi(mesh%cell)*mesh%volume),sqrt(sum(mesh%volume*sum(gradient**2,dim=1)))
     export_env=''
@@ -266,6 +281,10 @@ contains
     integer::lev,status,ios
     character(len=80)::env,filename
     if(.not.qh_evolve.or.evolution_open)call fail('invalid evolution begin phase')
+#ifdef PHASE0_STELLAR_ENRICHMENT
+    if(qh_stellar_sources.and..not.use_channel_resolved_feedback()) &
+         call fail('native stellar transaction requires channel-resolved feedback')
+#endif
     call restrict_gas_and_ghosts()
     call qumond_publish_fixed_source()
     call refresh_gas_and_gravity_ghosts()
@@ -337,6 +356,73 @@ contains
     call restrict_gas_and_ghosts()
     evolution_open=.false.
   end subroutine qumond_evolution_end
+
+  subroutine qumond_stellar_endpoint()
+    integer :: lev,ivar,i
+    if(.not.qh_stellar_sources.or.evolution_open.or.saved_time/=t.or.published_generation/=source_generation) &
+         call fail('stellar source transaction requires a synchronized completed endpoint')
+    call native_stellar_begin()
+    ! The old roster has already completed KDK. Repartition for the existing
+    ! level-local source routines; no newborn belongs to the completed drift.
+    do lev=levelmin,nlevelmax
+       call kill_tree_fine(lev)
+    enddo
+    call diag_rar_global_inventory('before_native_return')
+    ! Initialize EVERY level before any deposit; a later set_unew must not
+    ! overwrite a deposit made near a refinement boundary.
+    do lev=levelmin,nlevelmax
+       call set_unew(lev)
+    enddo
+    do lev=levelmin,nlevelmax
+       call thermal_feedback(lev)
+    enddo
+    do lev=nlevelmax,levelmin,-1
+       do ivar=1,nvar
+          call make_virtual_reverse_dp(unew(1,ivar),lev)
+       enddo
+    enddo
+    associate(mesh=>qh_composite_mesh)
+    do lev=levelmin,nlevelmax
+       do i=1,size(qh_cell_level)
+          if(qh_cell_level(i)/=lev)cycle
+          if(son(i)>0.and.any(unew(i,:)/=uold(i,:))) &
+               call fail('stellar source deposited into a covered cell')
+       enddo
+    enddo
+    if(.not.all(ieee_is_finite(unew(mesh%cell,:))).or.any(unew(mesh%cell,1)<smallr)) &
+         call fail('invalid stellar receiver state')
+    ! set_uold also adds a gravity half-source and must not be used here.
+    uold(mesh%cell,:)=unew(mesh%cell,:)
+    call restrict_gas_and_ghosts()
+    call diag_rar_global_inventory('after_native_return')
+    if(cooling)then
+       do lev=nlevelmax,levelmin,-1
+          call diag_rar_cooling_inventory('before_cooling',lev)
+          call cooling_fine(lev)
+          call diag_rar_cooling_inventory('after_cooling',lev)
+       enddo
+    endif
+    call restrict_gas_and_ghosts()
+    call diag_rar_global_inventory('before_native_birth')
+    do lev=nlevelmax,levelmin,-1
+       call star_formation(lev)
+       call restrict_gas_and_ghosts()
+    enddo
+    call diag_rar_global_inventory('after_native_birth')
+    do lev=nlevelmax,levelmin,-1
+       call merge_tree_fine(lev)
+    enddo
+    call native_stellar_reconcile(mesh,use_mond)
+    if(source_generation==huge(source_generation))call fail('physical source generation overflow')
+    source_generation=source_generation+1
+    call qumond_publish_fixed_source()
+    ! Refresh acceleration for the next interval only. There is no third
+    ! gravity kick, newborn drift, or rotation of distinct-time histories.
+    call refresh_gas_and_gravity_ghosts()
+    write(*,*) 'RAR_NATIVE_STELLAR_ENDPOINT_V1',nstep_coarse,t,source_generation, &
+         sum(uold(mesh%cell,1)*mesh%volume)
+    end associate
+  end subroutine qumond_stellar_endpoint
 
   subroutine restrict_gas_and_ghosts()
     integer::lev

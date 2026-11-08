@@ -11,6 +11,7 @@ module qumond_composite_particles
   private
   public :: native_particles_source,native_particles_force,native_particles_cached
   public :: native_particles_begin,native_particles_drift,native_particles_finish,native_particles_export
+  public :: native_stellar_begin,native_stellar_reconcile,native_stellar_identity
   integer,allocatable :: slots(:),ptr(:),leaf(:),lookup(:),slot_index(:)
   integer(i8b),allocatable :: identities(:)
   integer(kind=1),allocatable :: species(:)
@@ -18,7 +19,8 @@ module qumond_composite_particles
   real(dp),allocatable :: start_x(:,:),start_v(:,:),start_a(:,:),half_v(:,:)
   real(dp) :: cloud_width=0d0,domain_width=0d0,displacement_limit=0d0
   integer :: np=0,nweight=0
-  logical :: initialized=.false.,step_open=.false.,drifted=.false.
+  logical :: initialized=.false.,step_open=.false.,drifted=.false.,stellar_open=.false.
+  integer(i8b) :: next_stellar_identity=0_i8b
   character(len=32) :: source_role=''
 contains
   subroutine fail(reason)
@@ -27,10 +29,11 @@ contains
     call clean_stop
   end subroutine
 
-  subroutine initialize_roster(mesh,is_mond)
+  subroutine initialize_roster(mesh,is_mond,canonical)
     type(composite_mesh_t),intent(in) :: mesh
     logical,intent(in) :: is_mond
-    integer :: lev,g,grid,p,j,count,status,ios
+    logical,intent(in),optional :: canonical
+    integer :: lev,g,grid,p,j,count,status,ios,last_level
     character(len=128) :: width_env
     integer(i8b),allocatable :: sorted(:)
     if(.not.allocated(idp).or..not.allocated(xp).or..not.allocated(vp).or..not.allocated(mp)) &
@@ -47,7 +50,11 @@ contains
     ! Called after the root kill_tree, before recursion: the level lists
     ! partition the live roster. Free slots and merged child aliases are not
     ! inferred from a default particle species or an array prefix.
-    do lev=levelmin,nlevelmax
+    last_level=nlevelmax
+    if(present(canonical))then
+       if(canonical)last_level=levelmin
+    endif
+    do lev=levelmin,last_level
        do g=1,active(lev)%ngrid
           grid=active(lev)%igrid(g);p=headp(grid)
           do j=1,numbp(grid)
@@ -68,11 +75,13 @@ contains
     do j=2,np
        if(sorted(j)==sorted(j-1))call fail('duplicate live particle identity')
     enddo
-    source_role=''
-    call get_environment_variable('RAR_NATIVE_PARTICLE_ROLE',source_role,status=status)
-    if(status/=0.or.len_trim(source_role)==0)then
-       source_role='baryon'
-       if(any(species==PTYPE_DM))source_role='cdm'
+    if(.not.initialized)then
+       source_role=''
+       call get_environment_variable('RAR_NATIVE_PARTICLE_ROLE',source_role,status=status)
+       if(status/=0.or.len_trim(source_role)==0)then
+          source_role='baryon'
+          if(any(species==PTYPE_DM))source_role='cdm'
+       endif
     endif
     select case(trim(source_role))
     case('baryon')
@@ -84,6 +93,7 @@ contains
     case default
        call fail('unknown particle source role')
     end select
+    if(.not.initialized)then
     cloud_width=mesh%box*0.5d0**levelmin
     width_env=''
     call get_environment_variable('RAR_NATIVE_PARTICLE_CLOUD_WIDTH',width_env,status=status)
@@ -97,6 +107,8 @@ contains
          call fail('particle cloud width must span at least a base cell and at most the domain')
     domain_width=mesh%box
     displacement_limit=0.5d0*minval(mesh%width)
+    endif
+    source_x=-huge(1d0);accel=0d0
     initialized=.true.
     call validate_roster()
     write(*,*) 'RAR_NATIVE_PARTICLE_MODEL_V1',np,trim(source_role),cloud_width, &
@@ -108,10 +120,11 @@ contains
     n=count(species==tag)
   end function
 
-  recursive subroutine sort_ids(a,lo,hi)
+  recursive subroutine sort_ids(a,lo,hi,order)
     integer(i8b),intent(inout) :: a(:)
     integer,intent(in) :: lo,hi
-    integer :: i,j
+    integer,intent(inout),optional :: order(:)
+    integer :: i,j,itmp
     integer(i8b) :: pivot,tmp
     i=lo;j=hi;pivot=a((lo+hi)/2)
     do
@@ -122,11 +135,98 @@ contains
           j=j-1
        enddo
        if(i>j)exit
-       tmp=a(i);a(i)=a(j);a(j)=tmp;i=i+1;j=j-1
+       tmp=a(i);a(i)=a(j);a(j)=tmp
+       if(present(order))then
+          itmp=order(i);order(i)=order(j);order(j)=itmp
+       endif
+       i=i+1;j=j-1
        if(i>j)exit
     enddo
-    if(lo<j)call sort_ids(a,lo,j)
-    if(i<hi)call sort_ids(a,i,hi)
+    if(lo<j)call sort_ids(a,lo,j,order)
+    if(i<hi)call sort_ids(a,i,hi,order)
+  end subroutine
+
+  subroutine native_stellar_begin()
+    call validate_roster()
+    if(step_open.or.stellar_open)call fail('stellar transaction overlaps a particle step')
+    if(.not.star.or..not.allocated(tpp).or..not.allocated(mp0).or..not.allocated(indtab)) &
+         call fail('stellar transaction requires initialized SSP particle arrays')
+    if(.not.native_particles_cached())call fail('stellar transaction begins with a stale source')
+    start_x=xp(slots,:);start_v=vp(slots,:)
+    next_stellar_identity=0_i8b
+    if(np>0)next_stellar_identity=maxval(identities)
+    stellar_open=.true.
+  end subroutine
+
+  integer(i8b) function native_stellar_identity() result(identity)
+    if(.not.stellar_open)call fail('stellar identity requested outside a source transaction')
+    if(next_stellar_identity==huge(next_stellar_identity))call fail('stellar identity range exhausted')
+    next_stellar_identity=next_stellar_identity+1_i8b
+    identity=next_stellar_identity
+  end function
+
+  subroutine native_stellar_reconcile(mesh,is_mond)
+    type(composite_mesh_t),intent(in) :: mesh
+    logical,intent(in) :: is_mond
+    integer,allocatable :: current_slots(:),order(:)
+    integer(i8b),allocatable :: keys(:)
+    logical,allocatable :: retained(:)
+    integer :: g,grid,j,p,i,k,count_live,lo,hi,mid,found,old_count
+    real(dp) :: old_mass,new_mass
+    if(.not.stellar_open.or.step_open)call fail('invalid stellar roster reconciliation phase')
+    if(npart<np)call fail('stellar transaction deleted a live particle')
+    allocate(current_slots(npart),keys(npart),order(npart),retained(npart))
+    count_live=0;retained=.false.
+    ! Only the canonical base lists are authoritative after the final merge.
+    do g=1,active(levelmin)%ngrid
+       grid=active(levelmin)%igrid(g);p=headp(grid)
+       do j=1,numbp(grid)
+          if(p<1.or.p>size(idp).or.count_live>=npart)call fail('invalid post-source canonical list')
+          count_live=count_live+1;current_slots(count_live)=p
+          keys(count_live)=idp(p);order(count_live)=count_live;p=nextp(p)
+       enddo
+       if(p/=0)call fail('post-source list exceeds declared length')
+    enddo
+    if(count_live/=npart.or.any(keys<=0))call fail('invalid post-source live particle coverage')
+    if(npart>1)call sort_ids(keys,1,npart,order)
+    do j=2,npart
+       if(keys(j)==keys(j-1))call fail('duplicate post-source particle identity')
+    enddo
+    do i=1,np
+       lo=1;hi=npart;found=0
+       do while(lo<=hi)
+          mid=(lo+hi)/2
+          if(keys(mid)==identities(i))then
+             found=mid;exit
+          else if(keys(mid)<identities(i))then
+             lo=mid+1
+          else
+             hi=mid-1
+          endif
+       enddo
+       if(found==0)call fail('stellar transaction lost an existing particle identity')
+       k=order(found);p=current_slots(k);retained(k)=.true.
+       if(ptypep(p)/=species(i))call fail('stellar transaction changed an existing source role')
+       if(any(xp(p,:)/=start_x(i,:)).or.any(vp(p,:)/=start_v(i,:))) &
+            call fail('isotropic stellar return changed surviving particle position or velocity')
+       if(.not.ieee_is_finite(mp(p)).or.mp(p)<0d0.or.mp(p)>masses(i)) &
+            call fail('stellar return must leave finite nonnegative nonincreasing stellar mass')
+       if(species(i)==PTYPE_DM.and.mp(p)/=masses(i))call fail('stellar transaction changed CDM mass')
+    enddo
+    do j=1,npart
+       if(retained(j))cycle
+       p=current_slots(j)
+       if(ptypep(p)/=PTYPE_STAR.or.mp(p)<=0d0.or.mp0(p)/=mp(p).or.tpp(p)/=texp.or.indtab(p)/=0d0) &
+            call fail('newborn SSP mass, birth time, role or progress is inconsistent')
+    enddo
+    old_count=np;old_mass=sum(masses);new_mass=sum(mp(current_slots))
+    deallocate(slots,ptr,leaf,lookup,slot_index,identities,species,masses,weights,source_x, &
+         accel,start_x,start_v,start_a,half_v)
+    ! Keep the originally selected source role, physical cloud width and domain.
+    call initialize_roster(mesh,is_mond,canonical=.true.)
+    call check_base_lists()
+    stellar_open=.false.
+    write(*,*) 'RAR_NATIVE_STELLAR_ROSTER_V1',nstep_coarse,t,old_count,np,old_mass,new_mass
   end subroutine
 
   subroutine validate_roster()
@@ -240,7 +340,7 @@ contains
     real(dp) :: speed,acc,bound
     integer :: p,d
     call validate_roster()
-    if(step_open)call fail('duplicate particle step begin')
+    if(step_open.or.stellar_open)call fail('particle step overlaps an unfinished transaction')
     start_x=xp(slots,:);start_v=vp(slots,:);start_a=accel
     do p=1,np
        do d=1,3

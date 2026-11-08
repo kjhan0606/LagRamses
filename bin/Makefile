@@ -839,6 +839,10 @@ slope_types.o: amr_parameters.jaehyun.o
 endif
 
 qumond_composite_runtime.o: poisson_commons.o hydro_commons.o qumond_composite_particles.o
+ifeq ($(PHASE0_STELLAR_ENRICHMENT),1)
+qumond_composite_runtime.o: stellar_enrichment_config.o
+endif
+star_formation.kjhan.o: qumond_composite_particles.o
 amr_step.jaehyun.o: qumond_composite_runtime.o
 adaptive_loop.jaehyun.o: poisson_commons.o
 cooling_fine.kjhan.o: poisson_commons.o
