@@ -1,0 +1,19 @@
+{
+  "schema": "rar_composite_publication_independent_v1",
+  "leaves": 5608,
+  "subfaces": 17148,
+  "newtonian_relative_residual": 7.793518094960313e-10,
+  "qumond_relative_residual": 9.907411095943773e-10,
+  "phantom_relative_difference": 4.49000865690049e-16,
+  "force_relative_difference": 1.4497944749971657e-16,
+  "source_relative_difference": 0.0,
+  "snapshots": [],
+  "gas_state_mode": "evolving",
+  "particle_source": {
+    "weight_sum_error": 0.0,
+    "deposited_mass_error": 0.0,
+    "force_gather_error": 3.469446951953614e-17,
+    "cloud_width": 0.0625
+  },
+  "limits": "Independent native operator/source/field snapshot reconstruction. Transport/source accounting, continuum accuracy, particles and evolving MPI/restart require their own evidence."
+}

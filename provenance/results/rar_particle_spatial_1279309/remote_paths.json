@@ -1,0 +1,17 @@
+{
+  "fortran_source_revision": "0ab5e379d8ee85ba83c835d0d2c52f43a1abb63c",
+  "build": "/gpfs/kjhan/RAR_QUMOND/builds/rar_effective_ssp_1279309",
+  "rejected_sparse_trial": "/gpfs/kjhan/RAR_QUMOND/analysis/rar_native_quadratic_1279304",
+  "moving_boundary_runs": [
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_particle_resolution_1279312",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_particle_resolution_1279330"
+  ],
+  "original_default_reference": "/gpfs/kjhan/RAR_QUMOND/runs/rar_particle_probe_1279276",
+  "raw_output_policy": "All native field exports, exact executed runners/auditors, input files and logs remain in the original run directories. No raw output was removed.",
+  "fixed_boundary_run": "/gpfs/kjhan/RAR_QUMOND/runs/rar_particle_resolution_1279334",
+  "complete_run_jobs": [
+    1279312,
+    1279330,
+    1279334
+  ]
+}

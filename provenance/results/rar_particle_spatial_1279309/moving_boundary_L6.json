@@ -1,0 +1,45 @@
+{
+  "schema": "rar_native_fixed_cloud_resolution_v1",
+  "cases": {
+    "L6_newtonian": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 9.952975943416931e-17,
+      "cloud_width": 0.0625,
+      "base_level": 6,
+      "leaves": 288688,
+      "subfaces": 868692,
+      "acceleration": [
+        0.001995767351093889,
+        1.7049936529745565e-05,
+        2.0938304007009747e-05
+      ],
+      "self_over_Gm_s2": 0.003898339858478397,
+      "ratio_to_original_amr_self_force": 0.08171585728669885,
+      "fine_level_mass_fraction": 0.0,
+      "nearest_refinement_subface_distance": 0.04667500000000002,
+      "baseline_acceleration_max_difference": 0.025144729825814744
+    },
+    "L6_qumond": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 1.8344700758454735e-16,
+      "cloud_width": 0.0625,
+      "base_level": 6,
+      "leaves": 288688,
+      "subfaces": 868692,
+      "acceleration": [
+        0.006361533881771077,
+        -0.0014112281342666681,
+        0.0021185901433850053
+      ],
+      "self_over_Gm_s2": 0.013382698249611977,
+      "ratio_to_original_amr_self_force": 0.05090507421389654,
+      "fine_level_mass_fraction": 0.0,
+      "nearest_refinement_subface_distance": 0.04667500000000002,
+      "baseline_acceleration_max_difference": 0.139304681964267
+    }
+  },
+  "scope": "Same physical single-cloud mass, width and position on different native two-level meshes. Initial forces; one explicit evolution step without snapshots.",
+  "limits": "The rasterized refinement interface changes with resolution; distance and fine-level deposited mass are reported. This is not a spatial convergence order, a galaxy softening calibration, or proof of exact momentum conservation."
+}

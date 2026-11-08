@@ -1,0 +1,83 @@
+{
+  "schema": "rar_native_fixed_cloud_resolution_v1",
+  "cases": {
+    "L4_newtonian": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 1.0408340855860843e-17,
+      "cloud_width": 0.0625,
+      "base_level": 4,
+      "leaves": 5384,
+      "subfaces": 16476,
+      "acceleration": [
+        -0.023148962474720855,
+        -0.005446233540180097,
+        -0.0055739330371432465
+      ],
+      "self_over_Gm_s2": 0.04770603880225023,
+      "ratio_to_original_amr_self_force": 1.0,
+      "fine_level_mass_fraction": 0.5031999999999996,
+      "nearest_refinement_subface_distance": 0.00019999999999997797,
+      "baseline_acceleration_max_difference": 0.0
+    },
+    "L4_qumond": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 6.938893903907228e-17,
+      "cloud_width": 0.0625,
+      "base_level": 4,
+      "leaves": 5384,
+      "subfaces": 16476,
+      "acceleration": [
+        -0.13294314808249594,
+        -0.00262862546658274,
+        -0.020904460033041736
+      ],
+      "self_over_Gm_s2": 0.2628951721665233,
+      "ratio_to_original_amr_self_force": 1.0,
+      "fine_level_mass_fraction": 0.5031999999999996,
+      "nearest_refinement_subface_distance": 0.00019999999999997797,
+      "baseline_acceleration_max_difference": 0.0
+    },
+    "L5_newtonian": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 5.076437859484473e-17,
+      "cloud_width": 0.0625,
+      "base_level": 5,
+      "leaves": 37976,
+      "subfaces": 114792,
+      "acceleration": [
+        -0.009802391421317756,
+        -8.04322447131231e-06,
+        3.4224795206760916e-05
+      ],
+      "self_over_Gm_s2": 0.01914541888376666,
+      "ratio_to_original_amr_self_force": 0.4013206580225143,
+      "fine_level_mass_fraction": 0.0031999999999996476,
+      "nearest_refinement_subface_distance": 0.031050000000000022,
+      "baseline_acceleration_max_difference": 0.0133465710534031
+    },
+    "L5_qumond": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 9.8879238130678e-17,
+      "cloud_width": 0.0625,
+      "base_level": 5,
+      "leaves": 37976,
+      "subfaces": 114792,
+      "acceleration": [
+        -0.04581710236429136,
+        0.01397834666191422,
+        -0.011430685071515106
+      ],
+      "self_over_Gm_s2": 0.09618543972740705,
+      "ratio_to_original_amr_self_force": 0.36586993566576864,
+      "fine_level_mass_fraction": 0.0031999999999996476,
+      "nearest_refinement_subface_distance": 0.031050000000000022,
+      "baseline_acceleration_max_difference": 0.08712604571820458
+    }
+  },
+  "scope": "Same physical single-cloud mass, width and position on different native two-level meshes. Initial forces; one explicit evolution step without snapshots.",
+  "limits": "The rasterized refinement interface changes with resolution; distance and fine-level deposited mass are reported. This is not a spatial convergence order, a galaxy softening calibration, or proof of exact momentum conservation."
+}

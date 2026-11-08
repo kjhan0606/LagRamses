@@ -1,0 +1,145 @@
+{
+  "schema": "rar_native_fixed_cloud_resolution_v1",
+  "cases": {
+    "L4_newtonian": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 1.734723475976807e-18,
+      "cloud_width": 0.0625,
+      "base_level": 4,
+      "leaves": 5608,
+      "subfaces": 17148,
+      "acceleration": [
+        -0.023050666487628574,
+        -0.005472956831709716,
+        -0.005618625085139247
+      ],
+      "refinement": "fixed_box",
+      "requested_refinement_diameter": 0.25,
+      "refined_volume": 0.052734375,
+      "self_over_Gm_s2": 0.04755590380984428,
+      "ratio_to_original_amr_self_force": 0.9968529143023531,
+      "fine_level_mass_fraction": 0.5031999999999996,
+      "nearest_refinement_subface_distance": 0.00019999999999997797,
+      "baseline_acceleration_max_difference": 9.829598709228116e-05,
+      "self_force_ratio_to_this_series_L4": 1.0
+    },
+    "L4_qumond": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 3.469446951953614e-17,
+      "cloud_width": 0.0625,
+      "base_level": 4,
+      "leaves": 5608,
+      "subfaces": 17148,
+      "acceleration": [
+        -0.1321434565022232,
+        -0.002797796199150049,
+        -0.021209787263654592
+      ],
+      "refinement": "fixed_box",
+      "requested_refinement_diameter": 0.25,
+      "refined_volume": 0.052734375,
+      "self_over_Gm_s2": 0.2614531639540645,
+      "ratio_to_original_amr_self_force": 0.9945148927590598,
+      "fine_level_mass_fraction": 0.5031999999999996,
+      "nearest_refinement_subface_distance": 0.00019999999999997797,
+      "baseline_acceleration_max_difference": 0.0007996915802727378,
+      "self_force_ratio_to_this_series_L4": 1.0
+    },
+    "L5_newtonian": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 3.469446951953614e-17,
+      "cloud_width": 0.0625,
+      "base_level": 5,
+      "leaves": 44864,
+      "subfaces": 135888,
+      "acceleration": [
+        -0.020970901122690143,
+        -0.00016902403404980143,
+        0.0001698715216318005
+      ],
+      "refinement": "fixed_box",
+      "requested_refinement_diameter": 0.3125,
+      "refined_volume": 0.052734375,
+      "self_over_Gm_s2": 0.04096146532814589,
+      "ratio_to_original_amr_self_force": 0.8586222280566668,
+      "fine_level_mass_fraction": 0.5031999999999996,
+      "nearest_refinement_subface_distance": 0.00019999999999997797,
+      "baseline_acceleration_max_difference": 0.005743804558775047,
+      "self_force_ratio_to_this_series_L4": 0.8613329165592829
+    },
+    "L5_qumond": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 1.3183898417423734e-16,
+      "cloud_width": 0.0625,
+      "base_level": 5,
+      "leaves": 44864,
+      "subfaces": 135888,
+      "acceleration": [
+        -0.07355145186142018,
+        0.005609730998157494,
+        -0.003987008167309163
+      ],
+      "refinement": "fixed_box",
+      "requested_refinement_diameter": 0.3125,
+      "refined_volume": 0.052734375,
+      "self_over_Gm_s2": 0.14428269097402502,
+      "ratio_to_original_amr_self_force": 0.5488221399616777,
+      "fine_level_mass_fraction": 0.5031999999999996,
+      "nearest_refinement_subface_distance": 0.00019999999999997797,
+      "baseline_acceleration_max_difference": 0.05939169622107576,
+      "self_force_ratio_to_this_series_L4": 0.5518490914088708
+    },
+    "L6_newtonian": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 1.12865446155741e-16,
+      "cloud_width": 0.0625,
+      "base_level": 6,
+      "leaves": 358912,
+      "subfaces": 1081920,
+      "acceleration": [
+        -0.004713522151857598,
+        0.00014232518482392678,
+        -0.0001678509691000478
+      ],
+      "refinement": "fixed_box",
+      "requested_refinement_diameter": 0.34375,
+      "refined_volume": 0.052734375,
+      "self_over_Gm_s2": 0.009216126456109038,
+      "ratio_to_original_amr_self_force": 0.1931857409983561,
+      "fine_level_mass_fraction": 0.5031999999999996,
+      "nearest_refinement_subface_distance": 0.00019999999999997797,
+      "baseline_acceleration_max_difference": 0.018435440322863258,
+      "self_force_ratio_to_this_series_L4": 0.19379563246154222
+    },
+    "L6_qumond": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 6.140921104957897e-16,
+      "cloud_width": 0.0625,
+      "base_level": 6,
+      "leaves": 358912,
+      "subfaces": 1081920,
+      "acceleration": [
+        -0.019408973689963558,
+        -0.0003796695064289192,
+        0.000773877657533467
+      ],
+      "refinement": "fixed_box",
+      "requested_refinement_diameter": 0.34375,
+      "refined_volume": 0.052734375,
+      "self_over_Gm_s2": 0.037945519154932834,
+      "ratio_to_original_amr_self_force": 0.14433707109272187,
+      "fine_level_mass_fraction": 0.5031999999999996,
+      "nearest_refinement_subface_distance": 0.00019999999999997797,
+      "baseline_acceleration_max_difference": 0.11353417439253238,
+      "self_force_ratio_to_this_series_L4": 0.14513314194048002
+    }
+  },
+  "scope": "Same physical single-cloud mass, width and position on different native two-level meshes. Initial forces; one explicit evolution step without snapshots.",
+  "limits": "Sphere mode has a moving rasterized boundary. Fixed-box mode verifies the actual physical refinement volume, particle-interface distance and refined mass fraction at each resolution. Neither mode by itself is a galaxy softening calibration or proof of exact momentum conservation."
+}

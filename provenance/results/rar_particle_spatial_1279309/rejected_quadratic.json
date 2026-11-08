@@ -1,0 +1,212 @@
+{
+  "linear": {
+    "geometry": {
+      "constant_residual": 1.7621459846850485e-12,
+      "volume_conservation_residual": 1.8735013540549517e-16,
+      "nonzeros": 44096,
+      "continuum": {
+        "newtonian_force_relative_l2": 0.014078692906800421,
+        "qumond_force_relative_l2": 0.014924372738239952,
+        "N_residual": 4.162222268077334e-14,
+        "Q_residual": 4.174080043601488e-14
+      }
+    },
+    "cases": {
+      "newtonian_a": {
+        "acceleration": [
+          [
+            -0.023148962502446045,
+            -0.005446233507041395,
+            -0.005573932973665024
+          ]
+        ],
+        "true_residual": 5.027578031137077e-15,
+        "relative_net_pair_force": 1.0,
+        "compiled_baseline_max_difference": 6.347822267827041e-11,
+        "self_over_Gm_s2": 0.0477060388108466
+      },
+      "qumond_a": {
+        "acceleration": [
+          [
+            -0.13294314854696623,
+            -0.0026286254817461732,
+            -0.020904460063483093
+          ]
+        ],
+        "true_residual": 1.76139815741403e-14,
+        "relative_net_pair_force": 1.0,
+        "compiled_baseline_max_difference": 4.644702955580726e-10,
+        "self_over_Gm_s2": 0.26289517307232174
+      },
+      "newtonian_b": {
+        "acceleration": [
+          [
+            0.02314896250244563,
+            0.0054462335070409405,
+            0.005573932973665124
+          ]
+        ],
+        "true_residual": 4.241013694244369e-15,
+        "relative_net_pair_force": 1.0,
+        "compiled_baseline_max_difference": 6.347812813584097e-11,
+        "self_over_Gm_s2": 0.04770603881084567
+      },
+      "qumond_b": {
+        "acceleration": [
+          [
+            0.13294314854696507,
+            0.0026286254817453002,
+            0.020904460063484
+          ]
+        ],
+        "true_residual": 1.592395771356112e-14,
+        "relative_net_pair_force": 1.0,
+        "compiled_baseline_max_difference": 4.6446907431274553e-10,
+        "self_over_Gm_s2": 0.26289517307231974
+      },
+      "newtonian_pair": {
+        "acceleration": [
+          [
+            -0.03108665924854582,
+            -0.006089521060382496,
+            -0.006864227637144671
+          ],
+          [
+            0.031086659248545763,
+            0.006089521060382713,
+            0.006864227637144532
+          ]
+        ],
+        "true_residual": 4.3980544914492745e-15,
+        "relative_net_pair_force": 4.059591564464015e-15,
+        "compiled_baseline_max_difference": 9.293841043978013e-11
+      },
+      "qumond_pair": {
+        "acceleration": [
+          [
+            -0.21514068430070807,
+            -0.011222175228147849,
+            -0.03802300321135081
+          ],
+          [
+            0.21514068430070682,
+            0.01122217522815,
+            0.03802300321135124
+          ]
+        ],
+        "true_residual": 1.770606641907467e-14,
+        "relative_net_pair_force": 5.766565395625846e-15,
+        "compiled_baseline_max_difference": 2.61127619527457e-10
+      }
+    }
+  },
+  "quadratic": {
+    "geometry": {
+      "max_normal_condition": 12.253923254093486,
+      "max_polynomial_reproduction_error": 2.4424906541753444e-15,
+      "minimum_neighbors": 24,
+      "constant_residual": 2.0736745653948674e-12,
+      "volume_conservation_residual": 2.0637788353261577e-16,
+      "nonzeros": 77000,
+      "continuum": {
+        "newtonian_force_relative_l2": 0.03174087493943022,
+        "qumond_force_relative_l2": 0.03270970247569468,
+        "N_residual": 6.701129771988062e-14,
+        "Q_residual": 6.820580867658399e-14
+      }
+    },
+    "cases": {
+      "newtonian_a": {
+        "acceleration": [
+          [
+            0.11455248597139134,
+            0.004196092343995591,
+            0.004242314046231961
+          ]
+        ],
+        "true_residual": 6.804572351941051e-15,
+        "relative_net_pair_force": 1.0,
+        "compiled_baseline_max_difference": 0.1377014484461122,
+        "self_over_Gm_s2": 0.22403864702255155
+      },
+      "qumond_a": {
+        "acceleration": [
+          [
+            0.38425739731777997,
+            0.030022155423402534,
+            0.018024890422585017
+          ]
+        ],
+        "true_residual": 2.7140711076481582e-14,
+        "relative_net_pair_force": 1.0,
+        "compiled_baseline_max_difference": 0.5172005454002759,
+        "self_over_Gm_s2": 0.7536126520191408
+      },
+      "newtonian_b": {
+        "acceleration": [
+          [
+            -0.11455248597139131,
+            -0.0041960923439952336,
+            -0.004242314046231863
+          ]
+        ],
+        "true_residual": 6.656719365729228e-15,
+        "relative_net_pair_force": 1.0,
+        "compiled_baseline_max_difference": 0.13770144844611215,
+        "self_over_Gm_s2": 0.22403864702255147
+      },
+      "qumond_b": {
+        "acceleration": [
+          [
+            -0.38425739731777997,
+            -0.030022155423397714,
+            -0.01802489042258212
+          ]
+        ],
+        "true_residual": 2.594347796933296e-14,
+        "relative_net_pair_force": 1.0,
+        "compiled_baseline_max_difference": 0.5172005454002759,
+        "self_over_Gm_s2": 0.7536126520191399
+      },
+      "newtonian_pair": {
+        "acceleration": [
+          [
+            0.10625742235665588,
+            0.0035500075637174998,
+            0.002945237213887097
+          ],
+          [
+            -0.10625742235665603,
+            -0.0035500075637170184,
+            -0.002945237213887123
+          ]
+        ],
+        "true_residual": 7.695419321616407e-15,
+        "relative_net_pair_force": 2.372987383445815e-15,
+        "compiled_baseline_max_difference": 0.1373440816981402
+      },
+      "qumond_pair": {
+        "acceleration": [
+          [
+            0.2988641475876895,
+            0.021283869859757408,
+            0.0007432363915235163
+          ],
+          [
+            -0.2988641475876931,
+            -0.02128386985975292,
+            -0.000743236391520255
+          ]
+        ],
+        "true_residual": 2.9393651934637605e-14,
+        "relative_net_pair_force": 1.1017674175612596e-14,
+        "compiled_baseline_max_difference": 0.5140048316272811
+      }
+    }
+  },
+  "self_force_ratio_quadratic_over_linear": {
+    "newtonian": 4.696232439479201,
+    "qumond": 2.8665899157145196
+  },
+  "scope": "Native geometry sparse prototype using the same source, cloud, face conservation and QUMOND equation. Direct solve rather than compiled FGMRES; no implementation readiness claim."
+}
