@@ -1,0 +1,693 @@
+   _/_/_/   _/    _/   _/_/_/         _/_/     _/    _/    _/_/_/    _/_/_/_/   
+  _/_/_/ 
+  _/        _/    _/    _/    _/     _/  _/    _/_/_/_/   _/    _/   _/         
+ _/    _/
+ _/         _/    _/    _/    _/    _/    _/   _/ _/ _/   _/         _/         
+ _/      
+ _/         _/    _/    _/_/_/     _/_/_/_/    _/    _/     _/_/     _/_/_/     
+   _/_/  
+ _/         _/    _/    _/    _/   _/    _/    _/    _/         _/   _/         
+       _/
+  _/        _/    _/    _/    _/   _/    _/    _/    _/   _/    _/   _/         
+ _/    _/
+   _/_/_/    _/_/_/     _/    _/   _/    _/    _/    _/    _/_/_/    _/_/_/_/   
+  _/_/_/ 
+                               Version 3.0                                      
+        
+              written by Romain Teyssier (University of Zurich)                 
+        
+              GPU acceleration by Juhan Kim (KIAS)                              
+          
+                      (c) CEA 1999-2007, UZH 2008-2014                          
+        
+         GPU & optimization by Juhan Kim (KIAS) 2026                            
+        
+  
+ Working with nproc =    1 for ndim = 3
+  
+ IOGROUPSIZECONE=           2
+  
+  
+ compile date = 11/03/26-08:16:59
+ patch dir    = ../patch/lagRamses
+ remote repo  = git@github.com:kjhan0606/LagRamses.git
+ local branch = research/ngc2403-tabulated-20261103
+ last commit  = 65eeb24ddb43e22e6b6acc48b6758c386d506413
+  
+Radiation transport selector: none
+ Fine MG max iterations = 100
+ Restart phi policy = cold predictor; checkpoint phi I/O retained
+ Abort on fine MG nonconvergence = T
+ GPU acceleration: hydro=F poisson=F fft=T sink=F scalar=F particle=F streams=1
+ Multigrid GPU smoother in merged red/black mode (mg_merged_rb=T)
+ Memory balance: mem_weight_grid=  3228 (nvar= 18)
+ Load-balance grid headroom= 0.850 x ngridmax
+ Work balance weights grid/part/SIDM-pair: 80 1 0
+ Work timing: every 4 steps, EMA= 0.25, remap min/horizon=8/16, safety= 1.20
+ MOND (QUMOND) enabled:
+   a0 =   1.2000E-08 cm/s^2
+   mu-function: simple [mu=x/(1+x)]
+   mode: full QUMOND with phantom density (Phase 1)
+ Stellar feedback mode: legacy
+ Stellar IMF id: 2
+ Stellar population model id: 0
+ Stellar yield source basis: per_star_cumulative
+ Stellar IMF mass support:   8.0000E-02   1.2000E+02
+ Stellar binary fraction:   0.0000E+00
+ Stellar terminal-fate policy: review_only_unresolved
+ Stellar fate-map SHA256: 
+ Stellar fate approval id: 
+ High-mass endpoint preset: source_consistent
+ Maximum remnant correction / initial mass:    0.0000000E+00
+ Stellar terminal-fate policy is review-only; production admission is blocked
+ Hydro var indices:
+    ichem   =            6
+Physics switches: Haardt-Madau UV=F J21=  0.0000E+00 self-shielding=F
+  RAMSES non-equilibrium chemistry (neq_chem)=F
+ Entering init_amr
+ K-section comm tree (non-ksection ordering):
+   nksec_levels  =  0
+   ksec_kmax     =  0
+   ksec_nbinodes =     1
+ Morton hash: building per-level hash tables...
+ Morton hash: inserted          0 grids total
+ Morton [init] self-lookups=         0 mismatch=         0
+ Morton hash: ALL CHECKS PASSED
+ Diagnostic: testing MPI after init_amr...
+ Diagnostic: ALLREDUCE OK, sum=     1
+ Entering init_hydro
+ Entering init_poisson
+ Building initial AMR grid
+ Entering flag
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      1 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering build_comm for level  3
+   Entering build_comm for level  4
+   Entering build_comm for level  5
+   Entering build_comm for level  6
+   Entering build_comm for level  7
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      8 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering build_comm for level  4
+   Entering build_comm for level  5
+   Entering build_comm for level  6
+   Entering build_comm for level  7
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make     64 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  4
+   Entering build_comm for level  5
+   Entering build_comm for level  6
+   Entering build_comm for level  7
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make    512 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  5
+   Entering build_comm for level  6
+   Entering build_comm for level  7
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  4
+  +==> end step 1        4096
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make   4096 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  5
+   Entering refine_fine for level  5   0   0
+  +Entering authorize_fine for level  5
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  6
+   Entering build_comm for level  7
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  5
+  +==> end step 1       32768
+  +Entering flag_fine for level  4
+  +==> end step 1        4096
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  5
+   Entering refine_fine for level  5   0   0
+  +Entering authorize_fine for level  5
+   ==> Make  32768 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  6
+   Entering refine_fine for level  6   0   0
+  +Entering authorize_fine for level  6
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  7
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  6
+  +==> end step 1      262144
+  +Entering flag_fine for level  5
+  +==> end step 1       32768
+  +Entering flag_fine for level  4
+  +==> end step 1        4096
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  5
+   Entering refine_fine for level  5   0   0
+  +Entering authorize_fine for level  5
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  6
+   Entering refine_fine for level  6   0   0
+  +Entering authorize_fine for level  6
+   ==> Make 262144 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  7
+ Complete refine
+ Entering init_flow
+   Entering init_flow_fine for level  7
+   Entering upload_fine for level 6
+   Entering upload_fine for level 5
+   Entering upload_fine for level 4
+   Entering upload_fine for level 3
+   Entering upload_fine for level 2
+   Entering upload_fine for level 1
+ Complete init_flow
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  1
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  2
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  3
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  4
+   Entering build_comm for level  5
+   Entering refine_fine for level  5   0   0
+  +Entering authorize_fine for level  5
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  5
+   Entering build_comm for level  6
+   Entering refine_fine for level  6   0   0
+  +Entering authorize_fine for level  6
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  6
+   Entering build_comm for level  7
+   Entering init_flow_fine for level  7
+  +Entering rho_fine for level  7
+  +Entering multipole_fine for level 7
+  +Entering cic_from_multipole for level 7
+  +Entering flag_fine for level  6
+  +==> end step 1      262144
+  +Entering flag_fine for level  5
+  +==> end step 1       32768
+  +Entering flag_fine for level  4
+  +==> end step 1        4096
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  1
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  2
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  3
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  4
+   Entering build_comm for level  5
+   Entering refine_fine for level  5   0   0
+  +Entering authorize_fine for level  5
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  5
+   Entering build_comm for level  6
+   Entering refine_fine for level  6   0   0
+  +Entering authorize_fine for level  6
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  6
+   Entering build_comm for level  7
+   Entering init_flow_fine for level  7
+  +Entering rho_fine for level  7
+  +Entering multipole_fine for level 7
+  +Entering cic_from_multipole for level 7
+  +Entering flag_fine for level  6
+  +==> end step 1      262144
+  +Entering flag_fine for level  5
+  +==> end step 1       32768
+  +Entering flag_fine for level  4
+  +==> end step 1        4096
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Morton hash: building per-level hash tables...
+ Morton hash: inserted     299593 grids total
+ Morton [init] self-lookups=    299593 mismatch=         0
+ Morton hash: ALL CHECKS PASSED
+ Time elapsed since startup:   2.18343298439868     
+ Initial mesh structure
+ Level  1 has          1 grids (       1,       1,       1,)
+ Level  2 has          8 grids (       8,       8,       8,)
+ Level  3 has         64 grids (      64,      64,      64,)
+ Level  4 has        512 grids (     512,     512,     512,)
+ Level  5 has       4096 grids (    4096,    4096,    4096,)
+ Level  6 has      32768 grids (   32768,   32768,   32768,)
+ Level  7 has     262144 grids (  262144,  262144,  262144,)
+CUDA pool: MPI local rank 0 -> GPU 0 (NVIDIA A100-SXM4-80GB, 79.3 GB, SM 8.0, PCIe 0007:00, streams=1)
+ Adaptive loop: CUDA pool early-init, available=T
+ Starting time integration
+ Entering amr_step_coarse
+ Entering amr_step1 for level 7  for a levelmin   7
+ NaN_CHK post_maketree: uold=         0 f=         0 d0=         0
+ NaN_CHK post_kinfb: uold=         0 f=         0 d0=         0
+ NaN_CHK post_agnfb: uold=         0 f=         0 d0=         0
+ NaN_CHK pre_rho: uold=         0 f=         0 d0=         0
+  +Entering rho_fine for level  7
+  +Entering multipole_fine for level 7
+  +Entering cic_from_multipole for level 7
+ NaN_CHK post_rho: uold=         0 f=         0 d0=         0
+ NaN_CHK pre_sync1: uold=         0 f=         0 d0=         0
+   Entering synchro_hydro_fine for level 7
+ NaN_CHK post_sync1: uold=         0 f=         0 d0=         0
+Entering fine multigrid at level  7
+ Dynamic exchange [MG forward L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ FFT Poisson: level=  7 grid=  128x  128x  128 N=        2097152 distributed=F
+cuFFT setup: 128 x 128 x 128, dx2=6.103516e-05, GPU mem=48.4 MB
+   ==> Level=    7 FFT direct solve DONE
+[cuFFT timers rank=1 N=128x128x128 ncalls=1] total=0.005s  H2D=0.002s(43.5%)  fwd=0.000s(1.7%)  green=0.000s(6.6%)  inv=0.000s(1.6%)  D2H=0.002s(46.8%)
+   Entering force_fine for level  7
+ NaN_CHK post_force: uold=         0 f=         0 d0=         0
+ [QUMOND_SOURCE_DIAG] step=0 level=7 a0_code=  9.1042673654E-01 fourpi=  1.2566370614E+01
+ [QUMOND_SOURCE_DIAG] cells updated skipped missing_faces= 2097152 2097152 0 0
+ [QUMOND_SOURCE_DIAG] newtonian_source mean rms min max=   2.3995901880E-03   1.0217813469E-01   1.0000000000E-06   2.8533294383E+01
+ [QUMOND_SOURCE_DIAG] phantom_source mean rms min max=   9.1029069124E-17   9.3257593530E-02  -2.1820858706E-01   1.2318890475E+01
+ [QUMOND_SOURCE_DIAG] combined_source mean rms min max=   2.3995901881E-03   1.8368347316E-01  -2.1820758706E-01   4.0852184858E+01
+ [QUMOND_SOURCE_DIAG] sample=1 xyz=   5.820312500E-01   5.039062500E-01   5.039062500E-01 rho_N/ph/rho_sum=   1.183335195E+00   1.750735060E+00   2.934070255E+00
+ [QUMOND_SOURCE_DIAG] sample=2 xyz=   5.039062500E-01   5.039062500E-01   6.992187500E-01 rho_N/ph/rho_sum=   1.000000000E-06   6.175734737E-02   6.175834737E-02
+ [QUMOND_SOURCE_DIAG] sample=3 xyz=   6.835937500E-01   6.835937500E-01   6.835937500E-01 rho_N/ph/rho_sum=   1.000000000E-06   2.271767422E-02   2.271867422E-02
+Entering fine multigrid at level  7
+ Dynamic exchange [MG forward L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ FFT Poisson: level=  7 grid=  128x  128x  128 N=        2097152 distributed=F
+   ==> Level=    7 FFT direct solve DONE
+[cuFFT timers rank=1 N=128x128x128 ncalls=2] total=0.009s  H2D=0.004s(45.2%)  fwd=0.000s(1.7%)  green=0.000s(3.6%)  inv=0.000s(1.6%)  D2H=0.004s(48.0%)
+   Entering force_fine for level  7
+   Entering synchro_hydro_fine for level 7
+ NaN_CHK post_sync2: uold=         0 f=         0 d0=         0
+  +Entering newdt_fine for level  7
+   Entering courant_fine for level  7
+ SGS_DT: level= 7 dt= 3.189E-04
+  +Entering set_unew for level  7
+ Fine step=      0 t= 0.00000E+00 dt= 3.189E-04 a= 1.000E+00 mem=74.9% 
+  +Entering set_uold for level  7
+  +Entering add_gravity_source_terms for level  7
+   Entering synchro_hydro_fine for level 7
+ LB process timing step=       0 wall-max=    4.10 s, compute-balance=100.00%, OMP-active= 99.34%, level-scale=  1.000  1.000
+ LB rank process-CPU min/mean/max=     4.077     4.077     4.077 s
+ === Direct cooling timings ===
+   cooling_fine :      0.000 s
+   cooling_table:      0.000 s
+ === Direct SNRT timings ===
+   snrt_advance :      0.000 s
+   snrt_diagnose:      0.000 s
+ === Particle sub-timers ===
+   make_tree  :      0.000 s
+   kill+virt  :      0.000 s
+   synchro    :      0.000 s
+   move       :      0.000 s
+   merge      :      0.000 s
+   TOTAL      :      0.000 s
+ === Sink sub-timers ===
+   AGN_feedback :      0.030 s
+   create_sink  :      0.000 s
+   grow_bondi   :      0.000 s
+   bondi_hoyle  :      0.000 s
+   TOTAL        :      0.030 s
+ Time elapsed since last coarse step:    4.11 s        1.96 mus/pt        1.96 mus/pt (av)
+ Used memory:   1.2 Gb
+ Memory min/max:      1.2 /      1.2 Gb
+ Total running time:   6.720000     s
+[cuFFT timers rank=1 N=128x128x128 ncalls=2] total=0.009s  H2D=0.004s(45.2%)  fwd=0.000s(1.7%)  green=0.000s(3.6%)  inv=0.000s(1.6%)  D2H=0.004s(48.0%)
+ Entering amr_step_coarse
+ Entering amr_step1 for level 7  for a levelmin   7
+ NaN_CHK post_maketree: uold=         0 f=         0 d0=         0
+ Defragmenting main memory...
+   Entering build_comm for level  1
+   Entering build_comm for level  2
+   Entering build_comm for level  3
+   Entering build_comm for level  4
+   Entering build_comm for level  5
+   Entering build_comm for level  6
+   Entering build_comm for level  7
+ defrag total:    0.310 s
+ Entering dump_all
+ Start backup header
+ Entering output_header
+ End backup header
+ Start backup info etc.
+ Entering output_info
+ Entering file_descriptor_hydro
+ End backup info etc.
+ HDF5 output: output_00001/data_00001.h5
+ HDF5 output done.
+ Poisson checkpoint marker: valid warm-start phi
+ NaN_CHK post_kinfb: uold=         0 f=         0 d0=         0
+ NaN_CHK post_agnfb: uold=         0 f=         0 d0=         0
+ NaN_CHK pre_rho: uold=         0 f=         0 d0=         0
+  +Entering rho_fine for level  7
+  +Entering multipole_fine for level 7
+  +Entering cic_from_multipole for level 7
+ NaN_CHK post_rho: uold=         0 f=         0 d0=         0
+ NaN_CHK pre_sync1: uold=         0 f=         0 d0=         0
+   Entering synchro_hydro_fine for level 7
+ NaN_CHK post_sync1: uold=         0 f=         0 d0=         0
+Entering fine multigrid at level  7
+ Dynamic exchange [MG forward L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ FFT Poisson: level=  7 grid=  128x  128x  128 N=        2097152 distributed=F
+   ==> Level=    7 FFT direct solve DONE
+[cuFFT timers rank=1 N=128x128x128 ncalls=3] total=0.018s  H2D=0.008s(44.1%)  fwd=0.000s(1.3%)  green=0.000s(1.9%)  inv=0.000s(1.2%)  D2H=0.009s(51.5%)
+   Entering force_fine for level  7
+ NaN_CHK post_force: uold=         0 f=         0 d0=         0
+ [QUMOND_SOURCE_DIAG] step=1 level=7 a0_code=  9.1042673654E-01 fourpi=  1.2566370614E+01
+ [QUMOND_SOURCE_DIAG] cells updated skipped missing_faces= 2097152 2097152 0 0
+ [QUMOND_SOURCE_DIAG] newtonian_source mean rms min max=   2.3995901880E-03   1.0217813469E-01   1.0000000000E-06   2.8533294383E+01
+ [QUMOND_SOURCE_DIAG] phantom_source mean rms min max=   9.1029069124E-17   9.3257593530E-02  -2.1820858706E-01   1.2318890475E+01
+ [QUMOND_SOURCE_DIAG] combined_source mean rms min max=   2.3995901881E-03   1.8368347316E-01  -2.1820758706E-01   4.0852184858E+01
+ [QUMOND_SOURCE_DIAG] sample=1 xyz=   5.820312500E-01   5.039062500E-01   5.039062500E-01 rho_N/ph/rho_sum=   1.183335195E+00   1.750735060E+00   2.934070255E+00
+ [QUMOND_SOURCE_DIAG] sample=2 xyz=   5.039062500E-01   5.039062500E-01   6.992187500E-01 rho_N/ph/rho_sum=   1.000000000E-06   6.175734737E-02   6.175834737E-02
+ [QUMOND_SOURCE_DIAG] sample=3 xyz=   6.835937500E-01   6.835937500E-01   6.835937500E-01 rho_N/ph/rho_sum=   1.000000000E-06   2.271767422E-02   2.271867422E-02
+Entering fine multigrid at level  7
+ Dynamic exchange [MG forward L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ FFT Poisson: level=  7 grid=  128x  128x  128 N=        2097152 distributed=F
+   ==> Level=    7 FFT direct solve DONE
+[cuFFT timers rank=1 N=128x128x128 ncalls=4] total=0.023s  H2D=0.010s(44.2%)  fwd=0.000s(1.4%)  green=0.000s(1.6%)  inv=0.000s(1.3%)  D2H=0.012s(51.5%)
+   Entering force_fine for level  7
+   Entering synchro_hydro_fine for level 7
+ NaN_CHK post_sync2: uold=         0 f=         0 d0=         0
+  +Entering newdt_fine for level  7
+   Entering courant_fine for level  7
+ SGS_DT: level= 7 dt= 3.189E-04
+  +Entering set_unew for level  7
+ Mesh structure
+ Level  1 has          1 grids (       1,       1,       1,)
+ Level  2 has          8 grids (       8,       8,       8,)
+ Level  3 has         64 grids (      64,      64,      64,)
+ Level  4 has        512 grids (     512,     512,     512,)
+ Level  5 has       4096 grids (    4096,    4096,    4096,)
+ Level  6 has      32768 grids (   32768,   32768,   32768,)
+ Level  7 has     262144 grids (  262144,  262144,  262144,)
+ Main step=      1 mcons= 0.00E+00 econs= 0.00E+00 epot=-5.92E-04 ekin= 1.50E-05
+ Fine step=      1 t= 3.18933E-04 dt= 3.189E-04 a= 1.000E+00 mem=74.9% 
+ Run completed
+ Total elapsed time:   4.61862668464892     
+
+     seconds         %    STEP (rank=      1)
+       0.078       0.9    particles               
+       0.067       0.8    feedback                
+       0.136       1.6    sinks                   
+       2.159      26.0    poisson                 
+       1.658      20.0    poisson-cuFFT base      
+       3.109      37.5    mond-phantom            
+       0.177       2.1    courant                 
+       0.193       2.3    hydro - set unew        
+       0.199       2.4    hydro - set uold        
+       0.018       0.2    cooling                 
+       0.493       5.9    io                      
+       8.291     100.0    TOTAL
