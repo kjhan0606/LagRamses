@@ -1,0 +1,36 @@
+{
+  "schema": "rar_composite_publication_independent_v1",
+  "leaves": 960,
+  "subfaces": 3024,
+  "newtonian_relative_residual": 8.713294739223173e-10,
+  "qumond_relative_residual": 7.919976713206726e-10,
+  "phantom_relative_difference": 3.5699483025978804e-16,
+  "force_relative_difference": 1.7238652200181872e-16,
+  "source_relative_difference": 1.1700227014351517e-15,
+  "snapshots": [
+    {
+      "snapshot": "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279537/output_00001/data_00001.h5",
+      "leaves": 960,
+      "phi_max_difference": 0.0,
+      "force_max_difference": 0.0,
+      "covered_phi_difference": 5.551115123125783e-17,
+      "covered_force_difference": 0.0,
+      "gas_max_momentum": 0.19151653874918323,
+      "gas_energy_relative_difference": null
+    }
+  ],
+  "gas_state_mode": "evolving",
+  "particle_source": {
+    "weight_sum_error": 8.881784197001252e-16,
+    "deposited_mass_error": 0.0,
+    "force_gather_error": 1.1102230246251565e-15,
+    "cloud_width": 0.125
+  },
+  "physical_sink_source": {
+    "weight_sum_error": 4.440892098500626e-16,
+    "deposited_mass_error": 3.3881317890172014e-21,
+    "force_gather_error": 5.551115123125783e-16,
+    "cloud_width": 0.125
+  },
+  "limits": "Independent native operator/source/field snapshot reconstruction. Transport/source accounting, continuum accuracy, particles and evolving MPI/restart require their own evidence."
+}

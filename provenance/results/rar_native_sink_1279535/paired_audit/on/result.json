@@ -1,0 +1,355 @@
+{
+  "schema": "rar_native_stellar_endpoint_audit_v1",
+  "steps": 4,
+  "end_time": 0.007561868348367045,
+  "timestep_sequence": [
+    0.002,
+    0.001561868348367044,
+    0.002,
+    0.002
+  ],
+  "leaves": 960,
+  "births": 599,
+  "max_accepted_depletion_fraction": 0.49990167685994535,
+  "budgets": [
+    {
+      "step": 0,
+      "new_stars": 599,
+      "birth_mass": 0.38381000000000004,
+      "return_events": 0,
+      "return_mass": 0.0,
+      "maximum_return_inventory_residual": 0.0
+    },
+    {
+      "step": 1,
+      "new_stars": 0,
+      "birth_mass": 0.0,
+      "return_events": 599,
+      "return_mass": 0.0001279558028062786,
+      "maximum_return_inventory_residual": 2.8297676701871666e-16
+    },
+    {
+      "step": 2,
+      "new_stars": 0,
+      "birth_mass": 0.0,
+      "return_events": 599,
+      "return_mass": 0.00018334269166169333,
+      "maximum_return_inventory_residual": 1.2836953722228372e-15
+    },
+    {
+      "step": 3,
+      "new_stars": 0,
+      "birth_mass": 0.0,
+      "return_events": 599,
+      "return_mass": 0.00021716907489942192,
+      "maximum_return_inventory_residual": 5.641646004528322e-16
+    }
+  ],
+  "maximum_total_mass_difference": 9.844554060833843e-10,
+  "maximum_kdk_residual": 0.0,
+  "particle_epochs": [
+    {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 0.0,
+      "cloud_width": 0.125
+    },
+    {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 0.0,
+      "cloud_width": 0.125
+    },
+    {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 4.440892098500626e-16,
+      "cloud_width": 0.125
+    },
+    {
+      "weight_sum_error": 8.881784197001252e-16,
+      "deposited_mass_error": 5.551115123125783e-17,
+      "force_gather_error": 1.3322676295501878e-15,
+      "cloud_width": 0.125
+    },
+    {
+      "weight_sum_error": 8.881784197001252e-16,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 1.1102230246251565e-15,
+      "cloud_width": 0.125
+    },
+    {
+      "weight_sum_error": 8.881784197001252e-16,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 1.1102230246251565e-15,
+      "cloud_width": 0.125
+    },
+    {
+      "weight_sum_error": 8.881784197001252e-16,
+      "deposited_mass_error": 5.551115123125783e-17,
+      "force_gather_error": 1.3322676295501878e-15,
+      "cloud_width": 0.125
+    },
+    {
+      "weight_sum_error": 8.881784197001252e-16,
+      "deposited_mass_error": 1.1102230246251565e-16,
+      "force_gather_error": 1.1102230246251565e-15,
+      "cloud_width": 0.125
+    },
+    {
+      "weight_sum_error": 8.881784197001252e-16,
+      "deposited_mass_error": 5.551115123125783e-17,
+      "force_gather_error": 1.1102230246251565e-15,
+      "cloud_width": 0.125
+    }
+  ],
+  "thermal": {
+    "calls": [
+      {
+        "step": 0,
+        "level": 3,
+        "time": 0.002,
+        "leaf_records": 448,
+        "owned_volume": 0.875,
+        "effective_rhs_code": 0.005123515601805696,
+        "accepted_energy_code": 0.005123515601805696,
+        "whole_call_energy_code": 0.005123515601805642,
+        "whole_call_residual_code": -5.377642775528102e-17,
+        "tolerance": 5.141279170199699e-13
+      },
+      {
+        "step": 0,
+        "level": 4,
+        "time": 0.002,
+        "leaf_records": 512,
+        "owned_volume": 0.125,
+        "effective_rhs_code": 7.829552758166836e-05,
+        "accepted_energy_code": 7.829552758166845e-05,
+        "whole_call_energy_code": 7.829552758166838e-05,
+        "whole_call_residual_code": -6.776263578034403e-20,
+        "tolerance": 8.71773117786697e-15
+      },
+      {
+        "step": 1,
+        "level": 3,
+        "time": 0.003561868348367044,
+        "leaf_records": 448,
+        "owned_volume": 0.875,
+        "effective_rhs_code": -0.0037001862645736207,
+        "accepted_energy_code": -0.0037001862645736202,
+        "whole_call_energy_code": -0.003700186264573628,
+        "whole_call_residual_code": -7.806255641895632e-18,
+        "tolerance": 3.7090680487706214e-13
+      },
+      {
+        "step": 1,
+        "level": 4,
+        "time": 0.003561868348367044,
+        "leaf_records": 512,
+        "owned_volume": 0.125,
+        "effective_rhs_code": -0.0010214053896981862,
+        "accepted_energy_code": -0.0010214053896981862,
+        "whole_call_energy_code": -0.001021405389698228,
+        "whole_call_residual_code": -4.185020385794047e-17,
+        "tolerance": 1.0391689580921888e-13
+      },
+      {
+        "step": 2,
+        "level": 3,
+        "time": 0.005561868348367045,
+        "leaf_records": 448,
+        "owned_volume": 0.875,
+        "effective_rhs_code": -0.012976112265404786,
+        "accepted_energy_code": -0.012976112265404786,
+        "whole_call_energy_code": -0.012976112265404696,
+        "whole_call_residual_code": 9.020562075079397e-17,
+        "tolerance": 1.299387583379879e-12
+      },
+      {
+        "step": 2,
+        "level": 4,
+        "time": 0.005561868348367045,
+        "leaf_records": 512,
+        "owned_volume": 0.125,
+        "effective_rhs_code": -0.0011361215490157653,
+        "accepted_energy_code": -0.0011361215490157653,
+        "whole_call_energy_code": -0.0011361215490158158,
+        "whole_call_residual_code": -5.0523821237824507e-17,
+        "tolerance": 1.153885117409768e-13
+      },
+      {
+        "step": 3,
+        "level": 3,
+        "time": 0.007561868348367045,
+        "leaf_records": 448,
+        "owned_volume": 0.875,
+        "effective_rhs_code": -0.015404067762605342,
+        "accepted_energy_code": -0.015404067762605342,
+        "whole_call_energy_code": -0.015404067762605344,
+        "whole_call_residual_code": -1.734723475976807e-18,
+        "tolerance": 1.5421831330999345e-12
+      },
+      {
+        "step": 3,
+        "level": 4,
+        "time": 0.007561868348367045,
+        "leaf_records": 512,
+        "owned_volume": 0.125,
+        "effective_rhs_code": -0.0012516851288796528,
+        "accepted_energy_code": -0.0012516851288796528,
+        "whole_call_energy_code": -0.0012516851288797495,
+        "whole_call_residual_code": -9.6710833785707e-17,
+        "tolerance": 1.2694486972736554e-13
+      }
+    ],
+    "records": 3840,
+    "heating_records": 1979,
+    "cooling_records": 1861,
+    "effective_rhs_code": -0.030287767230789988,
+    "accepted_energy_code": -0.030287767230789988,
+    "max_whole_call_residual_code": 9.6710833785707e-17
+  },
+  "maximum_gas_gravity_transaction_residual": 1.5600314009350802e-16,
+  "physical_sinks": {
+    "agn_enabled": true,
+    "feedback_events": 4,
+    "budgets": [
+      {
+        "step": 0,
+        "accretion_events": 2109,
+        "gross_mass": 9.188733769850926e-09,
+        "retained_mass": 8.269860392865836e-09,
+        "radiated_mass_equivalent": 9.188733769850925e-10,
+        "radiated_energy_erg": 2.4263235313656413e+55,
+        "feedback_mode": "THERMAL",
+        "jet_loaded_mass": 0.0,
+        "jet_transported_bulk_kinetic_energy": 0.0,
+        "maximum_jet_material_balance_error": 0.0,
+        "feedback_energy_measured": 0.0017568113658726,
+        "feedback_energy_expected": 0.0017568113658726037
+      },
+      {
+        "step": 1,
+        "accretion_events": 2109,
+        "gross_mass": 1.3864680066461037e-12,
+        "retained_mass": 1.2478212059814934e-12,
+        "radiated_mass_equivalent": 1.3864680066461038e-13,
+        "radiated_energy_erg": 3.661026681444088e+51,
+        "feedback_mode": "JET",
+        "jet_loaded_mass": 1.2478212059814934e-10,
+        "jet_transported_bulk_kinetic_energy": 3.440209966883256e-12,
+        "maximum_jet_material_balance_error": 6.390934535542681e-23,
+        "feedback_energy_measured": 1.7672095804152632e-06,
+        "feedback_energy_expected": 1.767209580415071e-06
+      },
+      {
+        "step": 2,
+        "accretion_events": 2109,
+        "gross_mass": 1.8491302666922816e-11,
+        "retained_mass": 1.6642172400230538e-11,
+        "radiated_mass_equivalent": 1.8491302666922798e-12,
+        "radiated_energy_erg": 4.882705703539711e+52,
+        "feedback_mode": "JET",
+        "jet_loaded_mass": 1.664217240023054e-09,
+        "jet_transported_bulk_kinetic_energy": 4.600149131953338e-11,
+        "maximum_jet_material_balance_error": 5.533385933582265e-25,
+        "feedback_energy_measured": 2.3569247231597368e-05,
+        "feedback_energy_expected": 2.356924723159647e-05
+      },
+      {
+        "step": 3,
+        "accretion_events": 2109,
+        "gross_mass": 6.359392537097949e-10,
+        "retained_mass": 5.723453283388154e-10,
+        "radiated_mass_equivalent": 6.359392537097946e-11,
+        "radiated_energy_erg": 1.679224161285296e+54,
+        "feedback_mode": "THERMAL",
+        "jet_loaded_mass": 0.0,
+        "jet_transported_bulk_kinetic_energy": 0.0,
+        "maximum_jet_material_balance_error": 0.0,
+        "feedback_energy_measured": 0.00012158642712965795,
+        "feedback_energy_expected": 0.00012158642712966905
+      }
+    ],
+    "maximum_kdk_residual": 0.0,
+    "maximum_radiation_corrected_mass_error": 6.661338147750939e-16,
+    "snapshots": [
+      {
+        "output": 1,
+        "clouds": 2109,
+        "physical_mass": 1.0008271108214073e-05
+      },
+      {
+        "output": 2,
+        "clouds": 2109,
+        "physical_mass": 1.0008860095714812e-05
+      }
+    ],
+    "mass_loading_factor": 100.0,
+    "limits": "One seeded physical BH; existing Bondi and retained-mass thermal/jet AGN prescription, with donor internal energy left in place during loading. Jet transport budgets are checked, not resolved jet morphology. No sink creation/merger, deferred-reservoir, MPI, cosmology, regrid/restart or accretion-calibration claim.",
+    "source_epochs": [
+      {
+        "weight_sum_error": 4.440892098500626e-16,
+        "deposited_mass_error": 5.082197683525802e-21,
+        "force_gather_error": 3.3306690738754696e-16,
+        "cloud_width": 0.125
+      },
+      {
+        "weight_sum_error": 0.0,
+        "deposited_mass_error": 0.0,
+        "force_gather_error": 2.220446049250313e-16,
+        "cloud_width": 0.125
+      },
+      {
+        "weight_sum_error": 0.0,
+        "deposited_mass_error": 0.0,
+        "force_gather_error": 3.3306690738754696e-16,
+        "cloud_width": 0.125
+      },
+      {
+        "weight_sum_error": 4.440892098500626e-16,
+        "deposited_mass_error": 5.082197683525802e-21,
+        "force_gather_error": 3.3306690738754696e-16,
+        "cloud_width": 0.125
+      },
+      {
+        "weight_sum_error": 4.440892098500626e-16,
+        "deposited_mass_error": 3.3881317890172014e-21,
+        "force_gather_error": 1.1102230246251565e-16,
+        "cloud_width": 0.125
+      },
+      {
+        "weight_sum_error": 4.440892098500626e-16,
+        "deposited_mass_error": 3.3881317890172014e-21,
+        "force_gather_error": 3.3306690738754696e-16,
+        "cloud_width": 0.125
+      },
+      {
+        "weight_sum_error": 4.440892098500626e-16,
+        "deposited_mass_error": 3.3881317890172014e-21,
+        "force_gather_error": 2.220446049250313e-16,
+        "cloud_width": 0.125
+      },
+      {
+        "weight_sum_error": 4.440892098500626e-16,
+        "deposited_mass_error": 5.082197683525802e-21,
+        "force_gather_error": 2.220446049250313e-16,
+        "cloud_width": 0.125
+      },
+      {
+        "weight_sum_error": 4.440892098500626e-16,
+        "deposited_mass_error": 3.3881317890172014e-21,
+        "force_gather_error": 3.3306690738754696e-16,
+        "cloud_width": 0.125
+      }
+    ]
+  },
+  "source_revision": "a9375731598d3671f1d0c8d3ab55037b657c63ad",
+  "inputs_sha256": {
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279536/run.log": "d479a532f750f8d9ceb853efb1f613bf86096b0819030e9c491b6f53cd060cfa",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279536/effective.nml": "2cebd73f12c1499bff391f2b7e1f4376604ce589d916c8b52383b97006a3ed3b",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279536/inputs.sha256": "88caf7d5bd609c57df81d7d6d2597d6b856c687f1a9d9d344e20f13e8d121638",
+    "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279536/outputs.sha256": "65c841fd7313b96f10ae740350cad33864fa327eeea9abe863b4796585df0cf8"
+  },
+  "limits": "Synthetic depletion stress on a fixed serial two-level periodic mesh. Isothermal birth removes gas internal energy. Physical sinks/AGN are checked only when requested. No calibrated SF, MPI/regrid/restart, cosmological IC, galaxy-RAR, or zero AMR self-force claim."
+}

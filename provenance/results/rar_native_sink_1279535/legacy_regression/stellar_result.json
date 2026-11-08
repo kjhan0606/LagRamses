@@ -1,0 +1,12 @@
+{
+  "schema": "rar_stellar_commit_mass_audit_v1",
+  "records": 113,
+  "positive_mass_records": 113,
+  "stellar_debit_code": 1.066074614059222e-05,
+  "gas_return_code": 1.0660746140592314e-05,
+  "max_absolute_mass_residual_code": 8.470329472543003e-22,
+  "gas_total_energy_delta_code": 2.501584454362495e-08,
+  "limits": "Transaction mass exchange only. Energy includes transport; element source matching, global budgets, AGN and cooling closure are unverified.",
+  "element_records": 1243,
+  "max_element_mass_residual_code": 6.220398206398768e-22
+}

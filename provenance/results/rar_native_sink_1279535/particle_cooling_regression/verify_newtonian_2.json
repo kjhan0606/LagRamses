@@ -1,0 +1,31 @@
+{
+  "schema": "rar_composite_publication_independent_v1",
+  "leaves": 5384,
+  "subfaces": 16476,
+  "newtonian_relative_residual": 8.981692995949959e-10,
+  "qumond_relative_residual": 8.981692971102993e-10,
+  "phantom_relative_difference": 0.0,
+  "force_relative_difference": 7.697285394160035e-17,
+  "source_relative_difference": 7.994561234837367e-16,
+  "snapshots": [
+    {
+      "snapshot": "/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_1279529/newtonian/output_00002/data_00002.h5",
+      "leaves": 5384,
+      "phi_max_difference": 0.0,
+      "force_max_difference": 0.0,
+      "covered_phi_difference": 6.938893903907228e-18,
+      "covered_force_difference": 0.0,
+      "gas_max_momentum": 0.22965887033710192,
+      "gas_energy_relative_difference": null
+    }
+  ],
+  "gas_state_mode": "evolving",
+  "particle_source": {
+    "weight_sum_error": 8.881784197001252e-16,
+    "deposited_mass_error": 2.6020852139652106e-18,
+    "force_gather_error": 1.942890293094024e-16,
+    "cloud_width": 0.0625
+  },
+  "physical_sink_source": null,
+  "limits": "Independent native operator/source/field snapshot reconstruction. Transport/source accounting, continuum accuracy, particles and evolving MPI/restart require their own evidence."
+}

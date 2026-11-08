@@ -1,4 +1,4 @@
-"""Independent physical BH, proxy, accretion and thermal-AGN accounting."""
+"""Independent physical BH, proxy, accretion and thermal/jet AGN accounting."""
 import json
 import re
 from pathlib import Path
@@ -24,6 +24,11 @@ def audit(run, leaves, sinks, dt, times, total_mass, records, close):
             raise ValueError('unsupported sink fixture '+name)
     enabled = setting('sink_AGN') == '.true.'
     coupling = float(setting('eAGN_T').replace('d', 'e'))
+    jet_coupling = float(setting('eAGN_K').replace('d', 'e'))
+    load_setting = re.findall(r'(?im)^\s*mloadAGN\s*=\s*([^!\n]+)', nml)
+    if len(load_setting) > 1:
+        raise ValueError('ambiguous mass-loading factor')
+    mass_loading = float(load_setting[0].replace('d', 'e')) if load_setting else 100.
     if coupling != .15 or float(setting('X_floor')) != .01:
         raise ValueError('unsupported fixture feedback coupling')
     length, time_unit, density_unit = [float(setting(name).replace('d', 'e')) for name in
@@ -104,6 +109,15 @@ def audit(run, leaves, sinks, dt, times, total_mass, records, close):
         close(receipt[3], leaves[0][lookup[cell], 5]**3, 'AGN receiver volume', atol=1e-18, rtol=1e-14)
         close(receipt[10:14], receipt[4:8], 'AGN mass/momentum receiver receipt', atol=2e-15, rtol=1e-12)
         close(receipt[14], receipt[8]-receipt[9], 'AGN energy receiver receipt', atol=2e-15, rtol=1e-12)
+    returns = records(text, 'RAR_STELLAR_COMMIT_V1', 28, with_step=True)
+    cooling = records(text, 'RAR_COOLING_COMMIT_V2', 11)
+    global_compact = re.sub(r'(RAR_GLOBAL_INVENTORY_V1)\s*', r'\1', text)
+    gas_inventories = {}
+    for label in ('after_native_return', 'before_native_birth'):
+        for row in records(global_compact, 'RAR_GLOBAL_INVENTORY_V1'+label, 33):
+            if row[2] != 18:
+                raise ValueError('unexpected global source inventory layout')
+            gas_inventories[int(row[0]), label] = row[3:21]
 
     budgets, mass_expected = [], [total_mass[0]]
     mass_loss = max_kdk = max_mass_error = 0.
@@ -140,19 +154,70 @@ def audit(run, leaves, sinks, dt, times, total_mass, records, close):
         close(inv['before_feedback'], inv['after_accretion'], 'feedback begins after accretion', atol=0, rtol=0)
         delta = inv['after_feedback']-inv['before_feedback']
         expected_energy = 0.
+        mode = 'DISABLED'
+        loaded = loaded_kinetic = 0.
+        loaded_momentum = np.zeros(3)
+        withdrawal = np.zeros(18)
         if enabled:
             entry = coarse[k]
-            if entry['feedback_mode'] not in ('THERMAL', 'INACTIVE') or entry['saved_feedback_energy_code'] != 0:
-                raise ValueError('this auditor requires thermal AGN without a deferred reservoir')
+            mode = entry['feedback_mode']
+            if mode not in ('THERMAL', 'JET', 'INACTIVE') or entry['saved_feedback_energy_code'] != 0:
+                raise ValueError('unsupported AGN mode or deferred reservoir')
             close(entry['t_code'], times[k+1], 'AGN source time', atol=1e-16, rtol=0)
             close(entry['coarse_accreted_bh_mass_code'], net, 'AGN consumes this endpoint accretion', atol=1e-18, rtol=1e-9)
+            if net > 0:
+                expected_mode = 'JET' if entry['coarse_eddington_ratio'] < .01 else 'THERMAL'
+                if mode != expected_mode:
+                    raise ValueError('AGN source mode disagrees with the declared Eddington threshold')
             # Existing legacy retained-mass convention; the literal 3e10 is
             # distinct from c used by the radiated-rest-mass receipt above.
-            expected_energy = coupling*.1*net*(3e10/velocity_unit)**2
-        close(delta[np.r_[0:4, 5:10]], 0., 'thermal AGN preserves gas/BH mass and momentum', atol=3e-13, rtol=0)
-        close(delta[4], expected_energy, 'actual thermal AGN energy deposition', atol=3e-13, rtol=1e-9)
+            expected_energy = (jet_coupling if mode == 'JET' else coupling)*.1*net*(3e10/velocity_unit)**2
+            if mode == 'JET' and entry['gas_angular_momentum_norm_code'] > 0:
+                # Locate the unique physical donor geometrically. Recover its
+                # pre-feedback state from the completed gravity kick, SSP
+                # returns and accepted accretion transactions, independently
+                # of the AGN donor implementation.
+                center, width = leaves[0][:, 2:5], leaves[0][:, 5]
+                inside = np.all((x1[0] >= center-width[:, None]/2)
+                                & (x1[0] < center+width[:, None]/2), axis=1)
+                if np.count_nonzero(inside) != 1:
+                    raise ValueError('jet has no unique containing donor leaf')
+                donor_leaf = leaves[0][inside][0]
+                cell = int(donor_leaf[0]); donor_volume = donor_leaf[5]**3
+                kicks = np.loadtxt(run/f'gravity_kicks_{k:05d}.tsv')
+                kick = kicks[(kicks[:, 0] == 1) & (kicks[:, 1] == cell)]
+                if len(kick) != 1:
+                    raise ValueError('missing donor endpoint gravity state')
+                state = np.r_[kick[0, 4], kick[0, 13:17]]
+                back = returns[(returns[:, 0] == k) & (returns[:, 4] == cell)]
+                state += back[:, 11:16].sum(axis=0)/donor_volume
+                donor_events = batch[batch[:, 2] == cell]
+                if not len(donor_events):
+                    raise ValueError('jet donor lacks the pre-feedback material-state receipt')
+                state += (donor_events[:, 29:34]-donor_events[:, 11:16]).sum(axis=0)
+                donor = donor_events[-1, 29:47]
+                close(donor[:5], state, 'independent pre-feedback donor reconstruction', atol=3e-13, rtol=1e-12)
+                loaded = min(mass_loading*net, .25*donor[0]*donor_volume)
+                bulk = donor[1:4]/donor[0]
+                loaded_momentum = loaded*bulk
+                loaded_kinetic = .5*loaded*float(bulk @ bulk)
+                # Existing loading leaves donor internal energy in place and
+                # transports bulk kinetic energy and composition with mass.
+                withdrawal[:4] = -np.r_[loaded, loaded_momentum]
+                withdrawal[4] = -loaded_kinetic
+                withdrawal[5:17] = -loaded*donor[5:17]/donor[0]
+        close(delta[np.r_[0:4, 5:10]], 0., 'AGN preserves total gas/BH mass and momentum', atol=3e-13, rtol=0)
+        close(delta[4], expected_energy, 'actual thermal/jet AGN net energy', atol=3e-13, rtol=1e-9)
         selected_deposits = deposits[deposits[:, 0] == k]
-        close(delta[:5], selected_deposits[:, 10:15].sum(axis=0), 'whole AGN receiver receipts', atol=3e-13, rtol=1e-9)
+        received = selected_deposits[:, 10:28].sum(axis=0)
+        close(received[:4], np.r_[loaded, loaded_momentum], 'jet material/thermal-zero receiver normalization', atol=2e-18, rtol=1e-8)
+        close(received[4], expected_energy+loaded_kinetic, 'AGN plus transported bulk kinetic energy', atol=3e-13, rtol=1e-9)
+        close(received[5:], -withdrawal[5:], 'AGN transported material scalars', atol=5e-20, rtol=1e-8)
+        close(delta[:5], received[:5]+withdrawal[:5], 'whole AGN receiver minus donor receipts', atol=3e-13, rtol=1e-9)
+        source_delta = np.sum((after[select]-before[select])*vol[select, None], axis=0)+received+withdrawal
+        source_delta[4] += cooling[cooling[:, 3] == k, 9].sum()
+        close(gas_inventories[k, 'before_native_birth']-gas_inventories[k, 'after_native_return'],
+              source_delta, 'whole accretion, AGN and cooling material/energy budget', atol=4e-13, rtol=1e-8)
         if delta[4] > 1e-13:
             feedback_events += 1
         close(post[0, 3], inv['after_feedback'][5], 'published physical BH mass', atol=1e-19, rtol=1e-12)
@@ -164,6 +229,9 @@ def audit(run, leaves, sinks, dt, times, total_mass, records, close):
         budgets.append({'step': k, 'accretion_events': len(batch), 'gross_mass': float(gross[select].sum()),
                         'retained_mass': net, 'radiated_mass_equivalent': lost,
                         'radiated_energy_erg': float(radiation[select].sum()),
+                        'feedback_mode': mode, 'jet_loaded_mass': loaded,
+                        'jet_transported_bulk_kinetic_energy': loaded_kinetic,
+                        'maximum_jet_material_balance_error': float(np.max(abs(received[5:]+withdrawal[5:]))),
                         'feedback_energy_measured': float(delta[4]), 'feedback_energy_expected': expected_energy})
     if enabled and feedback_events == 0:
         raise ValueError('AGN enabled without measured positive energy deposition')
@@ -193,4 +261,5 @@ def audit(run, leaves, sinks, dt, times, total_mass, records, close):
     return {'agn_enabled': enabled, 'feedback_events': feedback_events, 'budgets': budgets,
             'maximum_kdk_residual': max_kdk, 'maximum_radiation_corrected_mass_error': max_mass_error,
             'snapshots': saved,
-            'limits': 'One seeded physical BH; existing Bondi and thermal retained-mass AGN prescription. No sink creation/merger, jet, MPI, cosmology, regrid/restart or accretion-calibration claim.'}
+            'mass_loading_factor': mass_loading,
+            'limits': 'One seeded physical BH; existing Bondi and retained-mass thermal/jet AGN prescription, with donor internal energy left in place during loading. Jet transport budgets are checked, not resolved jet morphology. No sink creation/merger, deferred-reservoir, MPI, cosmology, regrid/restart or accretion-calibration claim.'}

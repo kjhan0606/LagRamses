@@ -1,0 +1,34 @@
+[
+  {
+    "job_id": "1279529",
+    "script": "run_rar_evolving_gas.sbatch",
+    "dependencies": [
+      "1279524"
+    ],
+    "environment": "RAR_EVOLVE_BUILD_ID=1279524,RAR_EVOLVE_PARTICLES=1,RAR_EVOLVE_COOLING=1"
+  },
+  {
+    "job_id": "1279530",
+    "script": "audit_rar_evolving_gas.sbatch",
+    "dependencies": [
+      "1279529"
+    ],
+    "environment": "RAR_EVOLVE_RUN_ID=1279529,RAR_EVOLVE_PARTICLES=1,RAR_EVOLVE_COOLING=1"
+  },
+  {
+    "job_id": "1279531",
+    "script": "run_rar_stellar_commit_gate.sbatch",
+    "dependencies": [
+      "1279524"
+    ],
+    "environment": "RAR_COMMIT_BUILD_ID=1279524,RAR_AGN_COMMIT_LEDGER=1,RAR_GLOBAL_INVENTORY=1,RAR_COOLING_COMMIT_LEDGER=1,RAR_QUMOND_STAGE_HISTORY=0,RAR_QUMOND_COMPOSITE_PUBLISH=0,RAR_QUMOND_COMPOSITE_EVOLVE=0,RAR_QUMOND_STELLAR_SOURCES=0,RAR_QUMOND_SINK_SOURCES=0"
+  },
+  {
+    "job_id": "1279532",
+    "script": "audit_rar_source_regression.sbatch",
+    "dependencies": [
+      "1279531"
+    ],
+    "environment": "RAR_SOURCE_RUN_ID=1279531"
+  }
+]

@@ -1,0 +1,124 @@
+[
+  {
+    "job_id": "1279494",
+    "path": "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279494/run.log",
+    "size_bytes": 47141,
+    "sha256": "4ffa5588dd81ed8309075511e253098c897796945c0a4ed0d87c3bbb9c37c00a",
+    "source_revision": "e24e4a7a430a2a8098f16a40b4dc81bbba8355a0",
+    "diagnostic_lines": [
+      " ERROR: Bondi requires one owned central particle per sink after migration"
+    ],
+    "last_lines": [
+      "   Entering kill_tree_fine for level  2",
+      "  +Entering make_tree_fine for level  3",
+      "   Entering virtual_tree_fine for level  3",
+      "   Entering kill_tree_fine for level  3",
+      "  +Entering make_tree_fine for level  4",
+      "   Entering virtual_tree_fine for level  4",
+      " ERROR: Bondi requires one owned central particle per sink after migration",
+      "           0",
+      "",
+      "     seconds         %    STEP (rank=      1)",
+      "       0.001       0.5    particles               ",
+      "       0.003       3.5    sinks                   ",
+      "       0.075      75.9    poisson                 ",
+      "       0.002       2.1    hydro - set unew        ",
+      "       0.007       7.0    hydro - godunov         ",
+      "       0.011      10.7    hydro - set uold        ",
+      "       0.000       0.1    flag                    ",
+      "       0.099     100.0    TOTAL"
+    ]
+  },
+  {
+    "job_id": "1279495",
+    "path": "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279495/run.log",
+    "size_bytes": 47141,
+    "sha256": "bb278c1c3d1e34fcc1110d12402a723abf8a98c8d0861706911a86066102f727",
+    "source_revision": "e24e4a7a430a2a8098f16a40b4dc81bbba8355a0",
+    "diagnostic_lines": [
+      " ERROR: Bondi requires one owned central particle per sink after migration"
+    ],
+    "last_lines": [
+      "   Entering kill_tree_fine for level  2",
+      "  +Entering make_tree_fine for level  3",
+      "   Entering virtual_tree_fine for level  3",
+      "   Entering kill_tree_fine for level  3",
+      "  +Entering make_tree_fine for level  4",
+      "   Entering virtual_tree_fine for level  4",
+      " ERROR: Bondi requires one owned central particle per sink after migration",
+      "           0",
+      "",
+      "     seconds         %    STEP (rank=      1)",
+      "       0.001       0.5    particles               ",
+      "       0.003       3.4    sinks                   ",
+      "       0.075      75.3    poisson                 ",
+      "       0.002       2.5    hydro - set unew        ",
+      "       0.007       7.1    hydro - godunov         ",
+      "       0.011      10.8    hydro - set uold        ",
+      "       0.000       0.1    flag                    ",
+      "       0.100     100.0    TOTAL"
+    ]
+  },
+  {
+    "job_id": "1279511",
+    "path": "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279511/run.log",
+    "size_bytes": 47273,
+    "sha256": "f265d48f0724cc63cf95bbf170ad7d095d2c72d37003120608fc4840e30d8066",
+    "source_revision": "a2a5c43453e5a720f1e9a30229f97c518d22094c",
+    "diagnostic_lines": [
+      "RAR_NATIVE_SINK_CENTRE_V1 0 1 1   2.0000000000000000E-03   0.0000000000000000E+00   0.0000000000000000E+00   0.0000000000000000E+00",
+      " ERROR: Bondi requires one owned central particle per sink after migration"
+    ],
+    "last_lines": [
+      "   Entering kill_tree_fine for level  2",
+      "  +Entering make_tree_fine for level  3",
+      "   Entering virtual_tree_fine for level  3",
+      "   Entering kill_tree_fine for level  3",
+      "  +Entering make_tree_fine for level  4",
+      "   Entering virtual_tree_fine for level  4",
+      " ERROR: Bondi requires one owned central particle per sink after migration",
+      "           0",
+      "",
+      "     seconds         %    STEP (rank=      1)",
+      "       0.001       0.5    particles               ",
+      "       0.003       3.4    sinks                   ",
+      "       0.077      75.7    poisson                 ",
+      "       0.002       2.4    hydro - set unew        ",
+      "       0.007       6.8    hydro - godunov         ",
+      "       0.011      10.7    hydro - set uold        ",
+      "       0.000       0.1    flag                    ",
+      "       0.101     100.0    TOTAL"
+    ]
+  },
+  {
+    "job_id": "1279512",
+    "path": "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279512/run.log",
+    "size_bytes": 47324,
+    "sha256": "4e0ff7e33b478d0260fb9280e17e393cf7c3c6aa6481076968c344c861f9f320",
+    "source_revision": "a2a5c43453e5a720f1e9a30229f97c518d22094c",
+    "diagnostic_lines": [
+      "RAR_NATIVE_SINK_CENTRE_V1 0 1 1   2.0000000000000000E-03   0.0000000000000000E+00   0.0000000000000000E+00   0.0000000000000000E+00",
+      " ERROR: Bondi requires one owned central particle per sink after migration"
+    ],
+    "last_lines": [
+      "  +Entering make_tree_fine for level  3",
+      "   Entering virtual_tree_fine for level  3",
+      "   Entering kill_tree_fine for level  3",
+      "  +Entering make_tree_fine for level  4",
+      "   Entering virtual_tree_fine for level  4",
+      " ERROR: Bondi requires one owned central particle per sink after migration",
+      "           0",
+      "",
+      "     seconds         %    STEP (rank=      1)",
+      "       0.001       0.6    particles               ",
+      "       0.004       4.0    sinks                   ",
+      "       0.075      74.8    poisson                 ",
+      "       0.002       2.4    hydro - set unew        ",
+      "       0.007       7.1    hydro - godunov         ",
+      "       0.011      10.7    hydro - set uold        ",
+      "       0.000       0.1    hydro upload fine       ",
+      "       0.000       0.2    flag                    ",
+      "       0.101     100.0    TOTAL"
+    ]
+  }
+]

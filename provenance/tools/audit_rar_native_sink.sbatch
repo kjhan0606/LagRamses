@@ -65,4 +65,4 @@ result={'source_revision':a['source_revision'],'on_run':str(on),'off_run':str(of
 print(json.dumps(result,indent=2))
 PY
 (cd "$out" && sha256sum pair.json on/result.json off/result.json job.sbatch >artifacts.sha256 && sha256sum -c artifacts.sha256)
-printf '%s\n' 'NATIVE_PHYSICAL_BH_KDK_ACCRETION_THERMAL_AGN_AND_STELLAR_GAS_SOURCES_CHECKED_NOT_PRODUCTION' > "$out/COMPLETE"
+printf '%s\n' 'NATIVE_PHYSICAL_BH_KDK_ACCRETION_THERMAL_JET_AGN_AND_STELLAR_GAS_SOURCES_CHECKED_NOT_PRODUCTION' > "$out/COMPLETE"

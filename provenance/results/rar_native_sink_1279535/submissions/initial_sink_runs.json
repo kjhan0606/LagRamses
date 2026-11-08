@@ -1,0 +1,12 @@
+[
+  {
+    "job_id": "1279494",
+    "agn_enabled": true,
+    "build_job_id": "1279487"
+  },
+  {
+    "job_id": "1279495",
+    "agn_enabled": false,
+    "build_job_id": "1279487"
+  }
+]

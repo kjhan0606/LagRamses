@@ -1,5 +1,10 @@
 # Native physical sinks and synchronized AGN sources
 
+Status: the seeded physical-BH adapter, Bondi accretion, thermal/jet source
+budgets, stellar sources and cooling passed the bounded paired audit
+`1279553`. Tested Fortran revision is `a9375731598d3671f1d0c8d3ab55037b657c63ad`.
+This is an implementation/coupling result, not a galaxy or cosmological result.
+
 Q-GOAL: connect physical black-hole gravity and motion, existing gas accretion,
 and AGN deposition to the evolving native Lambda-CDM/QUMOND calculation.
 The full goal also retains stellar return/birth, enrichment, cooling/heating,
@@ -58,7 +63,7 @@ Opt-in accretion receipts record donor states,
 gross/retained mass, efficiency, radiative energy and retained momentum for
 independent accounting. They do not change the accretion prescription.
 
-Runtime verification is pending. Existing restrictions
+Existing restrictions
 on serial CPU, noncosmological periodic fixed two-level geometry, common
 timesteps, restart and regridding remain explicit. This is not a completed
 galaxy-formation or cosmological validation.
@@ -79,3 +84,56 @@ The no-sink stellar audit 1279517 passed. On revision `051b4e1`, particle/
 cooling regression 1279529 and independent audit 1279530 passed; legacy
 stellar/AGN/cooling regression 1279531 and audit 1279532 also passed. These
 do not replace the physical-sink audit.
+
+## Completed paired validation
+
+Grammar build 1279535 completed in 3m30s. AGN-on/off runs 1279536/1279537
+completed in 1m16s/1m13s, using 960 physical leaves on levels 3 and 4,
+one seeded BH, 2109 sampling proxies and four common-time steps. Both form
+599 stellar particles in the synthetic depletion stress. Each execution
+writes exactly two snapshots; all original outputs remain on GPFS.
+
+Audit 1279538 identified a limitation of the initial thermal-only verifier:
+the actual AGN sequence is THERMAL, JET, JET, THERMAL. Audit 1279553 expands
+the independent accounting to the actual existing jet model, without
+changing or repeating the physical execution. It reconstructs the containing
+donor from the endpoint gravity state, SSP returns and accretion receipts;
+checks the prescribed loading cap, transported bulk momentum/kinetic energy
+and material scalars; and compares receiver-minus-donor transactions with
+whole-gas inventories. Existing loading leaves internal energy in the donor.
+The net energy oracle uses the declared retained-mass convention,
+`eAGN_(T or K) * 0.1 * retained_mass * (3e10/velocity_unit)^2`.
+The radiated-rest-mass receipt separately uses `c=2.99792458e10 cm/s`.
+
+Initial and first-drift field/particle/BH exports are byte-identical between
+the controls. First gross/retained accretion masses match exactly. At
+`t=0.002`, measured feedback energy is `0.0017568113658726` code units with
+AGN enabled and exactly zero with it disabled. Later timesteps differ:
+AGN-on uses `[0.002, 0.001561868348367044, 0.002, 0.002]`, ending at
+`0.007561868348367045`; AGN-off ends at `0.008`. No unmatched-time endpoint
+subtraction is used as a causal feedback estimate.
+
+The two jet events load `1.2478212059814934e-10` and
+`1.664217240023054e-9` code mass. Their maximum material-balance errors are
+`6.391e-23` and `5.534e-25` code mass. All four measured feedback energies
+match the corresponding declared source formula within the audit tolerance.
+The gas+stars+physical-BH mass decreases by the radiative mass-equivalent
+channel, as intended; after accounting for that channel, maximum mass errors
+are `6.662e-16` (on) and `4.441e-16` (off). Physical-BH and stellar KDK
+residuals are zero in the exported transactions. Gas gravity transaction
+errors remain below `1.57e-16`. Each case verifies 3840 cooling/heating
+receipts, 1797 stellar-return events and 19767 element receipts. Nine source
+epochs per case independently satisfy the native N/Q operators below
+`1e-9` relative residual, and both snapshots match the gas+star+physical-BH
+source and force fields. Proxies are checked against the physical body and
+are not counted a second time in gravity.
+
+Evidence is retained in `results/rar_native_sink_1279535/`, including exact
+inputs, executable/source hashes, paired audit, regression evidence, Slurm
+accounting and earlier failure excerpts. Full run outputs remain under
+`/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279536` and `1279537`.
+No sink formation/merger, deferred-energy replay, resolved jet morphology,
+MPI/regrid/restart, cosmological IC, galaxy-RAR or calibrated accretion
+result follows from these tests. Global gravitational energy conservation
+and exact AMR self-force cancellation are not asserted. These limitations
+do not erase the measured native coupling result; they define subsequent work.

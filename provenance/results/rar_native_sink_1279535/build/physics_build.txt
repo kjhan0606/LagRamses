@@ -1,0 +1,1 @@
+SNRT=0; DUST_LIVE=0; DUST_IRON=0; DUST_PAH=0; DUST_DYNAMICS=0; hydro solver; HDF5 output

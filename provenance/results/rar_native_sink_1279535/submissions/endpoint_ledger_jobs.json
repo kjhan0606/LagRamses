@@ -1,0 +1,33 @@
+[
+  {
+    "job_id": "1279535",
+    "script": "build_rar_effective_ssp_cpu.sbatch",
+    "dependencies": [],
+    "environment": "RAR_BUILD_SOURCE_REPO=/home/kjhan/BackUP/rar/build/rar_qumond_amr_history_20261107,RAR_BUILD_REVISION=a9375731598d3671f1d0c8d3ab55037b657c63ad"
+  },
+  {
+    "job_id": "1279536",
+    "script": "run_rar_native_sink.sbatch",
+    "dependencies": [
+      "1279535"
+    ],
+    "environment": "RAR_NATIVE_SINK_BUILD_ID=1279535,RAR_NATIVE_SINK_AGN=1"
+  },
+  {
+    "job_id": "1279537",
+    "script": "run_rar_native_sink.sbatch",
+    "dependencies": [
+      "1279535"
+    ],
+    "environment": "RAR_NATIVE_SINK_BUILD_ID=1279535,RAR_NATIVE_SINK_AGN=0"
+  },
+  {
+    "job_id": "1279538",
+    "script": "audit_rar_native_sink.sbatch",
+    "dependencies": [
+      "1279536",
+      "1279537"
+    ],
+    "environment": "RAR_NATIVE_SINK_ON_ID=1279536,RAR_NATIVE_SINK_OFF_ID=1279537"
+  }
+]

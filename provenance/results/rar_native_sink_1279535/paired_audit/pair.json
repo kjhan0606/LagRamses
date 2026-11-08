@@ -1,0 +1,10 @@
+{
+  "source_revision": "a9375731598d3671f1d0c8d3ab55037b657c63ad",
+  "on_run": "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279536",
+  "off_run": "/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279537",
+  "first_feedback_time": 0.002,
+  "first_feedback_energy_on": 0.0017568113658726,
+  "first_feedback_energy_off": 0.0,
+  "pre_feedback_fields_identical": true,
+  "limits": "Initial and first-drift source fields and first accretion transaction match. Later steps may have different adaptive timesteps and trajectories; no unmatched-time subtraction is used."
+}

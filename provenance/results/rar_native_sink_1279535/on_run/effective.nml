@@ -1,0 +1,156 @@
+&RUN_PARAMS
+ remap_thresh=0.0
+ rt=.false.
+ radiation_transport='none'
+ cosmo=.false.
+ pic=.true.
+ poisson=.true.
+ hydro=.true.
+ sink=.true.
+ static=.false.
+ use_mond=.true.
+ nrestart=0
+ nremap=0
+ nstepmax=4
+ nsubcycle=1,1
+ ncontrol=1
+ ordering='hilbert'
+ memory_balance=.false.
+ use_fftw=.true.
+ gpu_fft=.false.
+ gpu_hydro=.false.
+ gpu_poisson=.false.
+ gpu_sink=.false.
+ gpu_scalar=.false.
+ gpu_particle=.false.
+ gpu_auto_tune=.false.
+ verbose=.true.
+ jobcontrolfile='jobcontrol.txt'
+/
+&OUTPUT_PARAMS
+ noutput=1
+ aout=1.1
+ tout=1.0d100
+ foutput=2
+ fbackup=1000000000
+ outformat='hdf5'
+/
+&INIT_PARAMS
+ filetype='ascii'
+ initfile(1)='ic'
+ hydro_initial_condition='rar_periodic_wave'
+ u_region=0.2
+ v_region=0.1
+ w_region=0.05
+ var_region=0.002
+ nregion=1
+ region_type='square'
+ x_center=0.5
+ y_center=0.5
+ z_center=0.5
+ length_x=2.0
+ length_y=2.0
+ length_z=2.0
+ exp_region=10.0
+ d_region=1.0
+ p_region=0.001
+/
+! This dilute, pressure-supported gas enables the analytic gravity source
+! deposition in this source revision. The source is not a galaxy model.
+! RAMSES_QUMOND_SOURCE_DIAG=1 is set by the Slurm runner for source tracing.
+&HYDRO_PARAMS
+ gamma=1.6666666666666667
+ smallr=1.0d-10
+ smallc=1.0d-10
+ courant_factor=0.1
+/
+&AMR_PARAMS
+ levelmin=3
+ levelmax=4
+ ngridtot=30000
+ nparttot=20000
+ boxlen=1.0
+/
+&POISSON_PARAMS
+ gravity_type=0
+ gravity_params=0.05,0.5,0.5,0.5
+ epsilon=1.0d-8
+ maxiter_fine=100
+ abort_on_mg_nonconvergence=.true.
+/
+&PHYSICS_PARAMS
+ cooling=.true.
+ metal=.true.
+ sink_AGN=.true.
+ agn=.true.
+ smbh=.true.
+ bondi=.true.
+ spin_bh=.false.
+ mad_jet=.false.
+ drag=.false.
+ agn_coarse_dump=.true.
+ eAGN_T=0.15
+ eAGN_K=1.0
+ X_floor=0.01
+
+ haardt_madau=.true.
+ J21=0.0
+ z_ave=0.1
+ n_star=0.43
+ del_star=0.0
+ t_star=0.0
+ eps_star=1000.0
+ m_star=1.0
+ f_w=0.0
+ sf_virial=.false.
+ sf_birth_properties=.false.
+ T2_star=0.0
+ jeans_ncells=0.0
+ isothermal=.false.
+ delayed_cooling=.false.
+ neq_chem=.false.
+ self_shielding=.false.
+ cooling_method='original'
+ cooling_varmax=4.0
+ T2max=1.0d10
+ dust_mass_enabled=.false.
+ yieldtablefilename='/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279536/legacy_yield_table_parser_only.asc' 
+ units_density=1.0d-24
+ units_length=3.0856775814913673d22
+ units_time=3.8707679655184575e15
+/
+&MOND_PARAMS
+ a0_mond=1.2d-8
+ mond_mu_type=1
+ mond_type=1
+ g_ext_mond=0.0,0.0,0.0
+/
+&stellar_enrichment_params
+ feedback_mode='channel_resolved', fate_policy='user_selected_model_v1',
+ high_mass_preset='source_consistent', high_mass_history_path='/gpfs/kjhan/RAR_QUMOND/runs/rar_native_sink_1279536/history.nml',
+ yield_source_basis='per_star_cumulative', population_model='effective_ssp',
+ imf_id=1, imf_mass_min_msun=.08, imf_mass_max_msun=600, binary_fraction=0,
+ channel_mass_min_msun=2,2,2,3,2, channel_mass_max_msun=600,600,600,8,600,
+ use_wind=.true.,use_agb=.true.,use_snii=.true.,use_snia=.true.,use_pisn=.true.
+/
+
+&REFINE_PARAMS
+ mass_sph=1.0d-5
+ m_refine=2*1.0d30
+ void_refine=.true.
+ void_refine_min_level=4
+ r_refine=0.25
+ x_refine=0.5
+ y_refine=0.5
+ z_refine=0.5
+ a_refine=1.0
+ b_refine=1.0
+ exp_refine=2.0
+/
+
+&SINK_PARAMS
+ create_sinks=.false.
+ nsinkmax=8
+ accretion_scheme='bondi'
+ eddington_limit=.true.
+/
