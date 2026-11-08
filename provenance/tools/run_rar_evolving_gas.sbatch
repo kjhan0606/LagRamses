@@ -16,10 +16,10 @@ out=$base/runs/rar_evolving_gas_${SLURM_JOB_ID:?}
 test -f "$build/COMPLETE"
 (cd "$build/source/bin" && sha256sum -c "$build/executable.sha256")
 free_bytes=$(df -B1 "$base" | awk 'END {print $4}')
-if [ "${RAR_EVOLVE_COOLING:-0}" = 1 ];then test "$free_bytes" -gt 2147483648;else test "$free_bytes" -gt 1610612736;fi
+if [ "${RAR_EVOLVE_COOLING:-0}" = 1 ];then test "$free_bytes" -gt 3221225472;else test "$free_bytes" -gt 2147483648;fi
 mkdir "$out"
 cp "${BASH_SOURCE[0]}" "$out/job.sbatch"
-printf '%s\n' 'purpose=bounded evolving gas, native AMR common-time gravity; optional controlled diagnostic particles; no subgrid/dust/RT' 'cases=newtonian,qumond,qumond_half; steps=6,6,12; dt_caps=0.0002,0.0002,0.0001; expected_common_endpoint=0.0012; noutput=1;aout=1.1;tout=1e100;foutput=3,3,6;fbackup=1e9;expected_full_dumps_per_case=2;upper_dump_bytes=16777216;expected_total_dump_bytes=100663296;reserve_including_exports_and_kick_records=536870912' "free_bytes_before=$free_bytes" > "$out/output_policy.txt"
+printf '%s\n' 'purpose=bounded evolving gas, native AMR common-time gravity; optional controlled diagnostic particles; no subgrid/dust/RT' 'cases=newtonian,qumond,qumond_half; steps=6,6,12; dt_caps=0.0002,0.0002,0.0001; expected_common_endpoint=0.0012; noutput=1;aout=1.1;tout=1e100;foutput=3,3,6;fbackup=1e9;expected_full_dumps_per_case=2;upper_dump_bytes=134217728;expected_total_dump_bytes=805306368;reserve_including_exports_and_kick_records=1073741824' "free_bytes_before=$free_bytes" > "$out/output_policy.txt"
 if [ "${RAR_EVOLVE_PARTICLES:-0}" = 1 ];then
  export RAR_NATIVE_PARTICLE_ROLE=diagnostic
  printf '%s\n' 'particles=4; fixed masses=0.002,0.001,0.002,0.001; fixed-cloud width=0.0625; identical mass for Newtonian/QUMOND numerical controls; not Lambda-CDM versus baryon-only QUMOND science' >> "$out/output_policy.txt"
@@ -27,7 +27,7 @@ else
  unset RAR_NATIVE_PARTICLE_ROLE
 fi
 if [ "${RAR_EVOLVE_COOLING:-0}" = 1 ];then
- printf '%s\n' 'thermal_profile_overrides=5 cases plus optional precision replay; newtonian/qumond/qumond_half cooling on, qumond_off cooling off, qumond_heating cool/heating on at lower initial pressure; at most 12 snapshots; upper_total_dump_bytes=201326592; reserve_all_outputs_bytes=1073741824' 'cooling=original; UV=code haardt_madau flag/default Courty model at fixed aexp1/z0; metal=true initial Z0.002; shielding=false; Jeans/eEOS/isothermal/delayed/neq/RT/dust off; T2max=1e10; source table T2_min_fix=1e-2' "cooling_varmax=${RAR_EVOLVE_COOLING_VARMAX:-4}; precision_replay=${RAR_EVOLVE_THERMAL_ACCURACY:-0}" >> "$out/output_policy.txt"
+ printf '%s\n' 'thermal_profile_overrides=5 cases plus optional precision replay; newtonian/qumond/qumond_half cooling on, qumond_off cooling off, qumond_heating cool/heating on at lower initial pressure; at most 12 snapshots; upper_dump_bytes=134217728; upper_total_dump_bytes=1610612736; reserve_all_outputs_bytes=2147483648' 'cooling=original; UV=code haardt_madau flag/default Courty model at fixed aexp1/z0; metal=true initial Z0.002; shielding=false; Jeans/eEOS/isothermal/delayed/neq/RT/dust off; T2max=1e10; source table T2_min_fix=1e-2' "cooling_varmax=${RAR_EVOLVE_COOLING_VARMAX:-4}; precision_replay=${RAR_EVOLVE_THERMAL_ACCURACY:-0}" >> "$out/output_policy.txt"
 fi
 set +u
 source "$(cat "$build/environment_setup_path.txt")" > "$out/compiler_environment.log" 2>&1
@@ -35,7 +35,7 @@ set -u
 export OMP_NUM_THREADS=1 OMP_DYNAMIC=FALSE I_MPI_FABRICS=shm I_MPI_PMI_LIBRARY=/usr/lib64/libpmi2.so
 export LD_LIBRARY_PATH=/home/kjhan/local/hdf5/lib:/home/kjhan/local/lib:${LD_LIBRARY_PATH:-}
 export RAR_QUMOND_STAGE_HISTORY=1 RAR_QUMOND_COMPOSITE_PUBLISH=1 RAR_QUMOND_COMPOSITE_EVOLVE=1 RAR_QUMOND_COMPOSITE_EXPORT=1 RAR_QUMOND_GRAVITY_KICKS=1
-unset RAR_QUMOND_COMPOSITE_OPERATOR RAR_QUMOND_COMPOSITE_SOLVER RAR_QUMOND_COMPOSITE_CONTINUUM
+unset RAR_QUMOND_STELLAR_SOURCES RAR_QUMOND_SINK_SOURCES RAR_SINK_ACCRETION_LEDGER RAR_QUMOND_COMPOSITE_OPERATOR RAR_QUMOND_COMPOSITE_SOLVER RAR_QUMOND_COMPOSITE_CONTINUUM
 modes='newtonian qumond qumond_half'
 if [ "${RAR_EVOLVE_COOLING:-0}" = 1 ];then
  modes="$modes qumond_off qumond_heating"

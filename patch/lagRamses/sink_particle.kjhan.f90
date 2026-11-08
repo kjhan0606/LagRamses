@@ -2247,6 +2247,7 @@ end subroutine write_smbh_capture_ledger
 subroutine dump_agn_coarse_state
   use pm_commons
   use amr_commons
+  use poisson_commons, only: qh_sink_sources
   use amr_parameters, only: spin_bh,mad_jet,X_floor
   use snrt_agn_efficiency, only: snrt_agn_resolve_efficiency, &
        snrt_agn_efficiency_status_name, snrt_agn_efficiency_mode_name
@@ -2284,7 +2285,9 @@ subroutine dump_agn_coarse_state
   if(.not.agn_coarse_dump .or. myid /= 1 .or. nsink <= 0) return
   ! AGN_feedback is a coarse-step routine.  Preserve its restart guard so a
   ! repeated entry in the same in-memory step cannot emit a duplicate block.
-  if(nstep_coarse == nstep_coarse_old .and. nstep_coarse > 0) return
+  ! Native sources run after update_time, which has already copied the coarse
+  ! index to nstep_coarse_old. They are new endpoint events, not restart replay.
+  if(.not.qh_sink_sources.and.nstep_coarse == nstep_coarse_old.and.nstep_coarse > 0)return
   if(nstep_coarse == last_dump_step) return
 
   call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
@@ -4800,7 +4803,7 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
         event_ok(j)=.true.
         if(rar_receipt_enabled)then
 !$omp critical(rar_sink_receipt)
-           write(*,'(A,1X,5(I0,1X),*(ES24.16,1X))') 'RAR_NATIVE_SINK_ACCRETION_V1', &
+           write(*,'(A,1X,5(I0,1X),*(ES25.16E3,1X))') 'RAR_NATIVE_SINK_ACCRETION_V1', &
                 nstep_coarse,ilevel,indp(j),idsink(ksink),nvar,t,vol_loc,gross_mass,dmsink_net, &
                 epsilon_r,radiated_erg,donor_before,uold(indp(j),1:nvar),event_momentum(j,:)
 !$omp end critical(rar_sink_receipt)

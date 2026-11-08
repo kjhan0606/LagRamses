@@ -83,7 +83,7 @@ PY
 printf '%s\n' 'purpose=short noncosmological native stellar endpoint integration; synthetic cap stress, not calibrated star formation' \
  'model=QUMOND; fixed levels3,4; periodic; baryons only; initially no particles; original cooling/heating and channel-resolved SSP feedback; no sinks/AGN/dust/RT' \
  'steps=4;dt_cap=0.002;maximum_end_time=0.008;eps_star=1000 deliberately stresses the accepted 50-percent depletion cap;star_mass_quantum=1e-5 code units' \
- 'noutput=1;aout=1.1;tout=1e100;foutput=2;fbackup=1e9;expected_full_dumps=2;upper_dump_bytes=16777216;expected_total_dump_bytes=33554432;reserve_including_copied_SSP_tables_exports_and_ledgers=1073741824' \
+ 'noutput=1;aout=1.1;tout=1e100;foutput=2;fbackup=1e9;expected_full_dumps=2;upper_dump_bytes=134217728;expected_total_dump_bytes=268435456;reserve_including_copied_SSP_tables_exports_and_ledgers=1073741824' \
  "free_bytes_before=$free_bytes" "effective_namelist=$out/effective.nml" > "$out/output_policy.txt"
 set +u
 source "$(cat "$build/environment_setup_path.txt")" > "$out/compiler_environment.log" 2>&1
@@ -96,7 +96,7 @@ export RAR_NATIVE_PARTICLE_ROLE=baryon RAR_QUMOND_EVOLVE_DT=0.002
 export RAR_STELLAR_BIRTH_LEDGER=1 RAR_STELLAR_COMMIT_LEDGER=1 RAR_COOLING_COMMIT_LEDGER=1 RAR_GLOBAL_INVENTORY=1
 export PHASE0_YIELD_TABLE=$out/phase0_yields.dat PHASE0_STELLAR_ENRICHMENT=1
 export PHASE0_SNIA_RUNTIME_CONTRACT=$out/snia_effective_ssp_runtime.nml
-unset RAR_QUMOND_COMPOSITE_OPERATOR RAR_QUMOND_COMPOSITE_SOLVER RAR_QUMOND_COMPOSITE_CONTINUUM RAR_NATIVE_PARTICLE_CLOUD_WIDTH
+unset RAR_QUMOND_SINK_SOURCES RAR_SINK_ACCRETION_LEDGER RAR_QUMOND_COMPOSITE_OPERATOR RAR_QUMOND_COMPOSITE_SOLVER RAR_QUMOND_COMPOSITE_CONTINUUM RAR_NATIVE_PARTICLE_CLOUD_WIDTH
 cd "$out"
 cat output_policy.txt
 cat effective.nml

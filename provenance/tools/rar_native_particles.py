@@ -19,6 +19,8 @@ def epoch(path, leaves, role='diagnostic'):
         raise ValueError('invalid particle roster/mass')
     if role == 'baryon' and np.any(rows[:, 2] != 1):
         raise ValueError('baryon source includes a nonstellar particle')
+    if role == 'physical_sink' and (np.any(rows[:, 2] != 2) or np.any(rows[:, 1] <= 0)):
+        raise ValueError('physical sink export includes a proxy or another species')
     if not 0 < width <= 1 or np.any(rows[:, 4:7] < 0) or np.any(rows[:, 4:7] >= 1):
         raise ValueError('cloud width/periodic position')
     center, cell_width = leaves[:, 2:5], leaves[:, 5]

@@ -5,7 +5,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 p=argparse.ArgumentParser();p.add_argument('run',type=Path);p.add_argument('output',type=Path);p.add_argument('--case',default='new_on');p.add_argument('--snapshots',type=int,default=2)
-p.add_argument('--leaf-file',default='composite_leaf_state.tsv');p.add_argument('--snapshot-glob',default='output_*/data_*.h5');p.add_argument('--evolving',action='store_true');p.add_argument('--particles',action='store_true');p.add_argument('--particle-role',choices=['diagnostic','baryon','cdm'],default='diagnostic');a=p.parse_args()
+p.add_argument('--leaf-file',default='composite_leaf_state.tsv');p.add_argument('--snapshot-glob',default='output_*/data_*.h5');p.add_argument('--evolving',action='store_true');p.add_argument('--particles',action='store_true');p.add_argument('--particle-role',choices=['diagnostic','baryon','cdm'],default='diagnostic');p.add_argument('--sinks',action='store_true');a=p.parse_args()
 case=a.run/a.case;leaf=np.loadtxt(case/a.leaf_file);face=np.loadtxt(case/'composite_faces.tsv')
 constants=np.array((case/a.leaf_file).read_text().splitlines()[0].split()[2:],float)
 fourpi,a0=constants[:2];external=constants[2:]
@@ -44,12 +44,18 @@ def divergence(normal):
  return (np.bincount(l,term,minlength=n)-np.bincount(r,term,minlength=n))/volume
 def norm(v):return np.sqrt(np.sum(volume*v*v))
 source,pn,pq,ph=leaf[:,6],leaf[:,7],leaf[:,8],leaf[:,9]
-particle_density=np.zeros(n);particle_report=None
+particle_density=np.zeros(n);particle_report=None;sink_report=None
 if a.particles:
  from rar_native_particles import epoch
  index=re.fullmatch(r'composite_epoch_(\d+)_leaf.tsv',a.leaf_file)
  if not a.evolving or index is None:raise ValueError('particles require an evolving field epoch')
  _,particle_density,particle_report=epoch(case/f'particles_epoch_{int(index[1]):05d}.tsv',leaf,role=a.particle_role)
+if a.sinks:
+ from rar_native_particles import epoch
+ index=re.fullmatch(r'composite_epoch_(\d+)_leaf.tsv',a.leaf_file)
+ if not a.evolving or index is None:raise ValueError('sinks require an evolving field epoch')
+ _,sink_density,sink_report=epoch(case/f'sinks_epoch_{int(index[1]):05d}.tsv',leaf,role='physical_sink')
+ particle_density+=sink_density
 gn=gradient(pn);gq=gradient(pq);fn=faces(pn,gn);fq=faces(pq,gq)
 rhsn=fourpi*(source-np.sum(volume*source)/volume.sum())
 resn=norm(divergence(fn[np.arange(len(face)),axis])-rhsn)/norm(rhsn)
@@ -150,5 +156,5 @@ for snapshot in sorted(case.glob(a.snapshot_glob)):
  snapshots.append({'snapshot':str(snapshot),'leaves':count,'phi_max_difference':max_phi,'force_max_difference':max_force,'covered_phi_difference':covered_phi,'covered_force_difference':covered_force,'gas_max_momentum':max_momentum,'gas_energy_relative_difference':None if a.evolving else energy_error})
 if len(snapshots)!=a.snapshots:raise ValueError('incorrect snapshot coverage')
 a.output.write_text(json.dumps({'schema':'rar_composite_publication_independent_v1','leaves':n,'subfaces':len(face),'newtonian_relative_residual':resn,'qumond_relative_residual':resq,'phantom_relative_difference':ph_error,'force_relative_difference':force_error,'source_relative_difference':source_error,'snapshots':snapshots,
- 'gas_state_mode':'evolving' if a.evolving else 'fixed','particle_source':particle_report,
+ 'gas_state_mode':'evolving' if a.evolving else 'fixed','particle_source':particle_report,'physical_sink_source':sink_report,
  'limits':'Independent native operator/source/field snapshot reconstruction. Transport/source accounting, continuum accuracy, particles and evolving MPI/restart require their own evidence.'},indent=2,allow_nan=False)+'\n')

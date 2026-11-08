@@ -17,6 +17,7 @@ from rar_evolving_thermal import thermal_accounting
 p = argparse.ArgumentParser()
 p.add_argument('run', type=Path)
 p.add_argument('out', type=Path)
+p.add_argument('--sinks', action='store_true')
 a = p.parse_args()
 text = (a.run/'run.log').read_text()
 if not (a.run/'COMPLETE').is_file() or 'Run completed' not in text:
@@ -37,7 +38,10 @@ def records(content, marker, count, with_step=False):
             tokens.extend(next(lines).split())
         if len(tokens) != count:
             raise ValueError('malformed record: '+marker)
-        row = [float(v.replace('D', 'E')) for v in tokens]
+        # ES output may omit the E for a three-digit exponent (e.g. 1.2-102).
+        # Preserve that Fortran value rather than rejecting a tiny receipt.
+        row = [float(re.sub(r'^([+-]?\d*\.?\d+)([+-]\d+)$', r'\1E\2', v.replace('D', 'E')))
+               for v in tokens]
         if with_step:
             row = [step, *row]
         found.append(row)
@@ -96,13 +100,17 @@ leaves = [np.loadtxt(path) for path in paths]
 reference = leaves[0]
 volume = reference[:, 5]**3
 lookup = {int(v): i for i, v in enumerate(reference[:, 0])}
-particles, gas, particle_reports = [], [], []
+particles, gas, particle_reports, sinks, sink_reports = [], [], [], [], []
 for k, (path, state) in enumerate(zip(paths, leaves)):
     if not np.array_equal(state[:, :6], reference[:, :6]):
         raise ValueError('fixed topology changed')
     time = float(path.read_text().splitlines()[1].split()[3])
     close(time, times[(k+1)//2], 'field clock', atol=1e-16, rtol=0)
     part, density, report = epoch(a.run/f'particles_epoch_{k:05d}.tsv', state, role='baryon')
+    if a.sinks:
+        body, body_density, body_report = epoch(a.run/f'sinks_epoch_{k:05d}.tsv', state, role='physical_sink')
+        sinks.append(body); sink_reports.append(body_report)
+        density += body_density
     particles.append(part)
     gas.append(state[:, 6]-density)
     particle_reports.append(report)
@@ -111,11 +119,14 @@ for k, (path, state) in enumerate(zip(paths, leaves)):
             '--case', a.run.name, '--evolving', '--particles', '--particle-role', 'baryon',
             '--leaf-file', path.name, '--snapshots', '1' if snap else '0',
             '--snapshot-glob', f'output_{k//4:05d}/data_*.h5' if snap else 'no_snapshot_for_this_epoch']
+    if a.sinks:
+        args.append('--sinks')
     subprocess.run(args, check=True)
 if len(particles[0]) != 0:
     raise ValueError('fixture must begin with no stellar particles')
 total_mass = np.array([state[:, 6] @ volume for state in leaves])
-close(total_mass, total_mass[0], 'physical gas plus stellar mass', atol=1e-12, rtol=0)
+if not a.sinks:
+    close(total_mass, total_mass[0], 'physical gas plus stellar mass', atol=1e-12, rtol=0)
 
 births = records(text, 'RAR_STELLAR_BIRTH_V1', 13)
 returns = records(text, 'RAR_STELLAR_COMMIT_V1', 28, with_step=True)
@@ -246,6 +257,8 @@ if thermal['cooling_records'] == 0 or thermal['heating_records'] == 0:
 for output, k in ((1, 2), (2, 4)):
     with h5py.File(a.run/f'output_{output:05d}/data_{output:05d}.h5') as h:
         g = h['particles'];ix = np.argsort(g['identity'][:]);last = particles[2*k]
+        if a.sinks:
+            ix = ix[g['ptypep'][:][ix] == 1]
         close(g['identity'][:][ix], last[:, 1], 'saved identities', atol=0, rtol=0)
         close(g['mass'][:][ix], last[:, 3], 'saved stellar masses', atol=0, rtol=0)
         for j in range(3):
@@ -257,15 +270,21 @@ for output, k in ((1, 2), (2, 4)):
             close(g['mp0'][:][ix][j], birth[6], 'saved birth mass', atol=0, rtol=0)
             close(g['indtab'][:][ix][j], times[k]-birth[4], 'saved committed SSP age', atol=1e-16, rtol=0)
 subprocess.run([sys.executable, str(a.out/'stellar.py'), str(a.run/'run.log'), str(a.out/'elements.json'), '--require-elements'], check=True)
+sink_result = None
+if a.sinks:
+    from rar_native_sinks import audit
+    sink_result = audit(a.run, leaves, sinks, dt, times, total_mass, records, close)
+    sink_result['source_epochs'] = sink_reports
 result = {'schema': 'rar_native_stellar_endpoint_audit_v1', 'steps': steps, 'end_time': float(times[-1]),
           'timestep_sequence': dt.tolist(), 'leaves': len(reference), 'births': len(births),
           'max_accepted_depletion_fraction': float(max(cap_fraction)), 'budgets': budgets,
           'maximum_total_mass_difference': float(max(abs(total_mass-total_mass[0]))),
           'maximum_kdk_residual': max_kdk, 'particle_epochs': particle_reports, 'thermal': thermal,
           'maximum_gas_gravity_transaction_residual': max_gas_kick,
+          'physical_sinks': sink_result,
           'source_revision': (a.run/'source_commit.txt').read_text().strip(),
           'inputs_sha256': {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in
                             [a.run/'run.log', a.run/'effective.nml', a.run/'inputs.sha256', a.run/'outputs.sha256']},
-          'limits': 'Synthetic depletion stress on a fixed serial two-level periodic mesh. Isothermal birth removes gas internal energy. No calibrated SF, live sink/AGN, MPI/regrid/restart, cosmological IC, galaxy-RAR, or zero AMR self-force claim.'}
+          'limits': 'Synthetic depletion stress on a fixed serial two-level periodic mesh. Isothermal birth removes gas internal energy. Physical sinks/AGN are checked only when requested. No calibrated SF, MPI/regrid/restart, cosmological IC, galaxy-RAR, or zero AMR self-force claim.'}
 (a.out/'result.json').write_text(json.dumps(result, indent=2, allow_nan=False)+'\n')
 print(json.dumps({k:result[k] for k in ('steps','end_time','leaves','births','maximum_total_mass_difference','maximum_kdk_residual')},indent=2))

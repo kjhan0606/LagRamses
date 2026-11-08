@@ -62,3 +62,20 @@ Runtime verification is pending. Existing restrictions
 on serial CPU, noncosmological periodic fixed two-level geometry, common
 timesteps, restart and regridding remain explicit. This is not a completed
 galaxy-formation or cosmological validation.
+
+Build 1279524 (`051b4e1`) completed. AGN-on/off runs 1279526/1279527
+completed all four steps after the list repair. Independent audits 1279528
+and 1279533 retained the completed physical outputs: the first exposed a
+Fortran implicit-E exponent parsing issue, and the second exposed missing
+AGN source-ledger rows. The native endpoint follows `update_time`, so the
+legacy `nstep_coarse_old` restart guard suppresses new diagnostic rows after
+step zero. Exempt the native path from that guard, retaining the per-step
+duplicate guard; this changes diagnostic output, not AGN deposition.
+Accretion receipts now use explicit three-digit exponents. The reader also
+supports valid historical implicit-E notation. Rerun from the corrected
+diagnostic revision before claiming complete physical-sink validation.
+
+The no-sink stellar audit 1279517 passed. On revision `051b4e1`, particle/
+cooling regression 1279529 and independent audit 1279530 passed; legacy
+stellar/AGN/cooling regression 1279531 and audit 1279532 also passed. These
+do not replace the physical-sink audit.
