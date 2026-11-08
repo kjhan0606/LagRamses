@@ -136,9 +136,9 @@ def save_plot(out, observed, radius, gbar, gq, gnfw, gobs):
     bx.plot(radius, nfw_residual, '^-', ms=3, lw=0.8, color='#d45b25',
             label='NFW / observed')
     bx.set(xlabel='Radius (kpc)', ylabel=r'$\log_{10}(g_{\rm model}/g_{\rm obs})$ (dex)')
-    bx.text(0.03, 0.97, 'Four contiguous radial holdouts',
-            transform=bx.transAxes, ha='left', va='top', fontsize=10)
-    bx.legend(loc='lower right', frameon=False, fontsize=10)
+    bx.text(0.97, 0.97, 'Four contiguous radial holdouts',
+            transform=bx.transAxes, ha='right', va='top', fontsize=10)
+    bx.legend(loc='upper right', bbox_to_anchor=(0.98, 0.91), frameon=False, fontsize=10)
     fig.savefig(out / 'rar_comparison.pdf')
     fig.savefig(out / 'rar_comparison.png', dpi=180)
     plt.close(fig)

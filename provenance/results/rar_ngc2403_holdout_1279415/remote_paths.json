@@ -1,0 +1,5 @@
+{
+  "run": "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_compiled512_cdm_nfw_holdout_1279415",
+  "report": "/home/kjhan/BackUP/rar/reports/ngc2403_compiled512_cdm_nfw_holdout_1279415",
+  "force_gate": "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_512_recovery_456010"
+}
