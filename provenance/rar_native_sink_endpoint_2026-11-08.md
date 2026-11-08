@@ -37,7 +37,23 @@ accepted accretion and a feedback event against existing source receipts.
 Existing stellar, cooling and particle regressions remain required. Use new
 Grammar Slurm run directories and preserve all outputs.
 
-Implementation and runtime verification are pending. Existing restrictions
+Initial implementation is commit `e24e4a7`. Grammar build 1279487 completed;
+seeded AGN-on/off executions 1279494 and 1279495 stopped at the first endpoint
+because the legacy cloud rebuild found no exact central proxy. The scheduler
+correctly marked the runners failed despite the executable's clean-stop exit
+code zero. No successful native sink evolution or feedback result is claimed.
+
+The bounded repair retains the known central particle slot across the serial
+KDK step, requires its periodic displacement from the physical body to be at
+most 32 machine epsilons of the box, records that displacement, and restores
+exact equality before legacy cloud removal. This handles possible scalar/
+array rounding without accepting a displaced body or selecting a nearest
+cloud. The next execution must confirm the measured discrepancy and whether
+this resolves the failure. Opt-in accretion receipts record donor states,
+gross/retained mass, efficiency, radiative energy and retained momentum for
+independent accounting. They do not change the accretion prescription.
+
+Runtime verification is pending. Existing restrictions
 on serial CPU, noncosmological periodic fixed two-level geometry, common
 timesteps, restart and regridding remain explicit. This is not a completed
 galaxy-formation or cosmological validation.

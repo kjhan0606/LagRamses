@@ -4374,7 +4374,10 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
   integer,intent(inout)::receipt_error,notice(2)
   logical,intent(in)::capture_radiation
   integer::cell_ierr
-  real(dp)::donor_row(nvar),gross_mass,radiated_erg
+  real(dp)::donor_row(nvar),donor_before(nvar),gross_mass,radiated_erg
+  character(len=8)::rar_receipt_env
+  integer::rar_receipt_status
+  logical::rar_receipt_enabled
   real(dp)::event_radiated(nvector),event_mechanical(3,nvector),partitioned(4)
   logical::reference_model
   integer,dimension(1:nvector)::ind_grid
@@ -4417,6 +4420,10 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
   real(dp),dimension(1:nvector)::event_mp,event_dmbh,event_dmed,event_dmsmbh
   real(dp),dimension(1:nvector,1:ndim)::event_vp,event_momentum
   real(dp)::dmsink_net,mp_old
+
+  rar_receipt_env=''
+  call get_environment_variable('RAR_SINK_ACCRETION_LEDGER',rar_receipt_env,status=rar_receipt_status)
+  rar_receipt_enabled=rar_receipt_status==0.and.trim(rar_receipt_env)=='1'
 
   ! Conversion factor from user units to cgs units
   call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
@@ -4633,6 +4640,7 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
         call omp_set_lock(bondi_cell_locks(ilock))
 
         donor_row=uold(indp(j),1:nvar)
+        if(rar_receipt_enabled)donor_before=donor_row
         if(.not.all(ieee_is_finite(donor_row(1:ndim+2))).or.donor_row(1)<=0d0)then
            if(receipt_error==0)write(*,*)'Bondi invalid donor rank/cell/hydro:',myid,indp(j),donor_row(1:ndim+2)
            receipt_error=1
@@ -4790,6 +4798,13 @@ subroutine accrete_bondi(ind_grid,ind_part,ind_grid_part,ng,np,ilevel, &
 
         endif
         event_ok(j)=.true.
+        if(rar_receipt_enabled)then
+!$omp critical(rar_sink_receipt)
+           write(*,'(A,1X,5(I0,1X),*(ES24.16,1X))') 'RAR_NATIVE_SINK_ACCRETION_V1', &
+                nstep_coarse,ilevel,indp(j),idsink(ksink),nvar,t,vol_loc,gross_mass,dmsink_net, &
+                epsilon_r,radiated_erg,donor_before,uold(indp(j),1:nvar),event_momentum(j,:)
+!$omp end critical(rar_sink_receipt)
+        endif
         call omp_unset_lock(bondi_cell_locks(ilock))
      endif
 
