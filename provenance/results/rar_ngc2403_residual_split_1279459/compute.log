@@ -1,0 +1,26 @@
+{
+  "qumond_minus_reference_at_model_gbar_dex": {
+    "mean_dex": -0.019146269498691647,
+    "median_dex": -0.018496809727299494,
+    "min_dex": -0.05131015544883636,
+    "max_dex": 0.001465857034891592
+  },
+  "reference_shift_between_baryon_inputs_dex": {
+    "mean_dex": -0.033874654986303876,
+    "median_dex": -0.01848944015287473,
+    "min_dex": -0.09643718702351001,
+    "max_dex": -0.0020777417643356093
+  },
+  "reference_at_sparc_gbar_minus_observed_dex": {
+    "mean_dex": -0.032320061253515546,
+    "median_dex": -0.04604286720667909,
+    "min_dex": -0.07699354891517678,
+    "max_dex": 0.041175237146678485
+  },
+  "total": {
+    "mean_dex": -0.08534098573851107,
+    "median_dex": -0.11039053061660402,
+    "min_dex": -0.1593909173230282,
+    "max_dex": 0.009218627081617272
+  }
+}
