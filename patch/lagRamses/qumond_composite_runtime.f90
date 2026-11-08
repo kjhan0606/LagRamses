@@ -1,8 +1,9 @@
-! First publication path: frozen gas/analytic source, serial periodic fixed mesh.
-! The caller rejects particles, evolving hydro/subgrid physics and other gravity.
+! Native serial periodic fixed-mesh gravity publication and common-time evolution.
+! Controlled gas/particle evolution excludes source creation and extra gravity.
 module qumond_composite_runtime
   use amr_commons
   use poisson_commons
+  use qumond_composite_particles
   use hydro_commons, only: uold,smallr,nvar,courant_factor
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #include "amr_index.h"
@@ -33,6 +34,9 @@ contains
     associate(mesh=>qh_composite_mesh)
     if(qh_evolve.and.saved_time==t.and.allocated(saved_gas))then
        if(any(uold(mesh%cell,1)/=saved_gas))call fail('completed endpoint gas source changed')
+       if(pic)then
+          if(.not.native_particles_cached())call fail('completed endpoint particle source changed')
+       endif
        published_epoch=nstep_coarse
        qh_epoch(:,levelmin:nlevelmax)=nstep_coarse
        call qumond_restore_published()
@@ -59,6 +63,7 @@ contains
           if(k>0)call add_analytic(k,boxlen*0.5d0**lev)
        enddo
     endif
+    if(pic)call native_particles_source(mesh,density,use_mond)
     if(.not.all(ieee_is_finite(density)))call fail('source is nonfinite')
     physical_rho_max=maxval(abs(density))
     fourpi=4d0*acos(-1d0)
@@ -119,8 +124,9 @@ contains
     enddo
     if(.not.all(ieee_is_finite(saved_phi)).or..not.all(ieee_is_finite(saved_force)).or. &
          .not.all(ieee_is_finite(saved_rho)))call fail('nonfinite draft fields')
-    ! No force consumer has run in this explicitly frozen-source path. Update
-    ! stage histories and publish the complete hierarchy only after both solves.
+    ! Publish a complete hierarchy only after both stages converge. Particle
+    ! gathers use the same fixed-cloud weights as the physical source deposit.
+    if(pic)call native_particles_force(mesh,saved_force)
     do lev=levelmin,nlevelmax
        do i=1,size(phi)
           if(qh_cell_level(i)/=lev)cycle
@@ -180,6 +186,7 @@ contains
        enddo
        close(unit)
        endif
+       if(pic)call native_particles_export(export_count)
        export_count=export_count+1
     endif
     end associate
@@ -279,6 +286,7 @@ contains
        if(.not.ieee_is_finite(old_dt).or.old_dt<=0d0)call fail('invalid evolution timestep cap')
        dt=min(dt,old_dt)
     endif
+    if(pic)call native_particles_begin(dt)
     if(.not.ieee_is_finite(dt).or.dt<=0d0.or.t+dt<=t)call fail('invalid common evolution timestep')
     dtnew(levelmin:nlevelmax)=dt
     evolution_start=t;evolution_dt=dt;evolution_epoch=nstep_coarse;evolution_open=.true.
@@ -301,9 +309,11 @@ contains
     if(clock_error>16d0*spacing(max(abs(t),abs(evolution_start),evolution_dt))) &
          call fail('hierarchy clock did not advance exactly once')
     if(any(dtnew(levelmin:nlevelmax)/=evolution_dt))call fail('recursive hierarchy timestep changed')
+    if(pic)call native_particles_drift(evolution_dt)
     call restrict_gas_and_ghosts()
     call qumond_history_enter(1,levelmin)
     call qumond_publish_fixed_source()
+    if(pic)call native_particles_finish(evolution_dt)
     associate(mesh=>qh_composite_mesh)
     do i=1,mesh%n,nvector
        n=min(nvector,mesh%n-i+1);ids=0;ids(1:n)=mesh%cell(i:i+n-1)

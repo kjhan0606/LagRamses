@@ -182,10 +182,11 @@ contains
 #endif
     endif
     if(qh_publish)then
-       if(.not.hydro.or.pic.or.star.or.sink.or.(cooling.and..not.qh_evolve).or.neq_chem.or.rt.or.T2_star>0d0.or. &
+       if(.not.hydro.or.(pic.and..not.qh_evolve).or.star.or.sink.or.tracer.or.sidm.or. &
+            (cooling.and..not.qh_evolve).or.neq_chem.or.rt.or.T2_star>0d0.or. &
             use_fR.or.use_nDGP.or.use_symmetron.or.use_dilaton.or.use_galileon.or.use_adm.or.use_fdm.or. &
             mond_mu_type/=1)then
-          write(*,*) 'QUMOND composite publication supports fixed gas/analytic source only; no evolution or extra gravity'
+          write(*,*) 'QUMOND composite publication excludes source creation, tracer/SIDM and extra gravity'
           call clean_stop
        endif
     endif

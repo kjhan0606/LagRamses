@@ -320,7 +320,7 @@ VPATH = $(PATCH):../patch/cuda:../patch/oct_tree:../patch/cuRamses:../$(SOLVER):
 #############################################################################
 # All objects
 MODOBJ	= amr_parameters.jaehyun.o amr_commons.kjhan.o timing.o radiation_commons.o amr_index.o random.o pm_parameters.o pm_commons.o poisson_parameters.o \
-	 qumond_composite.o poisson_commons.o hydro_parameters.o hydro_commons.o qumond_composite_runtime.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
+	 qumond_composite.o qumond_composite_particles.o poisson_commons.o hydro_parameters.o hydro_commons.o qumond_composite_runtime.o cooling_module.o bisection.o mpi_large.o ksection.o dynamic_exchange.o sparse_mat.o \
 	 morton_keys.o morton_hash.o neutrino_commons.o scalar_de_commons.o dark_energy_commons.o power_spectrum.o \
 	 clfind_commons.o gadgetreadfile.o write_makefile.o write_gitinfo.o \
 	 cosmic_ray_physics.o dust_mass_physics.o dust_phase_state.o dust_drag.o dust_multifluid.o \
@@ -744,6 +744,7 @@ dust_mass_smoke: dust_multifluid.o dust_iron_material.o dust_pah_atomization.o d
 cosmic_ray_smoke: cosmic_ray_physics.o ../patch/lagRamses/cosmic_ray_smoke.f90
 	$(F90) -fpp -I. ../patch/lagRamses/cosmic_ray_smoke.f90 cosmic_ray_physics.o -o $@
 qumond_composite.o: amr_commons.kjhan.o amr_index.o
+qumond_composite_particles.o: qumond_composite.o pm_commons.o amr_index.o
 poisson_commons.o: poisson_parameters.o qumond_composite.o
 stellar_enrichment_contract.o: stellar_enrichment_config.o
 stellar_snia_dtd.o: stellar_enrichment_config.o
@@ -837,7 +838,7 @@ amr_constants.o: amr_parameters.jaehyun.o
 slope_types.o: amr_parameters.jaehyun.o
 endif
 
-qumond_composite_runtime.o: poisson_commons.o hydro_commons.o
+qumond_composite_runtime.o: poisson_commons.o hydro_commons.o qumond_composite_particles.o
 amr_step.jaehyun.o: qumond_composite_runtime.o
 adaptive_loop.jaehyun.o: poisson_commons.o
 cooling_fine.kjhan.o: poisson_commons.o

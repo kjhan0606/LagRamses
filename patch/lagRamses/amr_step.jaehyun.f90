@@ -495,6 +495,10 @@ recursive subroutine amr_step(ilevel,icount)
      if(qh_publish)then
         if(ilevel==levelmin)then
            if(qh_evolve)then
+              if(use_pbh)then
+                 write(*,*) 'QUMOND evolving gas/particles excludes PBH evolution'
+                 call clean_stop
+              endif
               call qumond_evolution_begin()
            else
               call qumond_publish_fixed_source()
@@ -1090,7 +1094,7 @@ recursive subroutine amr_step(ilevel,icount)
   !---------------
   ! Move particles
   !---------------
-  if(pic)then
+  if(pic.and..not.qh_evolve)then
                                call timer('particles','start')
      call system_clock(pt_t1)
      call move_fine(ilevel) ! Only remaining particles
@@ -1150,7 +1154,6 @@ recursive subroutine amr_step(ilevel,icount)
      call make_virtual_fine_dp(psi_im(1),ilevel)
      if(timer_report_interval>0) call timer('flag','start')
   end if
-  if(qh_evolve.and.ilevel==levelmin)call qumond_evolution_end()
   if(.not.static.and..not.qh_evolve) call flag_fine(ilevel,icount)
 
   ! Accumulate exclusive rank x level work only on sparse sample steps.
@@ -1183,6 +1186,10 @@ recursive subroutine amr_step(ilevel,icount)
   if(pic)call merge_tree_fine(ilevel)
   call system_clock(pt_t2)
   pt_merge = pt_merge + dble(pt_t2-pt_t1)/dble(pt_rate)
+
+  ! All child lists have merged into the canonical base lists here. Advance
+  ! particles once, publish the new source, then synchronize gas and particles.
+  if(qh_evolve.and.ilevel==levelmin)call qumond_evolution_end()
 
   !---------------
   ! Radiation step
