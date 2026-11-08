@@ -49,3 +49,34 @@ CPU observational comparisons. No computation was run on a login host.
 
 Status at preparation: no replacement job submitted yet. Updated job IDs,
 results and limits will be appended after execution.
+
+
+## Successful recovery and high-resolution execution
+
+The frozen analysis/runner revision is 371307f73afcabe0a9f1ce44764599dd5ef70f38.
+Syntax job 456155 completed the 128-cubed paired run in 49 s, exit 0:0.
+Both independent fields pass: Newtonian median/p90 relative force error
+2.78744e-15 / 6.20767e-15, QUMOND 4.15684e-15 / 7.72007e-15. Newtonian
+source Laplacian RMS relative error is 3.76977e-14. All 128^3 cells were
+updated in both phantom-source calls, with no skipped/missing neighbors.
+The force error distribution uses 376872 cells in the stated radial shell;
+these metrics are discrete operator checks, not continuum estimates.
+
+The pending short job's partition list was expanded to a100,a100_pcie,
+which share the admitted A100 architecture and permit this account. Its ID
+was preserved. Dependent 512-cubed job 456162 started on syn102 after 456155
+succeeded. It retains the same physical input tables and compiled binary.
+No failed prerequisite was bypassed. Scheduler forecasts changed as resources
+became available; observed execution takes precedence over earlier estimates.
+
+The Grammar comparison program is committed in 48ec3e6 and has not yet run.
+It fixes the 64 observed radii, source-free parameters and sampling method,
+reuses the immutable 1279415 baseline CSV, and repeats the same four radial
+NFW holdouts for FR02. The same stellar table is byte-identical in both
+sources. Both radial profile and taper change in the gas intervention; the
+result must not be presented as a pure mass-normalization effect. The
+THINGS branch already applies the 1.33/1.36 helium rescale, so there is no
+separate helium-factor change to attribute. New plots compare at the same
+radii to avoid confusing different baryonic x coordinates.
+
+Compact checkpoint: results/rar_ngc2403_fr02_recovery_20261108/.

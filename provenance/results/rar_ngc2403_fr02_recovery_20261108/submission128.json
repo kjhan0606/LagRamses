@@ -1,0 +1,8 @@
+{
+  "time_utc": "2026-11-08T13:45:13.975850+00:00",
+  "command": "git -C /home/kjhan/BackUP/rar/build/rar_qumond_amr_history_20261107 show 371307f73afcabe0a9f1ce44764599dd5ef70f38:provenance/tools/ngc2403_fr02_uniform.sbatch | sbatch --parsable --job-name=rar-fr02-128 --mem=16G --time=00:10:00 --export=ALL,RAR_ANALYSIS_REVISION=371307f73afcabe0a9f1ce44764599dd5ef70f38,RAR_FR02_NMESH=128",
+  "returncode": 0,
+  "stdout": "456155\n",
+  "stderr": "",
+  "analysis_revision": "371307f73afcabe0a9f1ce44764599dd5ef70f38"
+}

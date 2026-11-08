@@ -1,0 +1,38 @@
+{
+  "status": "PERIODIC_SOURCE_AND_FORCE_GATE_PASS",
+  "cases": {
+    "newtonian": {
+      "median_relative_force_error": 2.78744024597014e-15,
+      "p90_relative_force_error": 6.207669201284804e-15,
+      "force_sample_count": 376872,
+      "quantile_method": "numpy_exact_linear",
+      "snapshot": "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_uniform128_456155/newtonian/output_00001/data_00001.h5",
+      "snapshot_sha256": "2e373fa845eebf322dc35b35a22853ba1fe6c50fe840b492c0ec854b05e2b135",
+      "source_rms_relative_error": 3.769767086707401e-14
+    },
+    "qumond": {
+      "median_relative_force_error": 4.156838554580332e-15,
+      "p90_relative_force_error": 7.72007188401264e-15,
+      "force_sample_count": 376872,
+      "quantile_method": "numpy_exact_linear",
+      "snapshot": "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_uniform128_456155/qumond/output_00001/data_00001.h5",
+      "snapshot_sha256": "2cb3272ac6dce184e7362969f3682b6c2a4a131921f02cecd3cabe561de7ebc4"
+    }
+  },
+  "qumond_diagnostic_calls": 2,
+  "diagnostic_scope": "source_only",
+  "post_second_poisson_diagnostic_calls": 0,
+  "fft_diagnostic_calls": 0,
+  "scope": "NGC 2403 graph-digitized FR02 gas plus fixed stellar source; uniform periodic QUMOND, no CDM halo or cosmological evolution",
+  "grid": {
+    "nmesh": 128,
+    "box_kpc": 64.0,
+    "cell_width_kpc": 0.5
+  },
+  "stellar_ml": 0.5,
+  "source_files_sha256": {
+    "star_profile_code.dat": "1cf451b8f9ff983ec083d332f7b4a32ea40ff803752e48e5d756328b297d89d3",
+    "hi_profile_code.dat": "e041eb1e22db9c1b39e58a7d08259f5f9bb4c5dc138ff314c590c03010a1dd2d",
+    "source_contract.json": "007e745db540161b701e924f3d66475721953a11010cfcd7c658e5a1e7eeb591"
+  }
+}

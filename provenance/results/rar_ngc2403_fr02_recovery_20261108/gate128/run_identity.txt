@@ -1,0 +1,4 @@
+slurm_job_id=456155
+source_revision=65eeb24ddb43e22e6b6acc48b6758c386d506413
+binary_sha256=7baf42cc884f33e9babb09b21aca5c46c380b3c32186cd562d20971c6414061c
+binary_path=/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_uniform128_456155/ramses_final3d

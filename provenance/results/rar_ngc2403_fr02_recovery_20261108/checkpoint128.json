@@ -1,0 +1,7 @@
+{
+  "time_utc": "2026-11-08T13:59:43.343920+00:00",
+  "command": "cd /gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_uniform128_456155 && sha256sum -c artifacts.sha256 --status; sacct -X -j 454073,456155,456162 -n -P -o JobID,JobName,State,ExitCode,Elapsed,NodeList; squeue -j 456162 -o \"%i %j %T %M %R\"",
+  "returncode": 0,
+  "stdout": "454073|rar-fr02-lagr-gate|FAILED|1:0|00:00:00|syn103\n456155|rar-fr02-128|COMPLETED|0:0|00:00:49|syn102\n456162|rar-fr02-512|RUNNING|0:0|00:06:43|syn102\nJOBID NAME STATE TIME NODELIST(REASON)\n456162 rar-fr02-512 RUNNING 6:43 syn102\n",
+  "stderr": ""
+}

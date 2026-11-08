@@ -1,0 +1,9 @@
+{
+  "time_utc": "2026-11-08T13:52:42.940462+00:00",
+  "reason": "Run full same-resolution source comparison only after the 128 source/force validation succeeds.",
+  "command": "git -C /home/kjhan/BackUP/rar/build/rar_qumond_amr_history_20261107 show 371307f73afcabe0a9f1ce44764599dd5ef70f38:provenance/tools/ngc2403_fr02_uniform.sbatch | sbatch --parsable --partition=a100,a100_pcie --job-name=rar-fr02-512 --dependency=afterok:456155 --export=ALL,RAR_ANALYSIS_REVISION=371307f73afcabe0a9f1ce44764599dd5ef70f38,RAR_FR02_NMESH=512",
+  "returncode": 0,
+  "stdout": "456162\n",
+  "stderr": "",
+  "analysis_revision": "371307f73afcabe0a9f1ce44764599dd5ef70f38"
+}

@@ -188,7 +188,7 @@ def main():
                   identity_max_abs_dex=float(np.max(np.abs(identity))), force_metadata=metadata,
                   inputs_sha256={str(path):sha(path) for path in (args.baseline,args.baseline_summary,args.observed,run/'analysis.json',run/'source_contract.json')},
                   limits=[
-                      'Same binary, grid, stars, heights, a0 and sampling. The entire gas source prescription changes, including helium and taper; this is not a pure density-normalization effect.',
+                      'Same binary, grid, stars, heights, a0 and sampling. The radial gas source prescription changes, including profile and taper; this is not a pure density-normalization effect.',
                       'The FR02 graph profile is a candidate and not established as the exact SPARC gas input. Its uncertainty is not quantified.',
                       'Both sources use a periodic 64-kpc box and finite 0.125-kpc cells. Operator verification does not prove continuum or isolated-boundary accuracy.',
                       'QUMOND is a fixed full field solve; NFW fits two parameters on 48 radii per fold. Folds share training data, and diagonal errors omit observational covariance and nuisance parameters.',
