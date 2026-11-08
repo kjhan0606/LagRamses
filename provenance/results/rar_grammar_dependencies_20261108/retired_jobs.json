@@ -1,0 +1,92 @@
+{
+  "utc": "2026-11-08T11:54:03.275841+00:00",
+  "operation": "retire_superseded_pending_only",
+  "before": {
+    "1267690": {
+      "controller": "JobId=1267690 JobName=rar-fdm-strong-mpi-an UserId=kjhan(10396) GroupId=kjhan(10396) MCS_label=N/A Priority=8659 Nice=0 Account=kias QOS=normal JobState=PENDING Reason=DependencyNeverSatisfied Dependency=afterok:1267685(failed) Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0 RunTime=00:00:00 TimeLimit=00:15:00 TimeMin=N/A SubmitTime=2026-11-04T15:20:09 EligibleTime=Unknown AccrueTime=Unknown StartTime=Unknown EndTime=Unknown Deadline=N/A SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-11-04T15:20:09 Scheduler=Main Partition=normal AllocNode:Sid=grammar:2121456 ReqNodeList=(null) ExcNodeList=(null) NodeList= NumNodes=1-1 NumCPUs=2 NumTasks=1 CPUs/Task=2 ReqB:S:C:T=0:0:*:* ReqTRES=cpu=2,mem=8G,node=1,billing=2 AllocTRES=(null) Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=* MinCPUsNode=2 MinMemoryNode=8G MinTmpDiskNode=0 Features=(null) DelayBoot=00:00:00 OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null) Command=/home/kjhan/BackUP/rar/scripts/fdm_strong_mpi_unit_analysis.sbatch WorkDir=/home/kjhan StdErr=/gpfs/kjhan/RAR_QUMOND/logs/fdm_strong_mpi_an_1267690.err StdIn=/dev/null StdOut=/gpfs/kjhan/RAR_QUMOND/logs/fdm_strong_mpi_an_1267690.out TresPerTask=cpu=2 \n",
+      "successor": "1267704",
+      "evidence_key": "fdm_analysis"
+    },
+    "1268670": {
+      "controller": "JobId=1268670 JobName=rar-q-agn-guard-reader UserId=kjhan(10396) GroupId=kjhan(10396) MCS_label=N/A Priority=8659 Nice=0 Account=kias QOS=normal JobState=PENDING Reason=DependencyNeverSatisfied Dependency=afterok:1268668(failed) Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0 RunTime=00:00:00 TimeLimit=00:30:00 TimeMin=N/A SubmitTime=2026-11-04T19:21:01 EligibleTime=Unknown AccrueTime=Unknown StartTime=Unknown EndTime=Unknown Deadline=N/A SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-11-04T19:21:01 Scheduler=Main Partition=normal AllocNode:Sid=grammar:2910780 ReqNodeList=(null) ExcNodeList=(null) NodeList= NumNodes=1-1 NumCPUs=2 NumTasks=1 CPUs/Task=2 ReqB:S:C:T=0:0:*:* ReqTRES=cpu=2,mem=8G,node=1,billing=2 AllocTRES=(null) Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=* MinCPUsNode=2 MinMemoryNode=8G MinTmpDiskNode=0 Features=(null) DelayBoot=00:00:00 OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null) Command=/home/kjhan/BackUP/rar/scripts/qumond_agn_guard_reader_1268668.sbatch WorkDir=/home/kjhan StdErr=/gpfs/kjhan/RAR_QUMOND/logs/q_agn_guard_reader_1268670.err StdIn=/dev/null StdOut=/gpfs/kjhan/RAR_QUMOND/logs/q_agn_guard_reader_1268670.out TresPerTask=cpu=2 \n",
+      "successor": "1268706",
+      "evidence_key": "agn_reader"
+    },
+    "1268673": {
+      "controller": "JobId=1268673 JobName=rar-q-agn-guard-reader UserId=kjhan(10396) GroupId=kjhan(10396) MCS_label=N/A Priority=8659 Nice=0 Account=kias QOS=normal JobState=PENDING Reason=DependencyNeverSatisfied Dependency=afterok:1268671(failed) Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0 RunTime=00:00:00 TimeLimit=00:30:00 TimeMin=N/A SubmitTime=2026-11-04T19:22:44 EligibleTime=Unknown AccrueTime=Unknown StartTime=Unknown EndTime=Unknown Deadline=N/A SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-11-04T19:22:44 Scheduler=Main Partition=normal AllocNode:Sid=grammar:2914760 ReqNodeList=(null) ExcNodeList=(null) NodeList= NumNodes=1-1 NumCPUs=2 NumTasks=1 CPUs/Task=2 ReqB:S:C:T=0:0:*:* ReqTRES=cpu=2,mem=8G,node=1,billing=2 AllocTRES=(null) Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=* MinCPUsNode=2 MinMemoryNode=8G MinTmpDiskNode=0 Features=(null) DelayBoot=00:00:00 OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null) Command=/home/kjhan/BackUP/rar/scripts/qumond_agn_guard_reader_1268671.sbatch WorkDir=/home/kjhan StdErr=/gpfs/kjhan/RAR_QUMOND/logs/q_agn_guard_reader_1268673.err StdIn=/dev/null StdOut=/gpfs/kjhan/RAR_QUMOND/logs/q_agn_guard_reader_1268673.out TresPerTask=cpu=2 \n",
+      "successor": "1268706",
+      "evidence_key": "agn_reader"
+    },
+    "1268677": {
+      "controller": "JobId=1268677 JobName=rar-q-agn-guard-reader UserId=kjhan(10396) GroupId=kjhan(10396) MCS_label=N/A Priority=8659 Nice=0 Account=kias QOS=normal JobState=PENDING Reason=DependencyNeverSatisfied Dependency=afterok:1268676(failed) Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0 RunTime=00:00:00 TimeLimit=00:30:00 TimeMin=N/A SubmitTime=2026-11-04T19:24:35 EligibleTime=Unknown AccrueTime=Unknown StartTime=Unknown EndTime=Unknown Deadline=N/A SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-11-04T19:24:35 Scheduler=Main Partition=normal AllocNode:Sid=grammar:2919876 ReqNodeList=(null) ExcNodeList=(null) NodeList= NumNodes=1-1 NumCPUs=2 NumTasks=1 CPUs/Task=2 ReqB:S:C:T=0:0:*:* ReqTRES=cpu=2,mem=8G,node=1,billing=2 AllocTRES=(null) Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=* MinCPUsNode=2 MinMemoryNode=8G MinTmpDiskNode=0 Features=(null) DelayBoot=00:00:00 OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null) Command=/home/kjhan/BackUP/rar/scripts/qumond_agn_guard_reader_1268676.sbatch WorkDir=/home/kjhan StdErr=/gpfs/kjhan/RAR_QUMOND/logs/q_agn_guard_reader_1268677.err StdIn=/dev/null StdOut=/gpfs/kjhan/RAR_QUMOND/logs/q_agn_guard_reader_1268677.out TresPerTask=cpu=2 \n",
+      "successor": "1268706",
+      "evidence_key": "agn_reader"
+    },
+    "1268683": {
+      "controller": "JobId=1268683 JobName=rar-q-agn-guard-reader UserId=kjhan(10396) GroupId=kjhan(10396) MCS_label=N/A Priority=8659 Nice=0 Account=kias QOS=normal JobState=PENDING Reason=DependencyNeverSatisfied Dependency=afterok:1268682(failed) Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0 RunTime=00:00:00 TimeLimit=00:30:00 TimeMin=N/A SubmitTime=2026-11-04T19:28:41 EligibleTime=Unknown AccrueTime=Unknown StartTime=Unknown EndTime=Unknown Deadline=N/A SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-11-04T19:28:41 Scheduler=Main Partition=normal AllocNode:Sid=grammar:2928773 ReqNodeList=(null) ExcNodeList=(null) NodeList= NumNodes=1-1 NumCPUs=2 NumTasks=1 CPUs/Task=2 ReqB:S:C:T=0:0:*:* ReqTRES=cpu=2,mem=8G,node=1,billing=2 AllocTRES=(null) Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=* MinCPUsNode=2 MinMemoryNode=8G MinTmpDiskNode=0 Features=(null) DelayBoot=00:00:00 OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null) Command=/home/kjhan/BackUP/rar/scripts/qumond_agn_guard_reader_1268682.sbatch WorkDir=/home/kjhan/BackUP/rar StdErr=/gpfs/kjhan/RAR_QUMOND/logs/q_agn_guard_reader_1268683.err StdIn=/dev/null StdOut=/gpfs/kjhan/RAR_QUMOND/logs/q_agn_guard_reader_1268683.out TresPerTask=cpu=2 \n",
+      "successor": "1268706",
+      "evidence_key": "agn_reader"
+    },
+    "1268688": {
+      "controller": "JobId=1268688 JobName=rar-q-agn-guard-reader UserId=kjhan(10396) GroupId=kjhan(10396) MCS_label=N/A Priority=8659 Nice=0 Account=kias QOS=normal JobState=PENDING Reason=DependencyNeverSatisfied Dependency=afterok:1268687(failed) Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0 RunTime=00:00:00 TimeLimit=00:30:00 TimeMin=N/A SubmitTime=2026-11-04T19:31:30 EligibleTime=Unknown AccrueTime=Unknown StartTime=Unknown EndTime=Unknown Deadline=N/A SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-11-04T19:31:30 Scheduler=Main Partition=normal AllocNode:Sid=grammar:2936328 ReqNodeList=(null) ExcNodeList=(null) NodeList= NumNodes=1-1 NumCPUs=2 NumTasks=1 CPUs/Task=2 ReqB:S:C:T=0:0:*:* ReqTRES=cpu=2,mem=8G,node=1,billing=2 AllocTRES=(null) Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=* MinCPUsNode=2 MinMemoryNode=8G MinTmpDiskNode=0 Features=(null) DelayBoot=00:00:00 OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null) Command=/home/kjhan/BackUP/rar/scripts/qumond_agn_guard_reader_1268687.sbatch WorkDir=/home/kjhan/BackUP/rar StdErr=/gpfs/kjhan/RAR_QUMOND/logs/q_agn_guard_reader_1268688.err StdIn=/dev/null StdOut=/gpfs/kjhan/RAR_QUMOND/logs/q_agn_guard_reader_1268688.out TresPerTask=cpu=2 \n",
+      "successor": "1268706",
+      "evidence_key": "agn_reader"
+    },
+    "1275336": {
+      "controller": "JobId=1275336 JobName=rar-stage-history-audit UserId=kjhan(10396) GroupId=kjhan(10396) MCS_label=N/A Priority=8659 Nice=0 Account=kias QOS=normal JobState=PENDING Reason=DependencyNeverSatisfied Dependency=afterok:1275335(failed) Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0 RunTime=00:00:00 TimeLimit=00:05:00 TimeMin=N/A SubmitTime=2026-11-07T11:52:31 EligibleTime=Unknown AccrueTime=Unknown StartTime=Unknown EndTime=Unknown Deadline=N/A SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-11-07T11:52:31 Scheduler=Main Partition=normal AllocNode:Sid=grammar:88668 ReqNodeList=(null) ExcNodeList=(null) NodeList= NumNodes=1 NumCPUs=2 NumTasks=1 CPUs/Task=2 ReqB:S:C:T=0:0:*:* ReqTRES=cpu=2,mem=4G,node=1,billing=2 AllocTRES=(null) Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=* MinCPUsNode=2 MinMemoryNode=4G MinTmpDiskNode=0 Features=(null) DelayBoot=00:00:00 OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null) Command=/home/kjhan/BackUP/rar/scripts/audit_rar_stage_history.sbatch WorkDir=/home/kjhan/BackUP/rar StdErr=/gpfs/kjhan/RAR_QUMOND/logs/rar_stage_history_audit_1275336.err StdIn=/dev/null StdOut=/gpfs/kjhan/RAR_QUMOND/logs/rar_stage_history_audit_1275336.out TresPerTask=cpu=2 \n",
+      "successor": "1275344",
+      "evidence_key": "history"
+    },
+    "1275358": {
+      "controller": "JobId=1275358 JobName=rar-stage-history UserId=kjhan(10396) GroupId=kjhan(10396) MCS_label=N/A Priority=8659 Nice=0 Account=kias QOS=normal JobState=PENDING Reason=DependencyNeverSatisfied Dependency=afterok:1275357(failed) Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0 RunTime=00:00:00 TimeLimit=00:15:00 TimeMin=N/A SubmitTime=2026-11-07T12:03:36 EligibleTime=Unknown AccrueTime=Unknown StartTime=Unknown EndTime=Unknown Deadline=N/A SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-11-07T12:03:36 Scheduler=Main Partition=normal AllocNode:Sid=grammar:124563 ReqNodeList=(null) ExcNodeList=(null) NodeList= NumNodes=1 NumCPUs=2 NumTasks=1 CPUs/Task=2 ReqB:S:C:T=0:0:*:* ReqTRES=cpu=2,mem=8G,node=1,billing=2 AllocTRES=(null) Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=* MinCPUsNode=2 MinMemoryNode=8G MinTmpDiskNode=0 Features=(null) DelayBoot=00:00:00 OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null) Command=/home/kjhan/BackUP/rar/scripts/run_rar_stage_history_gate.sbatch WorkDir=/home/kjhan/BackUP/rar StdErr=/gpfs/kjhan/RAR_QUMOND/logs/rar_stage_history_1275358.err StdIn=/dev/null StdOut=/gpfs/kjhan/RAR_QUMOND/logs/rar_stage_history_1275358.out TresPerTask=cpu=2 \n",
+      "successor": "1275361",
+      "evidence_key": "composite_history"
+    },
+    "1275359": {
+      "controller": "JobId=1275359 JobName=rar-stage-history-audit UserId=kjhan(10396) GroupId=kjhan(10396) MCS_label=N/A Priority=8659 Nice=0 Account=kias QOS=normal JobState=PENDING Reason=Dependency Dependency=afterok:1275358(unfulfilled) Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0 RunTime=00:00:00 TimeLimit=00:05:00 TimeMin=N/A SubmitTime=2026-11-07T12:03:36 EligibleTime=Unknown AccrueTime=Unknown StartTime=Unknown EndTime=Unknown Deadline=N/A SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-11-07T12:03:36 Scheduler=Main Partition=normal AllocNode:Sid=grammar:124563 ReqNodeList=(null) ExcNodeList=(null) NodeList= NumNodes=1 NumCPUs=2 NumTasks=1 CPUs/Task=2 ReqB:S:C:T=0:0:*:* ReqTRES=cpu=2,mem=4G,node=1,billing=2 AllocTRES=(null) Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=* MinCPUsNode=2 MinMemoryNode=4G MinTmpDiskNode=0 Features=(null) DelayBoot=00:00:00 OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null) Command=/home/kjhan/BackUP/rar/scripts/audit_rar_stage_history.sbatch WorkDir=/home/kjhan/BackUP/rar StdErr=/gpfs/kjhan/RAR_QUMOND/logs/rar_stage_history_audit_1275359.err StdIn=/dev/null StdOut=/gpfs/kjhan/RAR_QUMOND/logs/rar_stage_history_audit_1275359.out TresPerTask=cpu=2 \n",
+      "successor": "1275362",
+      "evidence_key": "composite_history"
+    }
+  },
+  "retired_jobs": [
+    "1267690",
+    "1268670",
+    "1268673",
+    "1268677",
+    "1268683",
+    "1268688",
+    "1275336",
+    "1275358",
+    "1275359"
+  ],
+  "successful_replacement_artifacts": {
+    "fdm_analysis": {
+      "/gpfs/kjhan/RAR_QUMOND/analysis/fdm_strong_mpi_unit_1267704/summary.json": "6160271625270bae59d75603c6c90733e290731bc04a387516feb48788da5d05",
+      "/gpfs/kjhan/RAR_QUMOND/analysis/fdm_strong_mpi_unit_1267704/compute.py": "6f920b83b2ebe00a934d0845b0cd4f159888aa560756d090ae4408751f8f2772",
+      "/gpfs/kjhan/RAR_QUMOND/analysis/fdm_strong_mpi_unit_1267704/job.sbatch": "a20c8b9074ed6411ceba9b770b52467367ba013bc6af6a8c1e805392ab4c8686"
+    },
+    "agn_reader": {
+      "/gpfs/kjhan/RAR_QUMOND/runs/qag_1268706/job.sbatch": "d31997b8ef5f6b94b5958009075dd3af327bb757c2526301963c89577b7d9563",
+      "/gpfs/kjhan/RAR_QUMOND/runs/qag_1268706/ic_sink": "82e6c3aa6f00445eb24bb2362d5c6f37c68e132065a3d1a2b8978af863d71c84",
+      "/gpfs/kjhan/RAR_QUMOND/runs/qag_1268706/effective.nml": "2a35e6e714ed9a8d5ccdaf2823e588c4aa71d2bd9e21932fa4915d6e5f8024a9",
+      "/gpfs/kjhan/RAR_QUMOND/runs/qag_1268706/yield_table.asc": "ba1099c5a4c3afe5e9ba28b3eb59d2e85fd3d40b7e7cb4ec30799eec00a5ac2e",
+      "/gpfs/kjhan/RAR_QUMOND/runs/qag_1268706/ramses_final3d": "363b97a964f8933c35a0df1d849d6ad7f29e19cb5b74de90741ab300039aa65c",
+      "/gpfs/kjhan/RAR_QUMOND/runs/qag_1268706/run.log": "a4b3e1c7b0ec69be2701c96e5b0a34d3d65df77d250178dba158187f448a3f0c",
+      "/gpfs/kjhan/RAR_QUMOND/runs/qag_1268706/agn_coarse_state_v1.jsonl": "7d4b82b182a11b1ead9068c048750a6226f9bfb0a721306e30c3c84b0c55bfa3",
+      "/gpfs/kjhan/RAR_QUMOND/runs/qag_1268706/ndgp_source_l005_rank00001.tsv": "1ca3db1d0d59f0e2b7eec4b182221f710d6e68506356d9f95f67ec920407657a",
+      "/gpfs/kjhan/RAR_QUMOND/runs/qag_1268706/output_policy.txt": "3e311546c0471330f336d099b752ec47ff90ccea3c1e64f85778371f5dc5f48c",
+      "/gpfs/kjhan/RAR_QUMOND/runs/qag_1268706/effective_namelist_path.txt": "9c8748aff6c283db6e55b58729f40df6c476cbe136044590f2f749c463f1970b"
+    },
+    "history": {
+      "/gpfs/kjhan/RAR_QUMOND/audits/rar_stage_history_1275344/result.json": "6b551277f68aee7bb46e61fee5ca6e8607eea8fcac3065e7936515adcaf04d02",
+      "/gpfs/kjhan/RAR_QUMOND/audits/rar_stage_history_1275344/job.sbatch": "5ebc89c4f995564783f05fd8257cd508fc26994e321a4b79d54537418dc1c804"
+    },
+    "composite_history": {
+      "/gpfs/kjhan/RAR_QUMOND/audits/rar_stage_history_1275362/result.json": "7d309da23fa0b9eea3218a26079805df453a5ebb2735264bdb3d9832be6f4a26",
+      "/gpfs/kjhan/RAR_QUMOND/audits/rar_stage_history_1275362/job.sbatch": "5ebc89c4f995564783f05fd8257cd508fc26994e321a4b79d54537418dc1c804"
+    }
+  },
+  "limits": "Replacement success retains each original scientific scope; no new science validation is claimed.",
+  "full_scheduler_audit": "/home/kjhan/BackUP/rar/reports/grammar_dependency_recovery_20261108",
+  "unrelated_projects": "DE, PBH, EDE, VoidSim, FDM assembly and PPI remain separate projects."
+}
