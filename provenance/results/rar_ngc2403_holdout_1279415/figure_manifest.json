@@ -1,0 +1,11 @@
+{
+  "render_job": 1279417,
+  "render_directory": "/home/kjhan/BackUP/rar/reports/ngc2403_holdout_figure_1279417",
+  "render_source_revision": "cafd8b68b37c6ed13ceb95c2e38d896b948d2bad",
+  "uses_unchanged_holdout_csv": true,
+  "sha256": {
+    "provenance/figures/rar_ngc2403_compiled512_holdout.pdf": "ee90da4246e0a661e980ebcd23fd0b81df077a198092b7cc375df89b52a0ef1a",
+    "provenance/figures/rar_ngc2403_compiled512_holdout.png": "03321dc26abfd17a9c5ed69d3cda24e72aaf64b513395d2d7f54990474320c9c",
+    "provenance/results/rar_ngc2403_holdout_1279415/holdout.csv": "702aa0a4c46f78d61f8c0971983163073bc99d3fc4106d68622965f3307544db"
+  }
+}

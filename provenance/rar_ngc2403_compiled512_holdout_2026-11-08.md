@@ -52,3 +52,7 @@ Visual inspection found the original right-panel title and legend touched
 the plotted curve. The renderer moves them into the empty upper-right
 region, retaining the original figure. The replacement figure is generated
 directly from the saved CSV, without reading the force files or fitting again.
+Grammar render `1279417` completed and the replacement PDF/PNG passed visual
+inspection. The CSV is byte-identical to the analysis input. The figures are
+tracked as `provenance/figures/rar_ngc2403_compiled512_holdout.pdf` and `.png`;
+their digests and render source revision are recorded in the result bundle.
