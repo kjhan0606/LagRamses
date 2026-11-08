@@ -54,5 +54,66 @@ Cooling remains the validated level-local Lie split. MPI, regridding,
 subcycling, restart, particle mass exchange, stellar/AGN feedback and native
 cosmological initial conditions remain outside this first particle bundle.
 
-Status at implementation commit: integrated source; compilation and execution
-results pending. The default-off path is retained.
+## Execution and independent checks
+
+Numerical source `b86ee8b814f49518c4c70079a21476298cab2ed7` compiled in
+Grammar job `1279259` (3 min 2 s). All following jobs use that immutable build.
+
+| Execution | Audit | Result |
+| --- | --- | --- |
+| 1279263 | 1279264 | Execution completed; initial fixture missed the actual refinement interface. Preserved. |
+| 1279266 | 1279269, 1279272 | Corrected interface positions. Initial audits exposed cancellation roundoff in reconstructed gas density. Preserved. |
+| 1279266 | 1279275 | Three moving-particle cases passed independent checks. |
+| 1279265 | 1279267 | Six gas-only cooling/heating and accuracy cases passed regression checks. |
+| 1279277 | 1279280 | Five simultaneous particle/gas/cooling-heating cases passed. |
+| 1279276 | in job | Six initial self/pair-force measurements completed. |
+
+The actual refinement interfaces at the selected transverse coordinates are
+`x=0.6875` and `0.3125`, rather than the nominal refinement-radius endpoints.
+The corrected four-particle fixture starts at `x=0.6873, 0.9998, 0.3127, 0.0002`
+with masses `0.002, 0.001, 0.002, 0.001`. Each N/Q/half-step case records two
+refinement crossings and two periodic crossings. Deposited mass agrees within
+`3.47e-18` code mass; independent force gathers agree within `1.78e-15` code
+acceleration, including thermal cases. KDK transactions and independently
+saved synchronized particle states pass. With cooling, halving the common
+timestep changes particle position by `2.94e-8` of total travel and velocity
+by `9.20e-10` relatively. These are short-interval replay differences, not
+estimates of long-time or spatial convergence.
+
+The independent gas reconstruction subtracts particle density from the
+exported total. A mismatch of `1.03e-14` in one cell was roundoff from that
+subtraction, not a different gas source. Its comparison now propagates an
+absolute bound of `32 * eps * (abs(total_density) + abs(particle_density))`,
+in addition to the existing `1e-14` gas-relative tolerance. Gas-only
+tolerances, direct source/snapshot checks and momentum/work checks are
+unchanged. No Fortran numerical change followed the implementation commit.
+
+Run directories are under `/gpfs/kjhan/RAR_QUMOND/runs/rar_evolving_gas_JOB`;
+audits are under `audits/rar_evolving_gas_JOB`. Each evolving case has only
+two full snapshots. The self/pair runs have no full snapshots and explicitly
+execute one step while analyzing the initial force only. Their first attempt
+`1279271` exposed that `nstepmax=0` still performs one full step in this path;
+the preserved failure led to the explicit `nstepmax=1` contract.
+
+## Measured spatial limitation
+
+A single synthetic cloud near the refinement interface has nonzero native
+self acceleration. Its norm is `0.0477060 * G m / s^2` for Newtonian gravity
+and `0.262895 * G m / s^2` for QUMOND, where `s=0.0625` is the fixed cloud
+width. These normalizations are numerical cloud scales, not percentages of
+an observed rotation-curve acceleration. Symmetric pairs cancel their total
+force to relative `8.76e-16` (N) and `5.25e-14` (Q), but this symmetry does
+not remove the single-cloud bias. Newtonian field superposition agrees to
+`6.04e-10` relative maximum error; QUMOND fields are not superposed.
+
+Therefore the source and time coupling is demonstrated within the controlled
+domain, while the current particle force prescription is not ready for a
+precision live-galaxy calculation. The next force work must reduce or bound
+the assignment/AMR self-force error and test spatial convergence. Do not
+silently subtract a single-particle QUMOND field: the nonlinear phantom
+source does not permit that Newtonian correction. This limitation is
+separate from the already tested prescribed, continuous baryon force path.
+
+Compact results and reproduction tools accompany this note in
+`provenance/results/rar_native_particle_bundle_1279259/` and
+`provenance/tools/`. The broad RAR/BIMOND/FDM programme remains incomplete.

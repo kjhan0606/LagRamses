@@ -1,0 +1,136 @@
+{
+  "schema": "rar_native_particle_initial_force_v1",
+  "cases": {
+    "newtonian_a": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 1.0408340855860843e-17,
+      "cloud_width": 0.0625,
+      "acceleration": [
+        [
+          -0.023148962474720855,
+          -0.005446233540180097,
+          -0.0055739330371432465
+        ]
+      ],
+      "mass_weighted_net_force": [
+        -4.629792494944171e-05,
+        -1.0892467080360193e-05,
+        -1.1147866074286493e-05
+      ],
+      "net_force_fraction": 1.0,
+      "self_acceleration_over_Gm_s2": 0.04770603880225023
+    },
+    "newtonian_b": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 2.0816681711721685e-17,
+      "cloud_width": 0.0625,
+      "acceleration": [
+        [
+          0.023148962474720848,
+          0.005446233540180093,
+          0.0055739330371432525
+        ]
+      ],
+      "mass_weighted_net_force": [
+        4.62979249494417e-05,
+        1.0892467080360187e-05,
+        1.1147866074286505e-05
+      ],
+      "net_force_fraction": 1.0,
+      "self_acceleration_over_Gm_s2": 0.047706038802250224
+    },
+    "newtonian_pair": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 2.42861286636753e-17,
+      "cloud_width": 0.0625,
+      "acceleration": [
+        [
+          -0.03108665934148419,
+          -0.006089521052690103,
+          -0.006864227620338753
+        ],
+        [
+          0.031086659341484173,
+          0.006089521052690113,
+          0.006864227620338807
+        ]
+      ],
+      "mass_weighted_net_force": [
+        -2.710505431213761e-20,
+        2.0328790734103208e-20,
+        1.0842021724855044e-19
+      ],
+      "net_force_fraction": 8.761305771490624e-16
+    },
+    "qumond_a": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 6.938893903907228e-17,
+      "cloud_width": 0.0625,
+      "acceleration": [
+        [
+          -0.13294314808249594,
+          -0.00262862546658274,
+          -0.020904460033041736
+        ]
+      ],
+      "mass_weighted_net_force": [
+        -0.0002658862961649919,
+        -5.257250933165481e-06,
+        -4.180892006608347e-05
+      ],
+      "net_force_fraction": 1.0,
+      "self_acceleration_over_Gm_s2": 0.2628951721665233
+    },
+    "qumond_b": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 2.7755575615628914e-17,
+      "cloud_width": 0.0625,
+      "acceleration": [
+        [
+          0.132943148082496,
+          0.0026286254665827003,
+          0.020904460033041614
+        ]
+      ],
+      "mass_weighted_net_force": [
+        0.000265886296164992,
+        5.2572509331654e-06,
+        4.180892006608323e-05
+      ],
+      "net_force_fraction": 1.0,
+      "self_acceleration_over_Gm_s2": 0.26289517216652336
+    },
+    "qumond_pair": {
+      "weight_sum_error": 0.0,
+      "deposited_mass_error": 0.0,
+      "force_gather_error": 8.326672684688674e-17,
+      "cloud_width": 0.0625,
+      "acceleration": [
+        [
+          -0.2151406840395916,
+          -0.011222175229817333,
+          -0.03802300320868402
+        ],
+        [
+          0.2151406840395792,
+          0.011222175229799236,
+          0.03802300320867712
+        ]
+      ],
+      "mass_weighted_net_force": [
+        -2.4774019641293776e-17,
+        -3.6192023770281745e-17,
+        -1.3810025172034113e-17
+      ],
+      "net_force_fraction": 5.2547601654143263e-14
+    }
+  },
+  "newtonian_field_superposition_relative_max_error": 6.038623910634205e-10,
+  "scope": "Time-zero native fixed AMR forces for one/two synthetic clouds in uniform gas; explicit one-step executions with no snapshots. Evolved fields are retained but not used in this initial-force measurement.",
+  "limits": "A symmetric pair and two interface positions are a bounded measurement, not a spatial convergence study. Matched maps do not imply zero self force. QUMOND is nonlinear and its single-particle fields are not superposed. No calibrated galaxy softening or long-time momentum-conservation claim."
+}

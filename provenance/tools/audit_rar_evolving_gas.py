@@ -3,7 +3,7 @@
 import argparse,hashlib,json,re,subprocess,sys
 from pathlib import Path
 import h5py,numpy as np
-p=argparse.ArgumentParser();p.add_argument('run',type=Path);p.add_argument('out',type=Path);p.add_argument('verifier',type=Path);p.add_argument('--cooling',action='store_true');p.add_argument('--thermal-accuracy',action='store_true');p.add_argument('--thermal-energy-tolerance',type=float);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('run',type=Path);p.add_argument('out',type=Path);p.add_argument('verifier',type=Path);p.add_argument('--cooling',action='store_true');p.add_argument('--thermal-accuracy',action='store_true');p.add_argument('--thermal-energy-tolerance',type=float);p.add_argument('--particles',action='store_true');a=p.parse_args()
 def records(text,tag,n):
  result=[];lines=iter(text.splitlines())
  for line in lines:
@@ -29,6 +29,7 @@ def snap_state(path,reference):
  if not seen.all() or not np.isfinite(result).all():raise ValueError('bad snapshot leaf join')
  return result,time,dt
 summaries={};initials={};finals={};reference=None;all_inputs={}
+particle_summaries={};particle_initial={};particle_final={}
 cases=[('newtonian',6,.0002),('qumond',6,.0002),('qumond_half',12,.0001)]
 if a.cooling:cases.extend([('qumond_off',6,.0002),('qumond_heating',6,.0002)])
 if a.thermal_accuracy:cases.append(('qumond_accuracy',6,.0002))
@@ -42,7 +43,20 @@ for mode,steps,dt in cases:
  if not np.allclose(ends[:,1],np.arange(steps)*dt,rtol=0,atol=1e-16) or not np.allclose(ends[:,2],np.arange(1,steps+1)*dt,rtol=0,atol=1e-16) or not np.all(ends[:,3]==dt):raise ValueError('end clock mismatch')
  paths=sorted(case.glob('composite_epoch_*_leaf.tsv'))
  if len(paths)!=steps+1:raise ValueError('missing/duplicate field epoch')
- states=[np.loadtxt(f) for f in paths];first=states[0];volume=first[:,5]**3;n=len(first)
+ states=[np.loadtxt(f) for f in paths]
+ source_roundoff=[np.zeros(len(state)) for state in states]
+ if a.particles:
+  from rar_native_particles import audit
+  density,report,pi,pf=audit(case,states,steps,dt)
+  particle_summaries[mode]=report;particle_initial[mode]=pi;particle_final[mode]=pf
+  for epoch_index,(state,rho) in enumerate(zip(states,density)):
+   # Gas is reconstructed by subtracting independently integrated particle
+   # density from the exported total. Bound that subtraction/map roundoff by
+   # its operands, not by the potentially much smaller gas residual alone.
+   source_roundoff[epoch_index]=32*np.finfo(float).eps*(abs(state[:,6])+abs(rho))
+   state[:,6]-=rho
+  for path in sorted(case.glob('particle*.tsv')):all_inputs[str(path)]=hashlib.sha256(path.read_bytes()).hexdigest()
+ first=states[0];volume=first[:,5]**3;n=len(first)
  if reference is None:reference=first
  if not np.array_equal(reference[:,:6],first[:,:6]):raise ValueError('control topology mismatch')
  for k,(path,state) in enumerate(zip(paths,states)):
@@ -78,7 +92,8 @@ for mode,steps,dt in cases:
    if len(row)!=n or len(np.unique(row[:,1]))!=n:raise ValueError('duplicate/missing leaf kick')
    ix=np.array([lookup[int(c)] for c in row[:,1]]);row=row[np.argsort(ix)];phases.append(row)
    old=states[k];new=states[k+1];source=old if phase==0 else new
-   if not np.array_equal(row[:,2],first[:,1]) or not np.allclose(row[:,3],source[:,6],rtol=1e-14,atol=0) or not np.allclose(row[:,4],new[:,6],rtol=1e-14,atol=0):raise ValueError('kick density source/receiver epoch mismatch')
+   source_atol=source_roundoff[k if phase==0 else k+1];receiver_atol=source_roundoff[k+1]
+   if not np.array_equal(row[:,2],first[:,1]) or not np.allclose(row[:,3],source[:,6],rtol=1e-14,atol=source_atol) or not np.allclose(row[:,4],new[:,6],rtol=1e-14,atol=receiver_atol):raise ValueError(f'kick density source/receiver epoch mismatch mode={mode} step={k} phase={phase} source_max={np.max(abs(row[:,3]-source[:,6]))} receiver_max={np.max(abs(row[:,4]-new[:,6]))}')
    if not np.all(row[:,5]==.5*dt) or not np.array_equal(row[:,6:9],source[:,10:13]):raise ValueError('kick timestep/force epoch mismatch')
    expected_dp=row[:,3,None]*row[:,5,None]*row[:,6:9];actual_dp=row[:,13:16]-row[:,9:12]
    expected_de=(np.sum(row[:,13:16]**2,axis=1)-np.sum(row[:,9:12]**2,axis=1))/(2*row[:,4]);actual_de=row[:,16]-row[:,12]
@@ -110,7 +125,7 @@ for mode,steps,dt in cases:
   gas,time,dts=snap_state(snapshot,first)
   if abs(time-epoch*dt)>1e-16 or not np.all(dts[3:5]==dt):raise ValueError('saved hierarchy time/dt mismatch')
   verification=a.out/f'verify_{mode}_{output}.json'
-  subprocess.run([sys.executable,str(a.verifier),str(a.run),str(verification),'--case',mode,'--snapshots','1','--leaf-file',paths[epoch].name,'--snapshot-glob',f'output_{output:05d}/data_{output:05d}.h5','--evolving'],check=True)
+  subprocess.run([sys.executable,str(a.verifier),str(a.run),str(verification),'--case',mode,'--snapshots','1','--leaf-file',paths[epoch].name,'--snapshot-glob',f'output_{output:05d}/data_{output:05d}.h5','--evolving']+(['--particles'] if a.particles else []),check=True)
   snapshots.append({'time':time,'verification':str(verification)})
   if output==2:finals[mode]=gas
  initials[mode]=first[:,6]
@@ -125,6 +140,13 @@ for field,cols in (('density',slice(0,1)),('momentum',slice(1,4)),('energy',slic
  halved[field]=relative(finals['qumond_half'][:,cols],finals['qumond'][:,cols]);contrasts[field]=relative(finals['newtonian'][:,cols],finals['qumond'][:,cols])
 if halved['density']>=summaries['qumond']['density_relative_change']:raise ValueError('timestep replay differs more than actual density evolution')
 cooling_effect={}
+particle_precision={}
+if a.particles:
+ if not np.array_equal(particle_initial['newtonian'][:,:10],particle_initial['qumond'][:,:10]) or not np.array_equal(particle_initial['qumond'][:,:10],particle_initial['qumond_half'][:,:10]):raise ValueError('unmatched particle ICs')
+ difference=particle_final['qumond_half']-particle_final['qumond'];difference[:,:3]-=np.rint(difference[:,:3])
+ travel=particle_final['qumond'][:,:3]-particle_initial['qumond'][:,4:7];travel-=np.rint(travel)
+ particle_precision={'position_difference_over_travel':float(np.linalg.norm(difference[:,:3])/np.linalg.norm(travel)), 'velocity_relative_difference':float(np.linalg.norm(difference[:,3:])/np.linalg.norm(particle_final['qumond'][:,3:]))}
+ if particle_precision['position_difference_over_travel']>.01 or particle_precision['velocity_relative_difference']>.001:raise ValueError('particle timestep refinement unresolved')
 if a.cooling:
  for field,cols in (('density',slice(0,1)),('momentum',slice(1,4)),('energy',slice(4,5))):cooling_effect[field]=relative(finals['qumond'][:,cols],finals['qumond_off'][:,cols])
 thermal_precision={}
@@ -132,6 +154,6 @@ if a.thermal_accuracy:
  for field,cols in (('density',slice(0,1)),('momentum',slice(1,4)),('energy',slice(4,5))):thermal_precision[field]=relative(finals['qumond_accuracy'][:,cols],finals['qumond'][:,cols])
  if a.thermal_energy_tolerance is None:raise ValueError('precision replay needs a declared energy tolerance')
  if max(halved['energy'],thermal_precision['energy'])>a.thermal_energy_tolerance:raise ValueError(f'thermal precision unresolved: dt={halved["energy"]} substep={thermal_precision["energy"]}')
-(a.out/'result.json').write_text(json.dumps({'schema':'rar_evolving_native_gas_v1','cases':summaries,'halved_timestep_relative_state_difference':halved,'newtonian_vs_qumond_relative_state_difference':contrasts,'cooling_on_vs_off_relative_state_difference':cooling_effect,'tightened_thermal_substep_relative_state_difference':thermal_precision,'declared_energy_tolerance':a.thermal_energy_tolerance,'input_sha256':all_inputs,
+(a.out/'result.json').write_text(json.dumps({'schema':'rar_evolving_native_gas_v1','cases':summaries,'particles':particle_summaries,'particle_timestep_refinement':particle_precision,'halved_timestep_relative_state_difference':halved,'newtonian_vs_qumond_relative_state_difference':contrasts,'cooling_on_vs_off_relative_state_difference':cooling_effect,'tightened_thermal_substep_relative_state_difference':thermal_precision,'declared_energy_tolerance':a.thermal_energy_tolerance,'input_sha256':all_inputs,
  'scope':'Actual gas transport with old-density/old-force and new-density/new-force half sources, common hierarchy timestep and fixed native topology. Independent source-field snapshots and per-leaf momentum/kinetic-work accounting. Thermal cases additionally reconcile original cooling/heating, initial temperature clipping and complete AMR call budgets.',
- 'limits':'Noncosmological periodic smooth gas at one spatial resolution and short endpoint. Cooling uses a level-local Lie split, not demonstrated second-order full physics. No total QUMOND field-plus-gas energy conservation, exact self-force cancellation, particles, stellar/AGN feedback, enrichment, MPI/regrid/restart or galaxy-formation readiness.'},indent=2,allow_nan=False)+'\n')
+ 'limits':'Noncosmological periodic smooth gas at one spatial resolution and short endpoint. Cooling uses a level-local Lie split, not demonstrated second-order full physics. Optional particles are fixed-mass numerical controls with synchronized endpoint checks. No total QUMOND field-plus-gas energy conservation, exact self-force cancellation, stellar/AGN feedback, enrichment, MPI/regrid/restart or galaxy-formation readiness.'},indent=2,allow_nan=False)+'\n')
