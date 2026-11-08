@@ -1,0 +1,1 @@
+/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_uniform512_456162/newtonian/effective.nml

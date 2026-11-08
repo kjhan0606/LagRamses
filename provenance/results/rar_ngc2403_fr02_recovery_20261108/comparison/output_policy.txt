@@ -1,0 +1,4 @@
+purpose=CPU comparison of compiled FR02 and THINGS-like force fields at the same resolution
+force_run=/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_uniform512_456162
+free_bytes=151179711479808
+new_full_dumps=0; output_budget_bytes=16777216; inputs_are_immutable

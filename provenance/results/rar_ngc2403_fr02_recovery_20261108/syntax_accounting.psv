@@ -1,0 +1,10 @@
+456155|rar-fr02-128|COMPLETED|0:0|00:00:49||billing=5,cpu=1,gres/gpu=1,mem=16G,node=1
+456155.batch|batch|COMPLETED|0:0|00:00:49|479312K|cpu=1,gres/gpu=1,mem=16G,node=1
+456155.extern|extern|COMPLETED|0:0|00:00:49|1.50M|billing=5,cpu=1,gres/gpu=1,mem=16G,node=1
+456155.0|hydra_bstrap_proxy|COMPLETED|0:0|00:00:25|742900K|billing=5,cpu=1,gres/gpu=1,mem=16G,node=1
+456155.1|hydra_bstrap_proxy|COMPLETED|0:0|00:00:37|1228K|billing=5,cpu=1,gres/gpu=1,mem=16G,node=1
+456162|rar-fr02-512|COMPLETED|0:0|00:25:39||billing=5,cpu=1,gres/gpu=1,mem=256G,node=1
+456162.batch|batch|COMPLETED|0:0|00:25:39|7369800K|cpu=1,gres/gpu=1,mem=256G,node=1
+456162.extern|extern|COMPLETED|0:0|00:25:39|1.50M|billing=5,cpu=1,gres/gpu=1,mem=256G,node=1
+456162.0|hydra_bstrap_proxy|COMPLETED|0:0|00:09:15|55802188K|billing=5,cpu=1,gres/gpu=1,mem=256G,node=1
+456162.1|hydra_bstrap_proxy|COMPLETED|0:0|00:22:28|55825756K|billing=5,cpu=1,gres/gpu=1,mem=256G,node=1

@@ -1,0 +1,11 @@
+{
+  "same_grid": {
+    "nmesh": 512,
+    "box_kpc": 64.0,
+    "cell_width_kpc": 0.125
+  },
+  "stellar_profile_identical_sha256": "1cf451b8f9ff983ec083d332f7b4a32ea40ff803752e48e5d756328b297d89d3",
+  "things_gas_sha256": "6415a65b9e892c8515c0b724551552ca04553e7cb7a912c6b9179c6f9e803c4a",
+  "fr02_gas_sha256": "e041eb1e22db9c1b39e58a7d08259f5f9bb4c5dc138ff314c590c03010a1dd2d",
+  "comparison_artifacts_sha256": "250b7f9d689d35dabcd3e24cde7fdebf22e67b99fba2adca9c7515ed3994ef88"
+}

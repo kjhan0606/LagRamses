@@ -1,0 +1,7 @@
+commit 65eeb24ddb43e22e6b6acc48b6758c386d506413
+Author:     Juhan Kim <kjhan0606@gmail.com>
+AuthorDate: Tue Nov 3 08:03:07 2026 +0900
+Commit:     Juhan Kim <kjhan0606@gmail.com>
+CommitDate: Tue Nov 3 08:03:07 2026 +0900
+
+    Add tabulated stellar and gas source for controlled field tests

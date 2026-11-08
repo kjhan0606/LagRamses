@@ -80,3 +80,74 @@ separate helium-factor change to attribute. New plots compare at the same
 radii to avoid confusing different baryonic x coordinates.
 
 Compact checkpoint: results/rar_ngc2403_fr02_recovery_20261108/.
+
+
+## Completed matched-source result
+
+Syntax 456162 completed in 25 min 39 s with exit 0:0 on an A100 on syn102.
+Each of its two full snapshots is 28,684,370,544 bytes. The independent oracle
+passes at 512 cubed: Newtonian median/p90 force error 1.01426e-14 / 2.22704e-14,
+QUMOND 1.69210e-14 / 3.17024e-14, Newtonian source RMS 5.44793e-13. The force
+statistics use 24,089,384 cells within the declared 0.03--0.35 code-radius
+shell and relative-force mask. This verifies the same discrete periodic
+operators in that domain; it does not establish continuum accuracy. Both
+phantom-source calls update all 512^3 cells, with no skipped neighbors.
+
+Grammar comparison 1279603 completed in 2 min 35 s, exit 0:0, from analysis
+revision af5676687b9a351494c83977d8953d2eead65b1c. Its manifest passes. The
+old and new inputs have identical grid, compiled executable and stellar-table
+hash; heights, M/L=0.5, acceleration scale and force-sampling rules are fixed.
+The gas profile and taper differ. All 64 observed radii and their data match
+exactly. No observed velocity was used to alter the QUMOND source or parameters.
+
+| Diagnostic over the 64 radii | THINGS-like QUMOND | FR02 QUMOND | THINGS-like NFW | FR02 NFW |
+| --- | ---: | ---: | ---: | ---: |
+| Velocity RMS (km/s) | 13.33265 | 11.23126 | 5.16001 | 5.19346 |
+| Mean velocity residual (km/s) | -11.23045 | -9.50573 | +0.94167 | +0.44065 |
+| RMS log acceleration residual (dex) | 0.099121 | 0.084081 | 0.041354 | 0.040715 |
+| Diagonal chi-squared per point | 326.656 | 197.556 | 33.577 | 26.808 |
+
+The QUMOND source change raises the equal-weight mean log acceleration by
+0.013003 dex over all 64 radii and by 0.018462 dex over the outer 16 radii
+(13.42--20.87 kpc). Its outer mean log residual against observation changes
+from -0.131611 to -0.113149 dex. Thus the graph-derived candidate improves
+this prescribed model but leaves an outer acceleration deficit of about
+23 per cent when the mean log ratio is exponentiated. The improvement is a
+measured response to this particular complete gas-source intervention, not
+an observational error estimate or a causal separation of profile, taper,
+resolution and boundary effects.
+
+The mean outer FR02 baryonic field remains 0.098213 dex below the SPARC
+baryonic reconstruction. QUMOND remains close to the empirical relation
+there (-0.000785 dex). The remaining reference-input shift is -0.054056 dex,
+and the empirical relation evaluated at SPARC gbar lies -0.058308 dex below
+this galaxy's observed acceleration. These three arithmetic means sum to
+-0.113149 dex. The identity closes per radius below 1e-12 dex. The same
+reference-versus-observation term is unchanged by changing the source model.
+This accounting must not be interpreted as a numerical-error decomposition.
+
+NFW uses the same four contiguous holdout blocks and two fitted parameters
+per fold, whereas QUMOND is fixed. All four FR02 optima lie inside the original
+V200/c200 grid. The curves concatenate four separately fitted predictions;
+fold boundaries can cause discontinuities. Fits share training data and the
+diagonal errors omit covariance, distance, inclination and mass-to-light
+uncertainties. Neither the residual hierarchy nor the large chi-squared
+values provide a calibrated model-selection significance. The NFW branch
+is still an isolated analytic halo added to the periodic baryonic field,
+not a live halo or a cosmological Lambda-CDM calculation.
+
+The PDF/PNG was visually inspected: both panels compare at the same radii,
+and labels/legends are inside clear regions. Original figures and all raw
+outputs are preserved. The new PDF is
+reports/ngc2403_fr02_comparison_1279603/results/source_comparison.pdf in the
+project root. The matching tracked archive is
+results/rar_ngc2403_fr02_recovery_20261108/comparison/results/.
+
+The next directly relevant science step is a controlled periodic-box change
+at fixed physical spacing and identical baryonic density, alongside the
+existing resolution comparison. A 64-kpc/256-cubed and 128-kpc/512-cubed pair
+would isolate this box change at 0.25 kpc; it would not by itself establish
+an infinite-domain or continuum limit. No such new box run has been submitted
+in this bundle. The exact SPARC gas reconstruction, observational nuisance
+inference, live-halo/galaxy evolution, native AMR limitations, cosmological ICs,
+and subsequent BIMOND/FDM programme remain open. The full goal is active.

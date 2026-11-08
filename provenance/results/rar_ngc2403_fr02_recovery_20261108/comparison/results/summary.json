@@ -1,0 +1,382 @@
+{
+  "status": "MATCHED_COMPILED_512_GAS_SOURCE_COMPARISON",
+  "run_root": "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_uniform512_456162",
+  "grid": {
+    "nmesh": 512,
+    "box_kpc": 64.0,
+    "cell_width_kpc": 0.125
+  },
+  "source_contract": {
+    "purpose": "matched fixed stellar and FR02 Figure 9 gas source for uniform lagRamses force diagnostics",
+    "box_kpc": 64.0,
+    "unit_length_cm": 1.974833652154475e+23,
+    "unit_density_g_cm3": 1e-24,
+    "surface_density_factor_per_msun_pc2": 0.001057517184997013,
+    "stellar_rows": 73,
+    "gas_rows": 44,
+    "stellar_mass_to_light": 0.5,
+    "stellar_mass_msun_under_reader_interpolation": 5031168963.050421,
+    "stellar_radial_scale_length_for_height_relation_kpc": 1.39,
+    "stellar_scaleheight_kpc": 0.2414262228976889,
+    "gas_input_is_hi_only": true,
+    "gas_helium_factor": 1.33,
+    "gas_total_mass_msun_with_taper": 4243047859.543423,
+    "fr02_distance_mpc": 3.18,
+    "sparc_distance_mpc": 3.16,
+    "gas_radius_scale_fr02_to_sparc": 0.9937106918238994,
+    "gas_radius_first_kpc": 0.49112561006289307,
+    "gas_radius_last_kpc": 21.85508666666667,
+    "gas_scaleheight_kpc": 0.2,
+    "gas_taper_start_kpc": 21.85508666666667,
+    "gas_taper_end_kpc": 23.85508666666667,
+    "star_exp_scaleheight_code": 0.003772284732776389,
+    "gas_exp_scaleheight_code": 0.003125,
+    "gas_taper_start_code": 0.3414857291666667,
+    "gas_taper_end_code": 0.3727357291666667,
+    "radial_contract": "piecewise-linear profiles; constant density inside the first knot; stars truncate at the final knot; gas tapers linearly from the final Figure 9 knot to zero over 2 kpc",
+    "vertical_contract": "cell-averaged normalized symmetric exponential density",
+    "inputs": {
+      "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_input_448195/ngc2403_observed.csv": "852eb3bcbf10e0e088f70598a25075b991867eb64a0c7ca0cd46d6ff7eb6fb95",
+      "/home/kjhan/BackUP/rar/data/ngc2403_fr02_fig9_digitization/radial_profile.csv": "c6d561e640ac5be57976d654bbf0b7ae727adc06daea8f8078d0c4488dafd460"
+    },
+    "interpretation_limit": "Figure 9 is a graph-digitized gas-source candidate and does not identify the exact radial profile used by SPARC."
+  },
+  "baseline_contract": {
+    "scope": "conditional matched HI profile for uniform periodic lagRamses gate",
+    "unit_length_cm": 1.974833652154475e+23,
+    "unit_density_g_cm3": 1e-24,
+    "surface_density_factor_per_msun_pc2": 0.001057517184997013,
+    "star_rows": 73,
+    "gas_rows": 2501,
+    "stellar_ml": 0.5,
+    "gas_helium_rescale": 0.9779411764705882,
+    "star_exp_scaleheight_code": 0.003772284732776389,
+    "gas_exp_scaleheight_code": 0.003125,
+    "gas_taper_start_code": 0.359375,
+    "gas_taper_end_code": 0.390625,
+    "radial_contract": "piecewise-linear separately for stars and HI; constant inside first sample; star zero past last, HI last value through taper",
+    "vertical_contract": "finite-cell average of normalized exp(-abs(z)/h)/(2h); do not multiply by dz again",
+    "inputs_sha256": {
+      "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_matched_hi_448318/annuli.csv": "6cf06b790199dd05ce5fa30cf3d55f6fa007805f45f6884e1d7009299451fb07",
+      "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_halogas_448201/annular_coverage.csv": "58ada8d43ba92a7f8b86a8d3e4686e0dc6ff016a9ebf4d199d449a96ee8be7f4",
+      "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_lagr_input_448232/star_profile_code.dat": "1cf451b8f9ff983ec083d332f7b4a32ea40ff803752e48e5d756328b297d89d3"
+    },
+    "gpu": "NVIDIA A10",
+    "limits": "approximate common-beam map scenarios; shared outer profile, vertical structure and stellar M/L assumptions; periodic test only",
+    "scenario": "things",
+    "gas_radial_spacing_kpc": 0.01,
+    "blend_kpc": [
+      11,
+      12
+    ],
+    "gas_table_max_abs_interpolation_difference_msun_pc2": 1.5058083342900375e-05,
+    "gas_table_max_abs_over_peak": 1.581139285348419e-06
+  },
+  "sample": {
+    "points": 64,
+    "radius_kpc": [
+      1.06,
+      20.87
+    ],
+    "azimuths_per_radius": 64
+  },
+  "all_radii": {
+    "log10_qumond_fr02_over_things_dex": {
+      "mean": 0.013003057177520167,
+      "median": 0.012210895316841917,
+      "rms": 0.019164358901845795,
+      "min": -0.001403655095533198,
+      "max": 0.043592237513524035
+    },
+    "log10_gbar_fr02_over_things_dex": {
+      "mean": 0.0238913798390758,
+      "median": 0.023946994135907028,
+      "rms": 0.031328351566594956,
+      "min": 0.0013424548314945408,
+      "max": 0.06618539113745874
+    },
+    "qumond_fr02_minus_observed_dex": {
+      "mean": -0.0723379285609909,
+      "median": -0.08779769105750969,
+      "rms": 0.08408106946275846,
+      "min": -0.14350459632922533,
+      "max": 0.008179582663061007
+    },
+    "qumond_things_minus_observed_dex": {
+      "mean": -0.08534098573851107,
+      "median": -0.11039053061660402,
+      "rms": 0.09912098294251537,
+      "min": -0.1593909173230282,
+      "max": 0.009218627081617272
+    },
+    "nfw_fr02_minus_observed_dex": {
+      "mean": 0.006378734308422406,
+      "median": -0.0027035995198697975,
+      "rms": 0.04071537462835986,
+      "min": -0.0494097930438816,
+      "max": 0.08705145585871711
+    },
+    "nfw_things_minus_observed_dex": {
+      "mean": 0.01013696351852001,
+      "median": -0.0052959677554024615,
+      "rms": 0.04135357752404044,
+      "min": -0.04871571989508054,
+      "max": 0.09101596957942429
+    },
+    "gbar_fr02_minus_sparc_dex": {
+      "mean": -0.035630431772296536,
+      "median": -0.006623583793023904,
+      "rms": 0.05454063523752955,
+      "min": -0.1482879718182901,
+      "max": -0.0015958580576093092
+    },
+    "gbar_things_minus_sparc_dex": {
+      "mean": -0.05952181161137233,
+      "median": -0.02989127034374843,
+      "rms": 0.0810891430464839,
+      "min": -0.17837211175521836,
+      "max": -0.0030438126324900303
+    },
+    "qumond_fr02_minus_reference_dex": {
+      "mean": -0.01994185295339194,
+      "median": -0.020440066838165245,
+      "rms": 0.02510115163098518,
+      "min": -0.0533942756505104,
+      "max": 0.0006894818938738101
+    },
+    "reference_baryon_input_shift_dex": {
+      "mean": -0.02007601435408341,
+      "median": -0.004287155547835495,
+      "rms": 0.030174671138587378,
+      "min": -0.08027133578870511,
+      "max": -0.0010895555278151348
+    },
+    "reference_sparc_minus_observed_dex": {
+      "mean": -0.032320061253515546,
+      "median": -0.04604286720667909,
+      "rms": 0.0488093353705834,
+      "min": -0.07699354891517678,
+      "max": 0.041175237146678485
+    }
+  },
+  "outer_radii": {
+    "radius_kpc": [
+      13.42,
+      20.87
+    ],
+    "statistics": {
+      "log10_qumond_fr02_over_things_dex": {
+        "mean": 0.018461934181854083,
+        "median": 0.015781144308928727,
+        "rms": 0.01935669028383224,
+        "min": 0.012852994279153799,
+        "max": 0.032613586783478796
+      },
+      "log10_gbar_fr02_over_things_dex": {
+        "mean": 0.032739973775493994,
+        "median": 0.029954330123570606,
+        "rms": 0.03358167381993644,
+        "min": 0.025356466341290494,
+        "max": 0.05120598623403547
+      },
+      "qumond_fr02_minus_observed_dex": {
+        "mean": -0.11314933484114273,
+        "median": -0.10951276812907844,
+        "rms": 0.11463706312192214,
+        "min": -0.14350459632922533,
+        "max": -0.08959182683367325
+      },
+      "qumond_things_minus_observed_dex": {
+        "mean": -0.1316112690229968,
+        "median": -0.12586801992021476,
+        "rms": 0.13244578454467743,
+        "min": -0.1593909173230282,
+        "max": -0.11415149887546108
+      },
+      "nfw_fr02_minus_observed_dex": {
+        "mean": -0.03179656086596736,
+        "median": -0.02827402448076195,
+        "rms": 0.033286616581565044,
+        "min": -0.0494097930438816,
+        "max": -0.01889116563449671
+      },
+      "nfw_things_minus_observed_dex": {
+        "mean": -0.018147536851665425,
+        "median": -0.014940567336311581,
+        "rms": 0.019585929852396537,
+        "min": -0.032565988017348106,
+        "max": -0.008732974594619988
+      },
+      "gbar_fr02_minus_sparc_dex": {
+        "mean": -0.09821280192658563,
+        "median": -0.09295247821524935,
+        "rms": 0.10003043079540344,
+        "min": -0.1482879718182901,
+        "max": -0.07679243116376379
+      },
+      "gbar_things_minus_sparc_dex": {
+        "mean": -0.13095277570207964,
+        "median": -0.12445000594234851,
+        "rms": 0.13201702190067022,
+        "min": -0.17837211175521836,
+        "max": -0.11795535698781738
+      },
+      "qumond_fr02_minus_reference_dex": {
+        "mean": -0.0007850752020192341,
+        "median": -0.0003604620980846621,
+        "rms": 0.001517691259946637,
+        "min": -0.003928635779677394,
+        "max": 0.0006894818938738101
+      },
+      "reference_baryon_input_shift_dex": {
+        "mean": -0.05405578760925207,
+        "median": -0.0514395615324731,
+        "rms": 0.05493783180488068,
+        "min": -0.08027133578870511,
+        "max": -0.043157850302470956
+      },
+      "reference_sparc_minus_observed_dex": {
+        "mean": -0.058308472029871425,
+        "median": -0.05723432612405649,
+        "rms": 0.059284934564220376,
+        "min": -0.07699354891517678,
+        "max": -0.04488016256338526
+      }
+    }
+  },
+  "velocity": {
+    "things_qumond": {
+      "rms_km_s": 13.33265349391385,
+      "median_absolute_km_s": 12.614368880715865,
+      "mean_residual_km_s": -11.230453864210592,
+      "diagonal_chi2": 20905.987503209002,
+      "diagonal_chi2_per_point": 326.65605473764066
+    },
+    "things_nfw": {
+      "rms_km_s": 5.1600052266918786,
+      "median_absolute_km_s": 3.2823118369178204,
+      "mean_residual_km_s": 0.9416688294693933,
+      "diagonal_chi2": 2148.904745880045,
+      "diagonal_chi2_per_point": 33.576636654375704
+    },
+    "fr02_qumond": {
+      "rms_km_s": 11.23126461197346,
+      "median_absolute_km_s": 10.579257999727481,
+      "mean_residual_km_s": -9.50572943350808,
+      "diagonal_chi2": 12643.565433596857,
+      "diagonal_chi2_per_point": 197.5557098999509
+    },
+    "fr02_nfw": {
+      "rms_km_s": 5.193462020677181,
+      "median_absolute_km_s": 3.2485556910275832,
+      "mean_residual_km_s": 0.44065274780067454,
+      "diagonal_chi2": 1715.7035100080088,
+      "diagonal_chi2_per_point": 26.807867343875138
+    }
+  },
+  "nfw_folds": [
+    {
+      "fold": 0,
+      "training_points": 48,
+      "heldout_points": 16,
+      "radius_kpc": [
+        1.06,
+        2.57
+      ],
+      "v200_km_s": 96.5,
+      "c200": 12.25,
+      "training_diagonal_chi2": 426.5762081976426,
+      "grid_edge": false
+    },
+    {
+      "fold": 1,
+      "training_points": 48,
+      "heldout_points": 16,
+      "radius_kpc": [
+        2.68,
+        4.97
+      ],
+      "v200_km_s": 97.25,
+      "c200": 12.05,
+      "training_diagonal_chi2": 450.14417907925224,
+      "grid_edge": false
+    },
+    {
+      "fold": 2,
+      "training_points": 48,
+      "heldout_points": 16,
+      "radius_kpc": [
+        5.47,
+        12.92
+      ],
+      "v200_km_s": 112.25,
+      "c200": 9.05,
+      "training_diagonal_chi2": 172.59215830570707,
+      "grid_edge": false
+    },
+    {
+      "fold": 3,
+      "training_points": 48,
+      "heldout_points": 16,
+      "radius_kpc": [
+        13.42,
+        20.87
+      ],
+      "v200_km_s": 95.25,
+      "c200": 12.350000000000001,
+      "training_diagonal_chi2": 549.5414406824764,
+      "grid_edge": false
+    }
+  ],
+  "nfw_fit_grid": {
+    "H0": 70.0,
+    "V200": [
+      30.0,
+      250.0
+    ],
+    "c200": [
+      2.0,
+      30.0
+    ]
+  },
+  "identity_max_abs_dex": 8.326672684688674e-17,
+  "force_metadata": {
+    "newtonian": {
+      "snapshot": "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_uniform512_456162/newtonian/output_00001/data_00001.h5",
+      "snapshot_sha256": "0d47f5c5cba2d07f4c3a3cf563b48efe0bf0f58116ad00b90f4dcb8b69c034eb",
+      "level": 9,
+      "nmesh": 512,
+      "boxlen_code": 1.0,
+      "dx_code": 0.001953125,
+      "dx_kpc": 0.1250000000000003,
+      "unit_length_cm": 1.97483365215448e+23,
+      "unit_time_s": 3870767965518460.0
+    },
+    "qumond": {
+      "snapshot": "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_uniform512_456162/qumond/output_00001/data_00001.h5",
+      "snapshot_sha256": "2f87ac0df205e5efb16751270736d1e5fdacc41cd292cda8d032920dcd0fd013",
+      "level": 9,
+      "nmesh": 512,
+      "boxlen_code": 1.0,
+      "dx_code": 0.001953125,
+      "dx_kpc": 0.1250000000000003,
+      "unit_length_cm": 1.97483365215448e+23,
+      "unit_time_s": 3870767965518460.0
+    }
+  },
+  "inputs_sha256": {
+    "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_fr02_comparison_1279603/inputs/holdout.csv": "702aa0a4c46f78d61f8c0971983163073bc99d3fc4106d68622965f3307544db",
+    "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_fr02_comparison_1279603/inputs/baseline_summary.json": "401e60cded2bb03a2e12f74f7dded8ef0317eec3788cfbf50449fa5e9df2b4be",
+    "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_fr02_comparison_1279603/inputs/observed.csv": "852eb3bcbf10e0e088f70598a25075b991867eb64a0c7ca0cd46d6ff7eb6fb95",
+    "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_uniform512_456162/analysis.json": "44ef1728fa016f3519b9376884f9ca22759516a3ef8bb267168255ed742fad72",
+    "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_uniform512_456162/source_contract.json": "007e745db540161b701e924f3d66475721953a11010cfcd7c658e5a1e7eeb591"
+  },
+  "limits": [
+    "Same binary, grid, stars, heights, a0 and sampling. The radial gas source prescription changes, including profile and taper; this is not a pure density-normalization effect.",
+    "The FR02 graph profile is a candidate and not established as the exact SPARC gas input. Its uncertainty is not quantified.",
+    "Both sources use a periodic 64-kpc box and finite 0.125-kpc cells. Operator verification does not prove continuum or isolated-boundary accuracy.",
+    "QUMOND is a fixed full field solve; NFW fits two parameters on 48 radii per fold. Folds share training data, and diagonal errors omit observational covariance and nuisance parameters.",
+    "NFW is an isolated analytic contribution added to the periodic baryon force, not a live Lambda-CDM or cosmological simulation.",
+    "The reference decomposition is algebraic accounting, not an error budget or causal separation of physics. One galaxy does not measure intrinsic population RAR scatter."
+  ]
+}

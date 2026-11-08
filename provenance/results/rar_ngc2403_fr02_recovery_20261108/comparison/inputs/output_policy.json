@@ -1,0 +1,13 @@
+{"purpose":"compiled FR02 fixed-source QUMOND/Newtonian comparison at declared resolution",
+ "source":"FR02 Figure 9 HI candidate with helium 1.33; SPARC stellar M/L=0.5",
+ "grid":"512^3", "box_kpc":64.0, "nmesh":512,
+ "cases":2, "nstepmax":1, "noutput":1, "aout":[1.1],
+ "tout":["1.0d100"], "foutput":1, "fbackup":1000000000,
+ "expected_full_dumps_per_case":1,
+ "measured_comparable_bytes_per_128_dump":448291224,
+ "measured_comparable_bytes_per_512_dump":28684370544,
+ "reserved_bytes_per_dump":53687091200,"reserved_bytes_total":107374182400,
+ "free_bytes_at_start":151283629555712,"source_revision":"65eeb24ddb43e22e6b6acc48b6758c386d506413",
+ "binary_sha256":"7baf42cc884f33e9babb09b21aca5c46c380b3c32186cd562d20971c6414061c","analysis_revision":"371307f73afcabe0a9f1ce44764599dd5ef70f38",
+ "source_preparation_job":1274676,
+ "limits":"graph-derived gas; periodic fixed sources; no live halo or cosmology; not an exact SPARC reconstruction"}

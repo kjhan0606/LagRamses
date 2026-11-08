@@ -1,0 +1,836 @@
+   _/_/_/   _/    _/   _/_/_/         _/_/     _/    _/    _/_/_/    _/_/_/_/   
+  _/_/_/ 
+  _/        _/    _/    _/    _/     _/  _/    _/_/_/_/   _/    _/   _/         
+ _/    _/
+ _/         _/    _/    _/    _/    _/    _/   _/ _/ _/   _/         _/         
+ _/      
+ _/         _/    _/    _/_/_/     _/_/_/_/    _/    _/     _/_/     _/_/_/     
+   _/_/  
+ _/         _/    _/    _/    _/   _/    _/    _/    _/         _/   _/         
+       _/
+  _/        _/    _/    _/    _/   _/    _/    _/    _/   _/    _/   _/         
+ _/    _/
+   _/_/_/    _/_/_/     _/    _/   _/    _/    _/    _/    _/_/_/    _/_/_/_/   
+  _/_/_/ 
+                               Version 3.0                                      
+        
+              written by Romain Teyssier (University of Zurich)                 
+        
+              GPU acceleration by Juhan Kim (KIAS)                              
+          
+                      (c) CEA 1999-2007, UZH 2008-2014                          
+        
+         GPU & optimization by Juhan Kim (KIAS) 2026                            
+        
+  
+ Working with nproc =    1 for ndim = 3
+  
+ IOGROUPSIZECONE=           2
+  
+  
+ compile date = 11/03/26-08:16:59
+ patch dir    = ../patch/lagRamses
+ remote repo  = git@github.com:kjhan0606/LagRamses.git
+ local branch = research/ngc2403-tabulated-20261103
+ last commit  = 65eeb24ddb43e22e6b6acc48b6758c386d506413
+  
+Radiation transport selector: none
+ Fine MG max iterations = 100
+ Restart phi policy = cold predictor; checkpoint phi I/O retained
+ Abort on fine MG nonconvergence = T
+ GPU acceleration: hydro=F poisson=F fft=T sink=F scalar=F particle=F streams=1
+ Multigrid GPU smoother in merged red/black mode (mg_merged_rb=T)
+ Memory balance: mem_weight_grid=  3228 (nvar= 18)
+ Load-balance grid headroom= 0.850 x ngridmax
+ Work balance weights grid/part/SIDM-pair: 80 1 0
+ Work timing: every 4 steps, EMA= 0.25, remap min/horizon=8/16, safety= 1.20
+ Stellar feedback mode: legacy
+ Stellar IMF id: 2
+ Stellar population model id: 0
+ Stellar yield source basis: per_star_cumulative
+ Stellar IMF mass support:   8.0000E-02   1.2000E+02
+ Stellar binary fraction:   0.0000E+00
+ Stellar terminal-fate policy: review_only_unresolved
+ Stellar fate-map SHA256: 
+ Stellar fate approval id: 
+ High-mass endpoint preset: source_consistent
+ Maximum remnant correction / initial mass:    0.0000000E+00
+ Stellar terminal-fate policy is review-only; production admission is blocked
+ Hydro var indices:
+    ichem   =            6
+Physics switches: Haardt-Madau UV=F J21=  0.0000E+00 self-shielding=F
+  RAMSES non-equilibrium chemistry (neq_chem)=F
+ Entering init_amr
+ K-section comm tree (non-ksection ordering):
+   nksec_levels  =  0
+   ksec_kmax     =  0
+   ksec_nbinodes =     1
+ Morton hash: building per-level hash tables...
+ Morton hash: inserted          0 grids total
+ Morton [init] self-lookups=         0 mismatch=         0
+ Morton hash: ALL CHECKS PASSED
+ Diagnostic: testing MPI after init_amr...
+ Diagnostic: ALLREDUCE OK, sum=     1
+ Entering init_hydro
+ Entering init_poisson
+ Building initial AMR grid
+ Entering flag
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      1 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering build_comm for level  3
+   Entering build_comm for level  4
+   Entering build_comm for level  5
+   Entering build_comm for level  6
+   Entering build_comm for level  7
+   Entering build_comm for level  8
+   Entering build_comm for level  9
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      8 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering build_comm for level  4
+   Entering build_comm for level  5
+   Entering build_comm for level  6
+   Entering build_comm for level  7
+   Entering build_comm for level  8
+   Entering build_comm for level  9
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make     64 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  4
+   Entering build_comm for level  5
+   Entering build_comm for level  6
+   Entering build_comm for level  7
+   Entering build_comm for level  8
+   Entering build_comm for level  9
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make    512 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  5
+   Entering build_comm for level  6
+   Entering build_comm for level  7
+   Entering build_comm for level  8
+   Entering build_comm for level  9
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  4
+  +==> end step 1        4096
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make   4096 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  5
+   Entering refine_fine for level  5   0   0
+  +Entering authorize_fine for level  5
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  6
+   Entering build_comm for level  7
+   Entering build_comm for level  8
+   Entering build_comm for level  9
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  5
+  +==> end step 1       32768
+  +Entering flag_fine for level  4
+  +==> end step 1        4096
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  5
+   Entering refine_fine for level  5   0   0
+  +Entering authorize_fine for level  5
+   ==> Make  32768 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  6
+   Entering refine_fine for level  6   0   0
+  +Entering authorize_fine for level  6
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  7
+   Entering build_comm for level  8
+   Entering build_comm for level  9
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  6
+  +==> end step 1      262144
+  +Entering flag_fine for level  5
+  +==> end step 1       32768
+  +Entering flag_fine for level  4
+  +==> end step 1        4096
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  5
+   Entering refine_fine for level  5   0   0
+  +Entering authorize_fine for level  5
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  6
+   Entering refine_fine for level  6   0   0
+  +Entering authorize_fine for level  6
+   ==> Make 262144 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  7
+   Entering refine_fine for level  7   0   0
+  +Entering authorize_fine for level  7
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  8
+   Entering build_comm for level  9
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  7
+  +==> end step 1     2097152
+  +Entering flag_fine for level  6
+  +==> end step 1      262144
+  +Entering flag_fine for level  5
+  +==> end step 1       32768
+  +Entering flag_fine for level  4
+  +==> end step 1        4096
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  5
+   Entering refine_fine for level  5   0   0
+  +Entering authorize_fine for level  5
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  6
+   Entering refine_fine for level  6   0   0
+  +Entering authorize_fine for level  6
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  7
+   Entering refine_fine for level  7   0   0
+  +Entering authorize_fine for level  7
+   ==> Make ****** sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  8
+   Entering refine_fine for level  8   0   0
+  +Entering authorize_fine for level  8
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  9
+ Complete refine
+ Entering flag
+  +Entering flag_fine for level  8
+  +==> end step 1    16777216
+  +Entering flag_fine for level  7
+  +==> end step 1     2097152
+  +Entering flag_fine for level  6
+  +==> end step 1      262144
+  +Entering flag_fine for level  5
+  +==> end step 1       32768
+  +Entering flag_fine for level  4
+  +==> end step 1        4096
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Complete flag
+ Entering refine
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  5
+   Entering refine_fine for level  5   0   0
+  +Entering authorize_fine for level  5
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  6
+   Entering refine_fine for level  6   0   0
+  +Entering authorize_fine for level  6
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  7
+   Entering refine_fine for level  7   0   0
+  +Entering authorize_fine for level  7
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  8
+   Entering refine_fine for level  8   0   0
+  +Entering authorize_fine for level  8
+   ==> Make ****** sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  9
+ Complete refine
+ Entering init_flow
+   Entering init_flow_fine for level  9
+   Entering upload_fine for level 8
+   Entering upload_fine for level 7
+   Entering upload_fine for level 6
+   Entering upload_fine for level 5
+   Entering upload_fine for level 4
+   Entering upload_fine for level 3
+   Entering upload_fine for level 2
+   Entering upload_fine for level 1
+ Complete init_flow
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  1
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  2
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  3
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  4
+   Entering build_comm for level  5
+   Entering refine_fine for level  5   0   0
+  +Entering authorize_fine for level  5
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  5
+   Entering build_comm for level  6
+   Entering refine_fine for level  6   0   0
+  +Entering authorize_fine for level  6
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  6
+   Entering build_comm for level  7
+   Entering refine_fine for level  7   0   0
+  +Entering authorize_fine for level  7
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  7
+   Entering build_comm for level  8
+   Entering refine_fine for level  8   0   0
+  +Entering authorize_fine for level  8
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  8
+   Entering build_comm for level  9
+   Entering init_flow_fine for level  9
+  +Entering rho_fine for level  9
+  +Entering multipole_fine for level 9
+  +Entering cic_from_multipole for level 9
+  +Entering flag_fine for level  8
+  +==> end step 1    16777216
+  +Entering flag_fine for level  7
+  +==> end step 1     2097152
+  +Entering flag_fine for level  6
+  +==> end step 1      262144
+  +Entering flag_fine for level  5
+  +==> end step 1       32768
+  +Entering flag_fine for level  4
+  +==> end step 1        4096
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+   Entering refine_coarse
+   Entering authorize_coarse
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering build_comm for level  1
+   Entering refine_fine for level  1   0   0
+  +Entering authorize_fine for level  1
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  1
+   Entering build_comm for level  2
+   Entering refine_fine for level  2   0   0
+  +Entering authorize_fine for level  2
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  2
+   Entering build_comm for level  3
+   Entering refine_fine for level  3   0   0
+  +Entering authorize_fine for level  3
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  3
+   Entering build_comm for level  4
+   Entering refine_fine for level  4   0   0
+  +Entering authorize_fine for level  4
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  4
+   Entering build_comm for level  5
+   Entering refine_fine for level  5   0   0
+  +Entering authorize_fine for level  5
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  5
+   Entering build_comm for level  6
+   Entering refine_fine for level  6   0   0
+  +Entering authorize_fine for level  6
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  6
+   Entering build_comm for level  7
+   Entering refine_fine for level  7   0   0
+  +Entering authorize_fine for level  7
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  7
+   Entering build_comm for level  8
+   Entering refine_fine for level  8   0   0
+  +Entering authorize_fine for level  8
+   ==> Make      0 sub-grids
+   ==> Kill      0 sub-grids
+   Entering init_flow_fine for level  8
+   Entering build_comm for level  9
+   Entering init_flow_fine for level  9
+  +Entering rho_fine for level  9
+  +Entering multipole_fine for level 9
+  +Entering cic_from_multipole for level 9
+  +Entering flag_fine for level  8
+  +==> end step 1    16777216
+  +Entering flag_fine for level  7
+  +==> end step 1     2097152
+  +Entering flag_fine for level  6
+  +==> end step 1      262144
+  +Entering flag_fine for level  5
+  +==> end step 1       32768
+  +Entering flag_fine for level  4
+  +==> end step 1        4096
+  +Entering flag_fine for level  3
+  +==> end step 1         512
+  +Entering flag_fine for level  2
+  +==> end step 1          64
+  +Entering flag_fine for level  1
+  +==> end step 1           8
+   Entering flag_coarse
+   ==> Flag      1 cells
+ Morton hash: building per-level hash tables...
+ Morton hash: inserted   19173961 grids total
+ Morton [init] self-lookups=  19173961 mismatch=         0
+ Morton hash: ALL CHECKS PASSED
+ Time elapsed since startup:   163.840265609324     
+ Initial mesh structure
+ Level  1 has          1 grids (       1,       1,       1,)
+ Level  2 has          8 grids (       8,       8,       8,)
+ Level  3 has         64 grids (      64,      64,      64,)
+ Level  4 has        512 grids (     512,     512,     512,)
+ Level  5 has       4096 grids (    4096,    4096,    4096,)
+ Level  6 has      32768 grids (   32768,   32768,   32768,)
+ Level  7 has     262144 grids (  262144,  262144,  262144,)
+ Level  8 has    2097152 grids ( 2097152, 2097152, 2097152,)
+ Level  9 has   16777216 grids (16777216,16777216,16777216,)
+CUDA pool: MPI local rank 0 -> GPU 0 (NVIDIA A100-SXM4-80GB, 79.3 GB, SM 8.0, PCIe 0007:00, streams=1)
+ Adaptive loop: CUDA pool early-init, available=T
+ Starting time integration
+ Entering amr_step_coarse
+ Entering amr_step1 for level 9  for a levelmin   9
+ NaN_CHK post_maketree: uold=         0 f=         0 d0=         0
+ NaN_CHK post_kinfb: uold=         0 f=         0 d0=         0
+ NaN_CHK post_agnfb: uold=         0 f=         0 d0=         0
+ NaN_CHK pre_rho: uold=         0 f=         0 d0=         0
+  +Entering rho_fine for level  9
+  +Entering multipole_fine for level 9
+  +Entering cic_from_multipole for level 9
+ NaN_CHK post_rho: uold=         0 f=         0 d0=         0
+ NaN_CHK pre_sync1: uold=         0 f=         0 d0=         0
+   Entering synchro_hydro_fine for level 9
+ NaN_CHK post_sync1: uold=         0 f=         0 d0=         0
+Entering fine multigrid at level  9
+ Dynamic exchange [MG forward L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L7 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L7 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L8 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L8 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ FFT Poisson: level=  9 grid=  512x  512x  512 N=      134217728 distributed=F
+cuFFT setup: 512 x 512 x 512, dx2=3.814697e-06, GPU mem=3078.0 MB
+   ==> Level=    9 FFT direct solve DONE
+[cuFFT timers rank=1 N=512x512x512 ncalls=1] total=0.382s  H2D=0.187s(48.9%)  fwd=0.004s(1.1%)  green=0.002s(0.4%)  inv=0.004s(1.1%)  D2H=0.185s(48.5%)
+   Entering force_fine for level  9
+ NaN_CHK post_force: uold=         0 f=         0 d0=         0
+   Entering synchro_hydro_fine for level 9
+ NaN_CHK post_sync2: uold=         0 f=         0 d0=         0
+  +Entering newdt_fine for level  9
+   Entering courant_fine for level  9
+ SGS_DT: level= 9 dt= 7.973E-05
+  +Entering set_unew for level  9
+ Fine step=      0 t= 0.00000E+00 dt= 7.973E-05 a= 1.000E+00 mem=74.9% 
+  +Entering set_uold for level  9
+  +Entering add_gravity_source_terms for level  9
+   Entering synchro_hydro_fine for level 9
+ LB process timing step=       0 wall-max=  183.72 s, compute-balance=100.00%, OMP-active= 99.48%, level-scale=  1.000  1.000
+ LB rank process-CPU min/mean/max=   182.758   182.758   182.758 s
+ === Direct cooling timings ===
+   cooling_fine :      0.000 s
+   cooling_table:      0.000 s
+ === Direct SNRT timings ===
+   snrt_advance :      0.000 s
+   snrt_diagnose:      0.000 s
+ === Particle sub-timers ===
+   make_tree  :      0.000 s
+   kill+virt  :      0.000 s
+   synchro    :      0.000 s
+   move       :      0.000 s
+   merge      :      0.000 s
+   TOTAL      :      0.000 s
+ === Sink sub-timers ===
+   AGN_feedback :      2.074 s
+   create_sink  :      0.000 s
+   grow_bondi   :      0.000 s
+   bondi_hoyle  :      0.000 s
+   TOTAL        :      2.074 s
+ Time elapsed since last coarse step:  183.87 s        1.37 mus/pt        1.37 mus/pt (av)
+ Used memory:  50.6 Gb
+ Memory min/max:     50.6 /     50.6 Gb
+ Total running time:   348.1900     s
+[cuFFT timers rank=1 N=512x512x512 ncalls=1] total=0.382s  H2D=0.187s(48.9%)  fwd=0.004s(1.1%)  green=0.002s(0.4%)  inv=0.004s(1.1%)  D2H=0.185s(48.5%)
+ Entering amr_step_coarse
+ Entering amr_step1 for level 9  for a levelmin   9
+ NaN_CHK post_maketree: uold=         0 f=         0 d0=         0
+ Defragmenting main memory...
+   Entering build_comm for level  1
+   Entering build_comm for level  2
+   Entering build_comm for level  3
+   Entering build_comm for level  4
+   Entering build_comm for level  5
+   Entering build_comm for level  6
+   Entering build_comm for level  7
+   Entering build_comm for level  8
+   Entering build_comm for level  9
+ defrag total:   28.183 s
+ Entering dump_all
+ Start backup header
+ Entering output_header
+ End backup header
+ Start backup info etc.
+ Entering output_info
+ Entering file_descriptor_hydro
+ End backup info etc.
+ HDF5 output: output_00001/data_00001.h5
+ HDF5 output done.
+ Poisson checkpoint marker: valid warm-start phi
+ NaN_CHK post_kinfb: uold=         0 f=         0 d0=         0
+ NaN_CHK post_agnfb: uold=         0 f=         0 d0=         0
+ NaN_CHK pre_rho: uold=         0 f=         0 d0=         0
+  +Entering rho_fine for level  9
+  +Entering multipole_fine for level 9
+  +Entering cic_from_multipole for level 9
+ NaN_CHK post_rho: uold=         0 f=         0 d0=         0
+ NaN_CHK pre_sync1: uold=         0 f=         0 d0=         0
+   Entering synchro_hydro_fine for level 9
+ NaN_CHK post_sync1: uold=         0 f=         0 d0=         0
+Entering fine multigrid at level  9
+ Dynamic exchange [MG forward L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L7 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L7 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L8 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L8 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ FFT Poisson: level=  9 grid=  512x  512x  512 N=      134217728 distributed=F
+   ==> Level=    9 FFT direct solve DONE
+[cuFFT timers rank=1 N=512x512x512 ncalls=2] total=0.700s  H2D=0.335s(47.9%)  fwd=0.008s(1.2%)  green=0.003s(0.4%)  inv=0.008s(1.2%)  D2H=0.345s(49.3%)
+   Entering force_fine for level  9
+ NaN_CHK post_force: uold=         0 f=         0 d0=         0
+   Entering synchro_hydro_fine for level 9
+ NaN_CHK post_sync2: uold=         0 f=         0 d0=         0
+  +Entering newdt_fine for level  9
+   Entering courant_fine for level  9
+ SGS_DT: level= 9 dt= 7.973E-05
+  +Entering set_unew for level  9
+ Mesh structure
+ Level  1 has          1 grids (       1,       1,       1,)
+ Level  2 has          8 grids (       8,       8,       8,)
+ Level  3 has         64 grids (      64,      64,      64,)
+ Level  4 has        512 grids (     512,     512,     512,)
+ Level  5 has       4096 grids (    4096,    4096,    4096,)
+ Level  6 has      32768 grids (   32768,   32768,   32768,)
+ Level  7 has     262144 grids (  262144,  262144,  262144,)
+ Level  8 has    2097152 grids ( 2097152, 2097152, 2097152,)
+ Level  9 has   16777216 grids (16777216,16777216,16777216,)
+ Main step=      1 mcons= 0.00E+00 econs= 0.00E+00 epot=-3.27E-05 ekin= 1.50E-05
+ Fine step=      1 t= 7.97340E-05 dt= 7.973E-05 a= 1.000E+00 mem=74.9% 
+ Run completed
+ Total elapsed time:   222.032546463190     
+
+     seconds         %    STEP (rank=      1)
+       4.599       1.2    particles               
+       4.635       1.3    feedback                
+       9.285       2.5    sinks                   
+     147.407      39.8    poisson                 
+     117.544      31.7    poisson-cuFFT base      
+      12.785       3.5    courant                 
+      16.395       4.4    hydro - set unew        
+      17.290       4.7    hydro - set uold        
+       0.992       0.3    cooling                 
+      39.140      10.6    io                      
+     370.222     100.0    TOTAL

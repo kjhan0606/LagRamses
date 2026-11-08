@@ -1,0 +1,9 @@
+{
+  "time_utc": "2026-11-08T14:21:35.750130+00:00",
+  "force_input_job": 456162,
+  "analysis_revision": "af5676687b9a351494c83977d8953d2eead65b1c",
+  "command": "git -C /home/kjhan/BackUP/rar/build/rar_qumond_amr_history_20261107 show af5676687b9a351494c83977d8953d2eead65b1c:provenance/tools/ngc2403_fr02_source_comparison.sbatch | sbatch --parsable --export=ALL,RAR_COMPARISON_REVISION=af5676687b9a351494c83977d8953d2eead65b1c,RAR_FR02_FORCE_JOB=456162",
+  "returncode": 0,
+  "stdout": "1279603\n",
+  "stderr": ""
+}

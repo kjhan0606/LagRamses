@@ -1,0 +1,249 @@
+{
+  "status": "COMPILED_512_FIXED_SOURCE_QUMOND_VS_NFW_HOLDOUT",
+  "scope": "Compiled lagRamses uniform 512^3 periodic force fields sampled at 64 SPARC radii. Four contiguous radial blocks are held out. NFW parameters are fit on the other 48 radii at fixed stellar M/L=0.5. QUMOND remains fixed.",
+  "run_root": "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_uniform512_things_451793",
+  "force_analysis_root": "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_512_recovery_456010",
+  "grid": {
+    "nmesh": 512,
+    "box_kpc": 64.0,
+    "cell_width_kpc": 0.125
+  },
+  "output_policy": {
+    "purpose": "matched 512^3 fixed-source QUMOND/Newtonian resolution step for NGC 2403",
+    "source": "same THINGS-like baryon source as compiled 256^3 comparison",
+    "grid": "512^3",
+    "box_kpc": 64.0,
+    "cell_width_kpc": 0.125,
+    "cases": 2,
+    "nstepmax": 1,
+    "noutput": 1,
+    "aout": [
+      1.1
+    ],
+    "tout": [
+      "1.0d100"
+    ],
+    "foutput": 1,
+    "fbackup": 1000000000,
+    "expected_full_dumps_per_case": 1,
+    "measured_comparable_bytes_per_dump": 28684370544,
+    "estimate_method": "measured 512^3 NGC 7793 snapshot with same binary and output fields",
+    "reserved_bytes_per_dump": 53687091200,
+    "reserved_bytes_total": 107374182400,
+    "free_bytes_at_start": 156208111550464,
+    "source_revision": "65eeb24ddb43e22e6b6acc48b6758c386d506413",
+    "binary_sha256": "7baf42cc884f33e9babb09b21aca5c46c380b3c32186cd562d20971c6414061c"
+  },
+  "source_contract": {
+    "scope": "conditional matched HI profile for uniform periodic lagRamses gate",
+    "unit_length_cm": 1.974833652154475e+23,
+    "unit_density_g_cm3": 1e-24,
+    "surface_density_factor_per_msun_pc2": 0.001057517184997013,
+    "star_rows": 73,
+    "gas_rows": 2501,
+    "stellar_ml": 0.5,
+    "gas_helium_rescale": 0.9779411764705882,
+    "star_exp_scaleheight_code": 0.003772284732776389,
+    "gas_exp_scaleheight_code": 0.003125,
+    "gas_taper_start_code": 0.359375,
+    "gas_taper_end_code": 0.390625,
+    "radial_contract": "piecewise-linear separately for stars and HI; constant inside first sample; star zero past last, HI last value through taper",
+    "vertical_contract": "finite-cell average of normalized exp(-abs(z)/h)/(2h); do not multiply by dz again",
+    "inputs_sha256": {
+      "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_matched_hi_448318/annuli.csv": "6cf06b790199dd05ce5fa30cf3d55f6fa007805f45f6884e1d7009299451fb07",
+      "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_halogas_448201/annular_coverage.csv": "58ada8d43ba92a7f8b86a8d3e4686e0dc6ff016a9ebf4d199d449a96ee8be7f4",
+      "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_lagr_input_448232/star_profile_code.dat": "1cf451b8f9ff983ec083d332f7b4a32ea40ff803752e48e5d756328b297d89d3"
+    },
+    "gpu": "NVIDIA A10",
+    "limits": "approximate common-beam map scenarios; shared outer profile, vertical structure and stellar M/L assumptions; periodic test only",
+    "scenario": "things",
+    "gas_radial_spacing_kpc": 0.01,
+    "blend_kpc": [
+      11,
+      12
+    ],
+    "gas_table_max_abs_interpolation_difference_msun_pc2": 1.5058083342900375e-05,
+    "gas_table_max_abs_over_peak": 1.581139285348419e-06
+  },
+  "sample": {
+    "points": 64,
+    "radius_kpc": [
+      1.06,
+      20.87
+    ],
+    "selection": "SPARC exploratory point cut and radius >= 1 kpc",
+    "force_sample": "median inward radial acceleration over 64 midplane azimuths per radius"
+  },
+  "nfw_fit_grid": {
+    "h0_km_s_mpc": 70.0,
+    "v200_km_s": [
+      30.0,
+      250.0,
+      0.25
+    ],
+    "c200": [
+      2.0,
+      30.0,
+      0.04999999999999982
+    ]
+  },
+  "out_of_fold_velocity": {
+    "fixed_qumond": {
+      "rms_km_s": 13.33265349391385,
+      "median_absolute_km_s": 12.614368880715865,
+      "mean_residual_km_s": -11.230453864210592,
+      "diagonal_chi2": 20905.987503209002,
+      "diagonal_chi2_per_point": 326.65605473764066
+    },
+    "analytic_nfw": {
+      "rms_km_s": 5.1600052266918786,
+      "median_absolute_km_s": 3.2823118369178204,
+      "mean_residual_km_s": 0.9416688294693933,
+      "diagonal_chi2": 2148.904745880045,
+      "diagonal_chi2_per_point": 33.576636654375704
+    }
+  },
+  "out_of_fold_rar_residual": {
+    "median_log10_gqumond_over_observed_dex": -0.11039053061660402,
+    "rms_log10_gqumond_over_observed_dex": 0.09912098294251537,
+    "median_log10_gnfw_over_observed_dex": -0.0052959677554024615,
+    "rms_log10_gnfw_over_observed_dex": 0.04135357752404044,
+    "median_log10_compiled_gbar_over_sparc_dex": -0.02989127034374843
+  },
+  "folds": [
+    {
+      "fold": 0,
+      "heldout_radius_kpc": [
+        1.06,
+        2.57
+      ],
+      "training_points": 48,
+      "heldout_points": 16,
+      "nfw_fit": {
+        "v200_km_s": 97.75,
+        "c200": 12.4,
+        "training_diagonal_chi2": 379.1152743882286,
+        "grid_edge": false
+      },
+      "heldout_fixed_qumond": {
+        "rms_km_s": 6.93514873389895,
+        "median_absolute_km_s": 6.005550955386269,
+        "mean_residual_km_s": -5.625487280050764,
+        "diagonal_chi2": 354.1524874057002,
+        "diagonal_chi2_per_point": 22.13453046285626
+      },
+      "heldout_nfw": {
+        "rms_km_s": 5.131582049567808,
+        "median_absolute_km_s": 3.0187243429666424,
+        "mean_residual_km_s": 3.5872264500540716,
+        "diagonal_chi2": 256.2088405270519,
+        "diagonal_chi2_per_point": 16.013052532940744
+      }
+    },
+    {
+      "fold": 1,
+      "heldout_radius_kpc": [
+        2.68,
+        4.97
+      ],
+      "training_points": 48,
+      "heldout_points": 16,
+      "nfw_fit": {
+        "v200_km_s": 98.75,
+        "c200": 12.15,
+        "training_diagonal_chi2": 417.01901451083467,
+        "grid_edge": false
+      },
+      "heldout_fixed_qumond": {
+        "rms_km_s": 6.328978274976006,
+        "median_absolute_km_s": 2.657369917518693,
+        "mean_residual_km_s": -4.266111341149759,
+        "diagonal_chi2": 47.70335035161631,
+        "diagonal_chi2_per_point": 2.9814593969760192
+      },
+      "heldout_nfw": {
+        "rms_km_s": 7.494998782787772,
+        "median_absolute_km_s": 7.67415620694721,
+        "mean_residual_km_s": 6.017669683926176,
+        "diagonal_chi2": 200.80654881706377,
+        "diagonal_chi2_per_point": 12.550409301066486
+      }
+    },
+    {
+      "fold": 2,
+      "heldout_radius_kpc": [
+        5.47,
+        12.92
+      ],
+      "training_points": 48,
+      "heldout_points": 16,
+      "nfw_fit": {
+        "v200_km_s": 113.75,
+        "c200": 9.0,
+        "training_diagonal_chi2": 172.0715868904099,
+        "grid_edge": false
+      },
+      "heldout_fixed_qumond": {
+        "rms_km_s": 16.216459400441185,
+        "median_absolute_km_s": 15.959489881452171,
+        "mean_residual_km_s": -16.170473829725758,
+        "diagonal_chi2": 18140.03808239205,
+        "diagonal_chi2_per_point": 1133.752380149503
+      },
+      "heldout_nfw": {
+        "rms_km_s": 3.870778425357226,
+        "median_absolute_km_s": 3.047332898938194,
+        "mean_residual_km_s": -3.060055089517193,
+        "diagonal_chi2": 1656.2692093841363,
+        "diagonal_chi2_per_point": 103.51682558650852
+      }
+    },
+    {
+      "fold": 3,
+      "heldout_radius_kpc": [
+        13.42,
+        20.87
+      ],
+      "training_points": 48,
+      "heldout_points": 16,
+      "nfw_fit": {
+        "v200_km_s": 98.5,
+        "c200": 12.100000000000001,
+        "training_diagonal_chi2": 586.5718661269124,
+        "grid_edge": false
+      },
+      "heldout_fixed_qumond": {
+        "rms_km_s": 18.971367565426515,
+        "median_absolute_km_s": 17.941718247725014,
+        "mean_residual_km_s": -18.85974300591609,
+        "diagonal_chi2": 2364.0935830596327,
+        "diagonal_chi2_per_point": 147.75584894122704
+      },
+      "heldout_nfw": {
+        "rms_km_s": 3.001924225276567,
+        "median_absolute_km_s": 2.2852185168479764,
+        "mean_residual_km_s": -2.778165726585481,
+        "diagonal_chi2": 35.620147151793276,
+        "diagonal_chi2_per_point": 2.2262591969870797
+      }
+    }
+  ],
+  "inputs_sha256": {
+    "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_512_recovery_456010/analysis.json": "62d1e494d63f9de837818c34763673365f8bfa096dcfca7b913741913008369c",
+    "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_uniform512_things_451793/output_policy.json": "08e731ba5586e56445e7f5afd2e677378bf31c9f9e7c0fe2025cc9a1c6c9df47",
+    "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_uniform512_things_451793/source_contract.json": "e0561823cb9c1d964002601b028b4acf08c971bd75bc32bd7e3c11d16255731b",
+    "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_compiled512_cdm_nfw_holdout_1279415/ngc2403_observed.csv": "852eb3bcbf10e0e088f70598a25075b991867eb64a0c7ca0cd46d6ff7eb6fb95",
+    "newtonian_snapshot": "1e10aa015c2861b0cb40714553aeb72d154812bdd7cffcf7a59f0503de1ed6d7",
+    "qumond_snapshot": "f26a07124c75b354ab038c3e5eefae7894b574a9086516556e7ccec996deff33"
+  },
+  "limitations": [
+    "The NFW component is a two-parameter analytic halo fitted on training radii and evaluated on excluded radii. It is not a live CDM halo and the calculation is not a cosmological Lambda CDM simulation.",
+    "The spherical isolated NFW acceleration is added to the periodic baryonic force; this is not a full periodic total-matter Poisson solve.",
+    "Each NFW fold fits two parameters on 48 radii while QUMOND remains fixed at a0 and stellar M/L=0.5. The predictive comparison has unequal fitting freedom.",
+    "The four folds share most training radii. Fold scores are correlated and do not provide independent model-selection evidence.",
+    "Pointwise velocity errors provide diagonal weights. Radial covariance, distance, inclination, stellar-population uncertainty, gas reconstruction, beam effects, and non-circular motions are not propagated.",
+    "The SPARC baryonic accelerations use a different gas-source reconstruction from the prescribed lagRamses source. The measured source mismatch remains explicit.",
+    "The force fields use a periodic uniform box. The comparison does not establish AMR-boundary accuracy, a continuum limit, galaxy evolution, or cosmological initial-condition consistency.",
+    "The Newtonian baryon field is used only to construct a matched-source analytic NFW prediction. The Newtonian baryon-only curve is not identified as the Lambda CDM model."
+  ]
+}

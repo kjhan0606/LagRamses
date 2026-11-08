@@ -1,0 +1,6 @@
+{
+  "queried_utc": "2026-11-08T14:29:45.850382+00:00",
+  "host": "syntax.kias.re.kr",
+  "command": "sacct -j 456155,456162 -n -P -o JobID,JobName,State,ExitCode,Elapsed,MaxRSS,AllocTRES",
+  "stderr": ""
+}
