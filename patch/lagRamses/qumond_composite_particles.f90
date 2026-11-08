@@ -5,6 +5,8 @@ module qumond_composite_particles
   use amr_commons
   use pm_commons
   use qumond_composite, only: composite_mesh_t
+  use qumond_composite_clouds, only: native_cloud_map
+  use poisson_commons, only: qh_sink_sources
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #include "amr_index.h"
   implicit none
@@ -12,13 +14,13 @@ module qumond_composite_particles
   public :: native_particles_source,native_particles_force,native_particles_cached
   public :: native_particles_begin,native_particles_drift,native_particles_finish,native_particles_export
   public :: native_stellar_begin,native_stellar_reconcile,native_stellar_identity
-  integer,allocatable :: slots(:),ptr(:),leaf(:),lookup(:),slot_index(:)
+  integer,allocatable :: slots(:),ptr(:),leaf(:),slot_index(:)
   integer(i8b),allocatable :: identities(:)
   integer(kind=1),allocatable :: species(:)
   real(dp),allocatable :: masses(:),weights(:),source_x(:,:),accel(:,:)
   real(dp),allocatable :: start_x(:,:),start_v(:,:),start_a(:,:),half_v(:,:)
   real(dp) :: cloud_width=0d0,domain_width=0d0,displacement_limit=0d0
-  integer :: np=0,nweight=0
+  integer :: np=0,nweight=0,live_count=0
   logical :: initialized=.false.,step_open=.false.,drifted=.false.,stellar_open=.false.
   integer(i8b) :: next_stellar_identity=0_i8b
   character(len=32) :: source_role=''
@@ -33,20 +35,15 @@ contains
     type(composite_mesh_t),intent(in) :: mesh
     logical,intent(in) :: is_mond
     logical,intent(in),optional :: canonical
-    integer :: lev,g,grid,p,j,count,status,ios,last_level
+    integer :: lev,g,grid,p,j,count,status,ios,last_level,total_live
     character(len=128) :: width_env
     integer(i8b),allocatable :: sorted(:)
     if(.not.allocated(idp).or..not.allocated(xp).or..not.allocated(vp).or..not.allocated(mp)) &
          call fail('particle arrays are not allocated')
-    np=npart
+    np=npart;live_count=npart
     if(np<0.or.np>size(idp))call fail('invalid live particle count')
     allocate(slots(np),identities(np),species(np),masses(np),slot_index(size(idp)))
-    allocate(source_x(np,3),accel(np,3),start_x(np,3),start_v(np,3),start_a(np,3),half_v(np,3))
-    allocate(ptr(np+1),leaf(max(1,64*np)),weights(max(1,64*np)),lookup(size(son)))
-    slot_index=0;lookup=0;count=0
-    do j=1,mesh%n
-       lookup(mesh%cell(j))=j
-    enddo
+    slot_index=0;count=0;total_live=0
     ! Called after the root kill_tree, before recursion: the level lists
     ! partition the live roster. Free slots and merged child aliases are not
     ! inferred from a default particle species or an array prefix.
@@ -59,15 +56,23 @@ contains
           grid=active(lev)%igrid(g);p=headp(grid)
           do j=1,numbp(grid)
              if(p<1.or.p>size(idp))call fail('invalid live linked-list slot')
-             if(slot_index(p)/=0.or.count>=np)call fail('duplicate particle or count mismatch')
-             count=count+1;slots(count)=p;slot_index(p)=count
-             identities(count)=idp(p);species(count)=ptypep(p);masses(count)=mp(p)
+             if(slot_index(p)/=0.or.total_live>=live_count)call fail('duplicate particle or count mismatch')
+             total_live=total_live+1
+             if(ptypep(p)==PTYPE_SINK)then
+                if(.not.qh_sink_sources.or.idp(p)>=0.or.idp(p)<-nsink)call fail('foreign sink cloud')
+                slot_index(p)=-1
+             else
+                count=count+1;slots(count)=p;slot_index(p)=count
+                identities(count)=idp(p);species(count)=ptypep(p);masses(count)=mp(p)
+             endif
              p=nextp(p)
           enddo
           if(p/=0)call fail('particle list exceeds declared length')
        enddo
     enddo
-    if(count/=np)call fail('live tree roster does not match npart')
+    if(total_live/=live_count)call fail('live tree roster does not match npart')
+    np=count;slots=slots(:np);identities=identities(:np);species=species(:np);masses=masses(:np)
+    allocate(source_x(np,3),accel(np,3),start_x(np,3),start_v(np,3),start_a(np,3),half_v(np,3))
     if(any(identities<=0))call fail('nonpositive live particle identity')
     if(any(species/=PTYPE_DM.and.species/=PTYPE_STAR))call fail('unsupported particle species')
     allocate(sorted(np));sorted=identities
@@ -170,30 +175,39 @@ contains
     logical,intent(in) :: is_mond
     integer,allocatable :: current_slots(:),order(:)
     integer(i8b),allocatable :: keys(:)
-    logical,allocatable :: retained(:)
-    integer :: g,grid,j,p,i,k,count_live,lo,hi,mid,found,old_count
+    logical,allocatable :: retained(:),seen_slots(:)
+    integer :: g,grid,j,p,i,k,count_live,total_live,lo,hi,mid,found,old_count
     real(dp) :: old_mass,new_mass
     if(.not.stellar_open.or.step_open)call fail('invalid stellar roster reconciliation phase')
     if(npart<np)call fail('stellar transaction deleted a live particle')
     allocate(current_slots(npart),keys(npart),order(npart),retained(npart))
-    count_live=0;retained=.false.
+    allocate(seen_slots(size(idp)));seen_slots=.false.
+    count_live=0;total_live=0;retained=.false.
     ! Only the canonical base lists are authoritative after the final merge.
     do g=1,active(levelmin)%ngrid
        grid=active(levelmin)%igrid(g);p=headp(grid)
        do j=1,numbp(grid)
           if(p<1.or.p>size(idp).or.count_live>=npart)call fail('invalid post-source canonical list')
-          count_live=count_live+1;current_slots(count_live)=p
-          keys(count_live)=idp(p);order(count_live)=count_live;p=nextp(p)
+          if(seen_slots(p))call fail('duplicate post-source live slot')
+          seen_slots(p)=.true.;total_live=total_live+1
+          if(ptypep(p)==PTYPE_SINK)then
+             if(.not.qh_sink_sources.or.idp(p)>=0.or.idp(p)<-nsink)call fail('foreign post-source cloud')
+          else
+             count_live=count_live+1;current_slots(count_live)=p
+             keys(count_live)=idp(p);order(count_live)=count_live
+          endif
+          p=nextp(p)
        enddo
        if(p/=0)call fail('post-source list exceeds declared length')
     enddo
-    if(count_live/=npart.or.any(keys<=0))call fail('invalid post-source live particle coverage')
-    if(npart>1)call sort_ids(keys,1,npart,order)
-    do j=2,npart
+    if(total_live/=npart.or.count_live<np.or.any(keys(:count_live)<=0)) &
+         call fail('invalid post-source live particle coverage')
+    if(count_live>1)call sort_ids(keys,1,count_live,order)
+    do j=2,count_live
        if(keys(j)==keys(j-1))call fail('duplicate post-source particle identity')
     enddo
     do i=1,np
-       lo=1;hi=npart;found=0
+       lo=1;hi=count_live;found=0
        do while(lo<=hi)
           mid=(lo+hi)/2
           if(keys(mid)==identities(i))then
@@ -213,14 +227,14 @@ contains
             call fail('stellar return must leave finite nonnegative nonincreasing stellar mass')
        if(species(i)==PTYPE_DM.and.mp(p)/=masses(i))call fail('stellar transaction changed CDM mass')
     enddo
-    do j=1,npart
+    do j=1,count_live
        if(retained(j))cycle
        p=current_slots(j)
        if(ptypep(p)/=PTYPE_STAR.or.mp(p)<=0d0.or.mp0(p)/=mp(p).or.tpp(p)/=texp.or.indtab(p)/=0d0) &
             call fail('newborn SSP mass, birth time, role or progress is inconsistent')
     enddo
-    old_count=np;old_mass=sum(masses);new_mass=sum(mp(current_slots))
-    deallocate(slots,ptr,leaf,lookup,slot_index,identities,species,masses,weights,source_x, &
+    old_count=np;old_mass=sum(masses);new_mass=sum(mp(current_slots(:count_live)))
+    deallocate(slots,ptr,leaf,slot_index,identities,species,masses,weights,source_x, &
          accel,start_x,start_v,start_a,half_v)
     ! Keep the originally selected source role, physical cloud width and domain.
     call initialize_roster(mesh,is_mond,canonical=.true.)
@@ -231,7 +245,7 @@ contains
 
   subroutine validate_roster()
     if(.not.initialized)call fail('roster not initialized')
-    if(npart/=np)call fail('particle creation/deletion is not yet admitted')
+    if(npart/=live_count)call fail('particle/cloud creation outside source transaction')
     if(any(idp(slots)/=identities).or.any(ptypep(slots)/=species).or.any(mp(slots)/=masses)) &
          call fail('particle identity, source role or mass changed')
     if(.not.all(ieee_is_finite(xp(slots,:))).or..not.all(ieee_is_finite(vp(slots,:))).or. &
@@ -250,74 +264,25 @@ contains
     real(dp),intent(inout) :: density(:)
     logical,intent(in) :: is_mond
     real(dp),allocatable :: particle_rho(:)
-    real(dp) :: lo(3),hi(3),position(3),normalization,max_error,integral,expected
-    integer :: p,sx,sy,sz,k,i
+    real(dp) :: max_error,integral,expected
+    integer :: p,k,i
     if(.not.initialized)call initialize_roster(mesh,is_mond)
     call validate_roster()
     if(mesh%box/=domain_width)call fail('particle assignment domain changed')
-    allocate(particle_rho(mesh%n));particle_rho=0d0;nweight=0;max_error=0d0
+    allocate(particle_rho(mesh%n));particle_rho=0d0
     source_x=xp(slots,:)
+    call native_cloud_map(mesh,source_x,cloud_width,ptr,leaf,weights,max_error)
+    nweight=size(weights)
     do p=1,np
-       ptr(p)=nweight+1
-       position=modulo(source_x(p,:),mesh%box)
-       ! At most eight of these periodic images intersect the domain. Prune
-       ! the octree by exact cell-box intersections, visiting local leaves.
-       do sz=-1,1
-          do sy=-1,1
-             do sx=-1,1
-                lo=max(0d0,position+mesh%box*real([sx,sy,sz],dp)-0.5d0*cloud_width)
-                hi=min(mesh%box,position+mesh%box*real([sx,sy,sz],dp)+0.5d0*cloud_width)
-                if(any(hi<=lo))cycle
-                call visit(son(1),1,lo,hi)
-             enddo
-          enddo
-       enddo
-       if(nweight<ptr(p))call fail('particle cloud has no leaf recipients')
-       normalization=sum(weights(ptr(p):nweight))
-       max_error=max(max_error,abs(normalization-1d0))
-       if(abs(normalization-1d0)>1d-12)call fail('particle cloud does not cover unit weight')
-       weights(ptr(p):nweight)=weights(ptr(p):nweight)/normalization
-       do k=ptr(p),nweight
+       do k=ptr(p),ptr(p+1)-1
           i=leaf(k)
           particle_rho(i)=particle_rho(i)+masses(p)*weights(k)/mesh%volume(i)
        enddo
     enddo
-    ptr(np+1)=nweight+1
     integral=sum(particle_rho*mesh%volume);expected=sum(masses)
     if(abs(integral-expected)>1d-12*max(expected,tiny(1d0)))call fail('particle deposit mass mismatch')
     density=density+particle_rho
     write(*,*) 'RAR_NATIVE_PARTICLE_SOURCE_V1',nstep_coarse,t,np,nweight,expected,integral,max_error
-  contains
-    recursive subroutine visit(grid,lev,low,high)
-      integer,intent(in) :: grid,lev
-      real(dp),intent(in) :: low(3),high(3)
-      integer :: child,cell,d,index
-      real(dp) :: center(3),width,volume
-      integer,allocatable :: new_leaf(:)
-      real(dp),allocatable :: new_weights(:)
-      if(grid<=0.or.lev>nlevelmax)call fail('invalid cloud traversal')
-      width=mesh%box*0.5d0**lev
-      do child=1,twotondim
-         do d=1,3
-            center(d)=xg(grid,d)*mesh%box+(real(ibits(child-1,d-1,1),dp)-0.5d0)*width
-         enddo
-         volume=product(max(0d0,min(high,center+0.5d0*width)-max(low,center-0.5d0*width)))
-         if(volume==0d0)cycle
-         cell=ICELL_OF(grid,child)
-         if(son(cell)>0)then
-            call visit(son(cell),lev+1,low,high)
-         else
-            index=lookup(cell)
-            if(index<=0)call fail('cloud reached a leaf outside the native mesh')
-            if(nweight==size(leaf))then
-               allocate(new_leaf(2*size(leaf)),new_weights(2*size(weights)))
-               new_leaf(1:nweight)=leaf;new_weights(1:nweight)=weights
-               call move_alloc(new_leaf,leaf);call move_alloc(new_weights,weights)
-            endif
-            nweight=nweight+1;leaf(nweight)=index;weights(nweight)=volume/cloud_width**3
-         endif
-      enddo
-    end subroutine
   end subroutine
 
   subroutine native_particles_force(mesh,force)
@@ -356,20 +321,27 @@ contains
 
   subroutine check_base_lists()
     logical,allocatable :: seen(:)
-    integer :: g,grid,p,j,i,previous,count_live
-    allocate(seen(np));seen=.false.;count_live=0
+    integer :: g,grid,p,j,i,previous,count_live,count_body
+    allocate(seen(size(idp)));seen=.false.;count_live=0;count_body=0
     do g=1,active(levelmin)%ngrid
        grid=active(levelmin)%igrid(g);p=headp(grid);previous=0
        do j=1,numbp(grid)
           if(p<1.or.p>size(slot_index))call fail('invalid canonical particle slot')
           i=slot_index(p)
-          if(i<=0)call fail('canonical list contains a particle outside roster')
-          if(seen(i).or.prevp(p)/=previous)call fail('canonical particle list is duplicated or broken')
-          seen(i)=.true.;count_live=count_live+1;previous=p;p=nextp(p)
+          if(i==0)call fail('canonical list contains a particle outside roster')
+          if(i<0)then
+             if(.not.qh_sink_sources.or.ptypep(p)/=PTYPE_SINK.or.idp(p)>=0.or.idp(p)<-nsink) &
+                  call fail('invalid canonical cloud')
+          else
+             count_body=count_body+1
+          endif
+          if(seen(p).or.prevp(p)/=previous)call fail('canonical particle list is duplicated or broken')
+          seen(p)=.true.;count_live=count_live+1;previous=p;p=nextp(p)
        enddo
        if(p/=0.or.tailp(grid)/=previous)call fail('canonical list tail/count mismatch')
     enddo
-    if(count_live/=np.or..not.all(seen))call fail('canonical lists do not cover roster')
+    if(count_live/=live_count.or.count_body/=np.or..not.all(seen(slots))) &
+         call fail('canonical lists do not cover roster')
   end subroutine
 
   subroutine native_particles_drift(dt)

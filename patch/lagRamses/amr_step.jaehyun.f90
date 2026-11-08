@@ -148,6 +148,7 @@ recursive subroutine amr_step(ilevel,icount)
   !-------------------------------------------
   ! Make new refinements and update boundaries
   !-------------------------------------------
+  if(ilevel==levelmin)call qumond_history_configure()
                                call timer('refine','start')
   if(levelmin.lt.nlevelmax .and..not.static.and..not.qh_evolve)then
      if(ilevel==levelmin.or.icount>1)then
@@ -421,10 +422,10 @@ recursive subroutine amr_step(ilevel,icount)
 
      call timer('sinks','start')
      call system_clock(sk_t1)
-     if(sink)call diag_rar_global_inventory('before_agn')
-     if(sink .and. sink_AGN)call AGN_feedback
-     if(sink)call diag_rar_global_inventory('after_agn')
-     if(sink .and. sink_AGN)call diag_check_eint('AGN_fb',0)
+     if(sink.and..not.qh_sink_sources)call diag_rar_global_inventory('before_agn')
+     if(sink.and.sink_AGN.and..not.qh_sink_sources)call AGN_feedback
+     if(sink.and..not.qh_sink_sources)call diag_rar_global_inventory('after_agn')
+     if(sink.and.sink_AGN.and..not.qh_sink_sources)call diag_check_eint('AGN_fb',0)
      call diag_check_nan('post_agnfb')
      call system_clock(sk_t2)
      sk_agn_fb = sk_agn_fb + dble(sk_t2-sk_t1)/dble(pt_rate)
@@ -432,7 +433,7 @@ recursive subroutine amr_step(ilevel,icount)
      ! Create sink particles and associated cloud particles
      !-----------------------------------------------------
      call system_clock(sk_t1)
-     if(sink)call create_sink
+     if(sink.and.(.not.qh_sink_sources.or.nstep_coarse==0))call create_sink
      if(sink)call diag_check_eint('create_sink',0)
      call system_clock(sk_t2)
      sk_create_sink = sk_create_sink + dble(sk_t2-sk_t1)/dble(pt_rate)
@@ -1111,7 +1112,7 @@ recursive subroutine amr_step(ilevel,icount)
   ! Compute Bondi-Hoyle accretion parameters
                                call timer('sinks','start')
   call system_clock(sk_t1)
-  if(sink.and.bondi)call bondi_hoyle(ilevel)
+  if(sink.and.bondi.and..not.qh_sink_sources)call bondi_hoyle(ilevel)
   call system_clock(sk_t2)
   sk_bondi_hoyle = sk_bondi_hoyle + dble(sk_t2-sk_t1)/dble(pt_rate)
 

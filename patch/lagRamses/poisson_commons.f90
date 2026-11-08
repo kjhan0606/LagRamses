@@ -6,7 +6,7 @@ module poisson_commons
   ! Experimental fixed-hierarchy history path; the shared solver state remains
   ! authoritative unless explicitly enabled. This does not repair AMR source loss.
   logical :: qh_checked=.false.,qh_enabled=.false.,qh_publish=.false.,qh_evolve=.false.
-  logical :: qh_stellar_sources=.false.
+  logical :: qh_stellar_sources=.false.,qh_sink_sources=.false.
   integer :: qh_kick_unit=0
   integer :: qh_stage=0
   type(composite_mesh_t) :: qh_composite_mesh
@@ -128,6 +128,13 @@ contains
     env=''
     call get_environment_variable('RAR_QUMOND_STELLAR_SOURCES',env,status=status)
     qh_stellar_sources=status==0.and.trim(env)=='1'
+    env=''
+    call get_environment_variable('RAR_QUMOND_SINK_SOURCES',env,status=status)
+    qh_sink_sources=status==0.and.trim(env)=='1'
+    if(qh_sink_sources.and.(.not.qh_stellar_sources.or..not.sink))then
+       write(*,*) 'Native sink sources require the synchronized stellar endpoint and sink physics'
+       call clean_stop
+    endif
     if(qh_stellar_sources.and.(.not.qh_evolve.or..not.star.or..not.pic.or.f_w/=0d0))then
        write(*,*) 'Native stellar sources require evolving PIC/stars and f_w=0'
        call clean_stop
@@ -196,7 +203,8 @@ contains
 #endif
     endif
     if(qh_publish)then
-       if(.not.hydro.or.(pic.and..not.qh_evolve).or.(star.and..not.qh_stellar_sources).or.sink.or.tracer.or.sidm.or. &
+       if(.not.hydro.or.(pic.and..not.qh_evolve).or.(star.and..not.qh_stellar_sources).or. &
+            (sink.and..not.qh_sink_sources).or.tracer.or.sidm.or. &
             (cooling.and..not.qh_evolve).or.neq_chem.or.rt.or.T2_star>0d0.or. &
             use_fR.or.use_nDGP.or.use_symmetron.or.use_dilaton.or.use_galileon.or.use_adm.or.use_fdm.or. &
             mond_mu_type/=1)then

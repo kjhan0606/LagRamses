@@ -4,6 +4,7 @@
 !################################################################
 subroutine create_sink
   use amr_commons
+  use poisson_commons, only: qh_sink_sources
   use pm_commons
   use hydro_commons
   use cooling_module, ONLY: XH=>X, rhoc, mH
@@ -80,7 +81,8 @@ subroutine create_sink
 
   ! update sink position before merging sinks and creating clouds
   t_stage=omp_get_wtime()
-  call kjhan_update_sink_position_velocity
+  ! Native KDK owns physical body coordinates; cloud sampling is not another motion law.
+  if(.not.qh_sink_sources)call kjhan_update_sink_position_velocity
   t_update_pos=t_update_pos+omp_get_wtime()-t_stage
 
   ! Merge sink using FOF

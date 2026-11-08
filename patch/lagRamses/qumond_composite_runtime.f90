@@ -1,9 +1,11 @@
 ! Native serial periodic fixed-mesh gravity publication and common-time evolution.
-! Stellar endpoint transactions are separately enabled; sink gravity remains excluded.
+! Stellar and physical-sink endpoint transactions are separately enabled.
 module qumond_composite_runtime
   use amr_commons
   use poisson_commons
   use qumond_composite_particles
+  use qumond_composite_sinks
+  use pm_commons, only: nsink
   use hydro_commons, only: uold,unew,smallr,nvar,courant_factor
 #ifdef PHASE0_STELLAR_ENRICHMENT
   use stellar_enrichment_config, only: use_channel_resolved_feedback
@@ -49,6 +51,9 @@ contains
        if(pic)then
           if(.not.native_particles_cached())call fail('completed endpoint particle source changed')
        endif
+       if(qh_sink_sources)then
+          if(.not.native_sinks_cached())call fail('completed endpoint physical sink source changed')
+       endif
        published_epoch=nstep_coarse
        qh_epoch(:,levelmin:nlevelmax)=nstep_coarse
        call qumond_restore_published()
@@ -76,6 +81,7 @@ contains
        enddo
     endif
     if(pic)call native_particles_source(mesh,density,use_mond)
+    if(qh_sink_sources)call native_sinks_source(mesh,density)
     if(.not.all(ieee_is_finite(density)))call fail('source is nonfinite')
     physical_rho_max=maxval(abs(density))
     fourpi=4d0*acos(-1d0)
@@ -139,6 +145,7 @@ contains
     ! Publish a complete hierarchy only after both stages converge. Particle
     ! gathers use the same fixed-cloud weights as the physical source deposit.
     if(pic)call native_particles_force(mesh,saved_force)
+    if(qh_sink_sources)call native_sinks_force(mesh,saved_force)
     do lev=levelmin,nlevelmax
        do i=1,size(phi)
           if(qh_cell_level(i)/=lev)cycle
@@ -202,6 +209,7 @@ contains
        close(unit)
        endif
        if(pic)call native_particles_export(export_count)
+       if(qh_sink_sources)call native_sinks_export(export_count)
        export_count=export_count+1
     endif
     end associate
@@ -306,6 +314,7 @@ contains
        dt=min(dt,old_dt)
     endif
     if(pic)call native_particles_begin(dt)
+    if(qh_sink_sources)call native_sinks_begin(dt)
     if(.not.ieee_is_finite(dt).or.dt<=0d0.or.t+dt<=t)call fail('invalid common evolution timestep')
     dtnew(levelmin:nlevelmax)=dt
     evolution_start=t;evolution_dt=dt;evolution_epoch=nstep_coarse;evolution_open=.true.
@@ -328,11 +337,13 @@ contains
     if(clock_error>16d0*spacing(max(abs(t),abs(evolution_start),evolution_dt))) &
          call fail('hierarchy clock did not advance exactly once')
     if(any(dtnew(levelmin:nlevelmax)/=evolution_dt))call fail('recursive hierarchy timestep changed')
+    if(qh_sink_sources)call native_sinks_drift(evolution_dt)
     if(pic)call native_particles_drift(evolution_dt)
     call restrict_gas_and_ghosts()
     call qumond_history_enter(1,levelmin)
     call qumond_publish_fixed_source()
     if(pic)call native_particles_finish(evolution_dt)
+    if(qh_sink_sources)call native_sinks_finish(evolution_dt)
     associate(mesh=>qh_composite_mesh)
     do i=1,mesh%n,nvector
        n=min(nvector,mesh%n-i+1);ids=0;ids(1:n)=mesh%cell(i:i+n-1)
@@ -395,6 +406,30 @@ contains
     uold(mesh%cell,:)=unew(mesh%cell,:)
     call restrict_gas_and_ghosts()
     call diag_rar_global_inventory('after_native_return')
+    if(qh_sink_sources)then
+       call native_sinks_inventory(mesh,'before_creation')
+       call create_sink
+       call native_sinks_inventory(mesh,'after_creation')
+       ! create_sink returns canonical base lists. Repartition before donor
+       ! updates, using the already sampled common-time Bondi gas moments.
+       do lev=levelmin,nlevelmax
+          call kill_tree_fine(lev)
+       enddo
+       if(bondi.and.nsink>0)call kjhan_refresh_canonical_sink_map
+       call native_sinks_inventory(mesh,'before_accretion')
+       if(bondi.and.nsink>0)then
+          do lev=nlevelmax,levelmin,-1
+             call grow_bondi(lev)
+          enddo
+       endif
+       call restrict_gas_and_ghosts()
+       call native_sinks_sync_clouds(.false.)
+       call native_sinks_inventory(mesh,'after_accretion')
+       call native_sinks_inventory(mesh,'before_feedback')
+       if(sink_AGN.and.nsink>0)call AGN_feedback
+       call restrict_gas_and_ghosts()
+       call native_sinks_inventory(mesh,'after_feedback')
+    endif
     if(cooling)then
        do lev=nlevelmax,levelmin,-1
           call diag_rar_cooling_inventory('before_cooling',lev)
@@ -413,6 +448,7 @@ contains
        call merge_tree_fine(lev)
     enddo
     call native_stellar_reconcile(mesh,use_mond)
+    if(qh_sink_sources)call native_sinks_reconcile(mesh)
     if(source_generation==huge(source_generation))call fail('physical source generation overflow')
     source_generation=source_generation+1
     call qumond_publish_fixed_source()
