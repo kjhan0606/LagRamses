@@ -1,0 +1,101 @@
+&RUN_PARAMS
+ cosmo=.false.
+ pic=.false.
+ poisson=.true.
+ hydro=.true.
+ sink=.false.
+ static=.true.
+ use_mond=.false.
+ nrestart=0
+ nremap=0
+ nstepmax=1
+ nsubcycle=1
+ ncontrol=1
+ ordering='hilbert'
+ memory_balance=.false.
+ use_fftw=.false.
+ gpu_fft=.true.
+ gpu_hydro=.false.
+ gpu_poisson=.false.
+ gpu_sink=.false.
+ gpu_scalar=.false.
+ gpu_particle=.false.
+ gpu_auto_tune=.false.
+ verbose=.true.
+ jobcontrolfile='jobcontrol.txt'
+/
+&OUTPUT_PARAMS
+ noutput=1
+ aout=1.1
+ tout=1.0d100
+ foutput=1
+ fbackup=1000000000
+ outformat='hdf5'
+/
+&INIT_PARAMS
+ nregion=1
+ region_type='square'
+ x_center=0.5
+ y_center=0.5
+ z_center=0.5
+ length_x=2.0
+ length_y=2.0
+ length_z=2.0
+ exp_region=10.0
+ d_region=1.0d-6
+ p_region=1.0d-5
+/
+! The tabulated stellar and gas discs enter through gravity_type=-5.
+! The uniform dilute hydro gas adds only a constant Poisson source and is static.
+! This pilot is a prescribed mass model, not galaxy formation.
+&HYDRO_PARAMS
+ gamma=1.6666666666666667
+ smallr=1.0d-10
+ smallc=1.0d-10
+ courant_factor=0.5
+/
+&AMR_PARAMS
+ levelmin=7
+ levelmax=7
+ ngridtot=400000
+ nparttot=1
+ boxlen=1.0
+/
+&POISSON_PARAMS
+ gravity_type=-5
+ gravity_params=0.003772284732776389,0.003125,0.359375,0.390625
+ epsilon=1.0d-8
+ maxiter_fine=100
+ abort_on_mg_nonconvergence=.true.
+/
+&PHYSICS_PARAMS
+ units_density=1.0d-24
+ units_length=1.974833652154475d23
+ units_time=3.8707679655184575e15
+/
+&MOND_PARAMS
+ a0_mond=1.2d-8
+ mond_mu_type=1
+ mond_type=1
+ g_ext_mond=0.0,0.0,0.0
+/
+&STELLAR_ENRICHMENT_PARAMS
+ feedback_mode='legacy'
+ use_h=.false.
+ use_he=.false.
+ use_c=.false.
+ use_n=.false.
+ use_o=.false.
+ use_ne=.false.
+ use_mg=.false.
+ use_si=.false.
+ use_s=.false.
+ use_ca=.false.
+ use_fe=.false.
+ use_wind=.false.
+ use_agb=.false.
+ use_snii=.false.
+ use_snia=.false.
+ use_pisn=.false.
+ allow_legacy_prompt_snia=.false.
+/
