@@ -16,7 +16,7 @@ module qumond_composite_particles
   integer(kind=1),allocatable :: species(:)
   real(dp),allocatable :: masses(:),weights(:),source_x(:,:),accel(:,:)
   real(dp),allocatable :: start_x(:,:),start_v(:,:),start_a(:,:),half_v(:,:)
-  real(dp) :: cloud_width=0d0,displacement_limit=0d0
+  real(dp) :: cloud_width=0d0,domain_width=0d0,displacement_limit=0d0
   integer :: np=0,nweight=0
   logical :: initialized=.false.,step_open=.false.,drifted=.false.
   character(len=32) :: source_role=''
@@ -30,7 +30,8 @@ contains
   subroutine initialize_roster(mesh,is_mond)
     type(composite_mesh_t),intent(in) :: mesh
     logical,intent(in) :: is_mond
-    integer :: lev,g,grid,p,j,count,status
+    integer :: lev,g,grid,p,j,count,status,ios
+    character(len=128) :: width_env
     integer(i8b),allocatable :: sorted(:)
     if(.not.allocated(idp).or..not.allocated(xp).or..not.allocated(vp).or..not.allocated(mp)) &
          call fail('particle arrays are not allocated')
@@ -84,6 +85,17 @@ contains
        call fail('unknown particle source role')
     end select
     cloud_width=mesh%box*0.5d0**levelmin
+    width_env=''
+    call get_environment_variable('RAR_NATIVE_PARTICLE_CLOUD_WIDTH',width_env,status=status)
+    if(status==-1)call fail('particle cloud width setting is truncated')
+    if(status==0.and.len_trim(width_env)>0)then
+       read(width_env,*,iostat=ios)cloud_width
+       if(ios/=0)call fail('invalid particle cloud width setting')
+    endif
+    if(.not.ieee_is_finite(cloud_width))call fail('nonfinite particle cloud width')
+    if(cloud_width<mesh%box*0.5d0**levelmin.or.cloud_width>mesh%box) &
+         call fail('particle cloud width must span at least a base cell and at most the domain')
+    domain_width=mesh%box
     displacement_limit=0.5d0*minval(mesh%width)
     initialized=.true.
     call validate_roster()
@@ -142,7 +154,7 @@ contains
     integer :: p,sx,sy,sz,k,i
     if(.not.initialized)call initialize_roster(mesh,is_mond)
     call validate_roster()
-    if(cloud_width/=mesh%box*0.5d0**levelmin)call fail('particle assignment width changed')
+    if(mesh%box/=domain_width)call fail('particle assignment domain changed')
     allocate(particle_rho(mesh%n));particle_rho=0d0;nweight=0;max_error=0d0
     source_x=xp(slots,:)
     do p=1,np
