@@ -1,0 +1,38 @@
+{
+  "status": "PERIODIC_SOURCE_AND_FORCE_GATE_PASS",
+  "cases": {
+    "newtonian": {
+      "median_relative_force_error": 1.025515635327676e-14,
+      "p90_relative_force_error": 2.2768005107543448e-14,
+      "force_sample_count": 24089384,
+      "quantile_method": "numpy_exact_linear",
+      "snapshot": "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_uniform512_things_451793/newtonian/output_00001/data_00001.h5",
+      "snapshot_sha256": "1e10aa015c2861b0cb40714553aeb72d154812bdd7cffcf7a59f0503de1ed6d7",
+      "source_rms_relative_error": 5.251838789987802e-13
+    },
+    "qumond": {
+      "median_relative_force_error": 1.6844541139782032e-14,
+      "p90_relative_force_error": 3.1501168847789354e-14,
+      "force_sample_count": 24089384,
+      "quantile_method": "numpy_exact_linear",
+      "snapshot": "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_uniform512_things_451793/qumond/output_00001/data_00001.h5",
+      "snapshot_sha256": "f26a07124c75b354ab038c3e5eefae7894b574a9086516556e7ccec996deff33"
+    }
+  },
+  "qumond_diagnostic_calls": 2,
+  "diagnostic_scope": "source_only",
+  "post_second_poisson_diagnostic_calls": 0,
+  "fft_diagnostic_calls": 0,
+  "scope": "NGC 2403 THINGS-like fixed baryon source; uniform periodic QUMOND, no CDM halo or cosmological evolution",
+  "grid": {
+    "nmesh": 512,
+    "box_kpc": 64.0,
+    "cell_width_kpc": 0.125
+  },
+  "stellar_ml": 0.5,
+  "source_files_sha256": {
+    "star_profile_code.dat": "1cf451b8f9ff983ec083d332f7b4a32ea40ff803752e48e5d756328b297d89d3",
+    "hi_profile_code.dat": "6415a65b9e892c8515c0b724551552ca04553e7cb7a912c6b9179c6f9e803c4a",
+    "source_contract.json": "e0561823cb9c1d964002601b028b4acf08c971bd75bc32bd7e3c11d16255731b"
+  }
+}

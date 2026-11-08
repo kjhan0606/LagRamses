@@ -23,6 +23,31 @@ Newtonian Poisson source from the full stored snapshots, with unchanged
 1e-6 source and force thresholds. Source log preflight now occurs before GPU
 array allocation, and all three parser results are unpacked explicitly.
 
-Runtime validation of this compatibility correction is pending at this
-commit. A new Syntax GPU postprocessing directory is required; preserve the
-failed analysis and original run without adding a success marker to either.
+Runtime validation was pending at implementation commit `33b2a8f`. Syntax
+job `456010` subsequently passed using a new postprocessing directory. The
+failed analysis and original run remain unchanged; neither received a new
+success marker.
+
+The two 512^3 snapshots each supply 24,089,384 force comparison samples.
+Newtonian median/p90 relative force differences are 1.03e-14 / 2.28e-14;
+QUMOND differences are 1.68e-14 / 3.15e-14. The Newtonian source RMS relative
+difference is 5.25e-13. These compare the compiled fields with an independent
+reconstruction of the same periodic discrete equations and source. They do
+not measure continuum or isolated-galaxy accuracy. The result explicitly
+records two source-only diagnostics and zero post-Poisson/FFT diagnostics.
+The final result, hash manifest and source identities are preserved under
+`provenance/results/rar_ngc2403_recovery_456010/`.
+
+The subsequent Grammar NFW holdout runner now accepts this separate completed
+force-analysis directory. It requires both cases, all source hashes, matching
+snapshot paths/digests and the unchanged 1e-6 force/source thresholds. It
+verifies the snapshot digest again when reading forces. Analysis code is
+exported from an explicit Git revision before execution. It never fabricates
+completion files in the failed original wrapper directory.
+
+The holdout question remains a fixed-source rotation-curve comparison: fit
+the two analytic NFW parameters on 48 of 64 selected radii and evaluate the
+other 16, in four contiguous folds, with fixed QUMOND parameters. This is
+not a live Lambda-CDM cosmological calculation, and the two models have
+unequal fitted freedom. The spherical isolated NFW acceleration is added
+to the periodic baryonic field; no full periodic halo Poisson solve is claimed.

@@ -1,0 +1,3 @@
+purpose=GPU postprocessing of existing two 512^3 force snapshots; no simulation launch, no new snapshots
+read_only_simulation_root=/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_uniform512_things_451793
+gpu_cards=1; host_memory=128GiB; new_output_budget=16MiB; original failed wrapper and outputs preserved
