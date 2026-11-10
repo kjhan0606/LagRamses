@@ -90,7 +90,7 @@ sha256sum -c "$root/inputs.sha256" --status
     ! -name artifacts.sha256 ! -name GENERATION_ONLY \
     ! -name GEOMETRY_AUDIT_COMPLETE -print0 | sort -z | xargs -0 sha256sum \
     > artifacts.sha256)
-sha256sum -c "$root/artifacts.sha256" --status
+(cd "$root" && sha256sum -c artifacts.sha256 --status)
 printf 'generation_state=GENERATION_ONLY\ngeometry_audit=passed\nRAMSES_evolution=not_run\n' \
     > "$root/GENERATION_ONLY"
 touch "$root/GEOMETRY_AUDIT_COMPLETE"
