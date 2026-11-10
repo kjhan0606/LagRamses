@@ -1,0 +1,36 @@
+{
+  "points": 64,
+  "radius_kpc": [
+    1.06,
+    20.87
+  ],
+  "qumond_velocity_rms_km_s": {
+    "0.5": 11.23126461197346,
+    "0.7": 8.545830562204525
+  },
+  "newtonian_fields": [
+    {
+      "snapshot": "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_uniform512_456162/newtonian/output_00001/data_00001.h5",
+      "snapshot_sha256": "0d47f5c5cba2d07f4c3a3cf563b48efe0bf0f58116ad00b90f4dcb8b69c034eb",
+      "level": 9,
+      "nmesh": 512,
+      "boxlen_code": 1.0,
+      "dx_code": 0.001953125,
+      "dx_kpc": 0.1250000000000003,
+      "unit_length_cm": 1.97483365215448e+23,
+      "unit_time_s": 3870767965518460.0
+    },
+    {
+      "snapshot": "/gpfs/kjhan/RAR_QUMOND/runs/ngc2403_fr02_ml07_uniform512_457508/newtonian/output_00001/data_00001.h5",
+      "snapshot_sha256": "d04620736dbc053c779cb38cf8e8a306b5e24c969c4041ef9c18eaf2c2251a2b",
+      "level": 9,
+      "nmesh": 512,
+      "boxlen_code": 1.0,
+      "dx_code": 0.001953125,
+      "dx_kpc": 0.1250000000000003,
+      "unit_length_cm": 1.97483365215448e+23,
+      "unit_time_s": 3870767965518460.0
+    }
+  ],
+  "scope": "static prescribed stellar and FR02 gas source; periodic 64 kpc box; not a live halo or cosmological simulation"
+}
