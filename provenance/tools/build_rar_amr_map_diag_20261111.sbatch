@@ -3,9 +3,9 @@
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=1
 #SBATCH --mem=32G
-#SBATCH --time=01:00:00
+#SBATCH --time=02:00:00
 #SBATCH --output=/gpfs/kjhan/RAR_QUMOND/logs/rar_amr_map_build_%j.out
 #SBATCH --error=/gpfs/kjhan/RAR_QUMOND/logs/rar_amr_map_build_%j.err
 set -Eeuo pipefail
@@ -14,7 +14,7 @@ project=/home/kjhan/BackUP/rar
 build_source="$project/build/rar_amr_map_diag_20261111"
 expected_revision=de54b156539acdfd6cfd6b8b019c7319915e89c4
 base=/gpfs/kjhan/RAR_QUMOND
-record="$base/builds/rar_amr_map_diag_20261111"
+record="$base/builds/rar_amr_map_diag_20261111_v2"
 
 module purge
 module load intel/tbb/2022.3
@@ -43,7 +43,7 @@ printf '%s\n' 'NVECTOR=32 HDF5=1 USE_FFTW=1 USE_CUDA=0 SNRT=0' > "$record/build_
 link_helpers='dust_pah_atomization.o dust_pah_hydrogen.o dust_pah_live_model.o dust_pah_radiation.o dust_stochastic.o snrt_dust_contract.o snrt_dust_ir.o snrt_moving_scatter.o'
 printf '%s\n' "$link_helpers" > "$record/additional_link_objects.txt"
 make clean > "$record/make.log" 2>&1
-make -j4 NVECTOR=32 HDF5=1 USE_FFTW=1 USE_CUDA=0 SNRT=0 SNRT_MODOBJ="$link_helpers" >> "$record/make.log" 2>&1
+make NVECTOR=32 HDF5=1 USE_FFTW=1 USE_CUDA=0 SNRT=0 SNRT_MODOBJ="$link_helpers" >> "$record/make.log" 2>&1
 
 test -x ramses_final3d
 cp -p ramses_final3d "$record/ramses_final3d"

@@ -17,7 +17,7 @@ base=/gpfs/kjhan/RAR_QUMOND
 ic="$base/initial_conditions/lcdm_g205_multifluid_l9_1284259"
 audit="$base/analysis/lcdm_g205_multifluid_l9_audit_1284269"
 template="$project/configs/lcdm_grafic_n256_reader_preflight_20261103.nml.in"
-build_record="$base/builds/rar_amr_map_diag_20261111"
+build_record="$base/builds/rar_amr_map_diag_20261111_v2"
 root="$base/runs/lcdm_g205_multifluid_l9_amrmapdiag_${SLURM_JOB_ID:?}"
 
 module purge
