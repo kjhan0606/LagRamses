@@ -104,4 +104,12 @@ Grammar CPU reader-only job 1286337 started on grammar072 and failed after seven
 
 The runnable and tracked Slurm scripts now use the corrected insertion. Rendering that insertion against the source template produces a clean ngridmax_auto=.false. line. The correction was committed and pushed as ee81361.
 
-Replacement Grammar CPU job 1286645 uses one MPI rank, four CPUs, 64 GiB, and a 45-minute limit. At the latest Slurm query it was pending for priority, with a forecast start of 06:14 KST; this estimate can move. The reader preflight and any RAMSES evolution remain incomplete.
+Replacement Grammar CPU job 1286645 used one MPI rank, four CPUs, 64 GiB, and a 45-minute limit. Immediately after submission it was pending for priority, with a forecast start of 06:14 KST; that estimate was provisional. Its terminal result is recorded below.
+
+## Level-11 RAMSES reader-preflight result (2026-11-11)
+
+Replacement Grammar CPU job `1286645` completed successfully (`COMPLETED`, exit `0:0`, 6 min 1 s); its RAMSES step used 4 CPUs and 13,336,244 KiB peak RSS under the 64 GiB request. The effective namelist is `/gpfs/kjhan/RAR_QUMOND/runs/lcdm_g205_multifluid_l11_reader_1286645/effective.nml`, and the run record is `/gpfs/kjhan/RAR_QUMOND/runs/lcdm_g205_multifluid_l11_reader_1286645/`. The outcome marker is `L11_MULTIFLUID_READER_PREFLIGHT_PASSED`. It read 23,509,074 particles and the level-8 through level-11 GRAFIC hierarchy. The final logged mesh counts were 2,097,152, 41,438, 168,263, and 943,128 grids respectively, totaling 3,249,981 under the 4.5-million grid capacity.
+
+The run used `cosmo`, `hydro`, `pic`, `poisson`, and the FFTW base-grid solver; `nstepmax=0` still executed initialization and one coarse step. The test namelist had `sink=.false.`, `rt=.false.`, `cooling=.false.`, and `use_mond=.false.`. The log records `Run completed`, FFTW direct base-level solves, Ω_b header/namelist agreement at 0.049302, and zero values in the recorded NaN checks. No fine-multigrid nonconvergence warning was found. Its output policy (`noutput=1`, `aout=1.1`, `tout=1.0d100`, `foutput=fbackup=10^9`) expected zero dumps; no output or backup directory was created.
+
+This closes only the one-rank, one-coarse-step level-11 IC reader gate. The total particle count is not the CDM count inside the evolved $R_{200c}$, so it does not verify the million-CDM-particle target, evolved zoom contamination, gas/stellar evolution, SMBH or AGN physics, a resolved galaxy, or an RAR result. The job is a standard ΛCDM IC preflight (`use_mond=.false.`), not a QUMOND calculation and not the final hydro production run.
