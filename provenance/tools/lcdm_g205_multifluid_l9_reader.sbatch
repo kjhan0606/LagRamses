@@ -35,8 +35,8 @@ cp -p "$template" "$root/template.nml.in"
 cp -p "${BASH_SOURCE[0]}" "$root/job.sbatch"
 
 sed \
-    -e "s|__IC_DIRECTORY__|$root/ic|g" \
-    -e "/initfile(1)=/a\\  initfile(2)='$root/ic9'" \
+    -e "s|__IC_DIRECTORY__|ic|g" \
+    -e "/initfile(1)=/a\\  initfile(2)='ic9'" \
     -e 's/levelmax=8/levelmax=9/' \
     -e 's/boxlen=25.0/boxlen=1.0/' \
     -e 's/nparttot=16777216/nparttot=18000000/' \
@@ -45,7 +45,7 @@ sed \
 
 for key in 'cosmo=.true.' 'hydro=.true.' 'pic=.true.' 'poisson=.true.' \
     'use_fftw=.true.' 'use_mond=.false.' 'levelmin=8' 'levelmax=9' \
-    'boxlen=1.0' 'ivar_refine=0' "initfile(2)='$root/ic9'" \
+    'boxlen=1.0' 'ivar_refine=0' "initfile(2)='ic9'" \
     'npartmax=20000000' 'nparttot=18000000' 'ngridmax=3000000' \
     'ngridtot=3000000' 'nstepmax=0' 'noutput=1' 'aout=1.1' \
     'tout=1.0d100' 'foutput=1000000000' 'fbackup=1000000000' \
@@ -71,6 +71,9 @@ export LD_LIBRARY_PATH=/home/kjhan/local/hdf5/lib:/home/kjhan/local/lib:${LD_LIB
 for marker in 'Run completed' 'IC/namelist omega_b consistent' \
     'FFTW3 CPU direct Poisson solver enabled' 'FFT direct solve DONE'; do
     grep -Fq "$marker" "$root/run.log"
+done
+for path in ic/ic_pvar_00001 ic9/ic_pvar_00001; do
+    grep -Fq "Reading file $path" "$root/run.log" || { printf 'Missing expected IC field read: %s\n' "$path" >&2; exit 1; }
 done
 grep -Eq 'Level[[:space:]]+8 has[[:space:]]+2097152 grids' "$root/run.log"
 grep -Eq 'Level[[:space:]]+9 has[[:space:]]+[1-9][0-9]* grids' "$root/run.log"
