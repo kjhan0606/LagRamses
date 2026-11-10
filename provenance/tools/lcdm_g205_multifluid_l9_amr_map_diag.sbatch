@@ -22,6 +22,8 @@ root="$base/runs/lcdm_g205_multifluid_l9_amrmapdiag_${SLURM_JOB_ID:?}"
 
 module purge
 module load intel/tbb/2022.3
+module load intel/compiler-rt/2025.3.0
+module load intel/umf/1.0.2
 module load intel/compiler/2025.3.0
 module load intel/mpi/2021.17
 command -v mpiifx
