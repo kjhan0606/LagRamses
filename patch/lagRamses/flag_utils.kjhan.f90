@@ -1467,9 +1467,19 @@ subroutine init_refmap_fine(ilevel)
   character(LEN=80)::filename
   character(LEN=5)::nchar,ncharvar
   integer,parameter::tag=1103
-  integer::dummy_io,info2
+  integer::dummy_io,info2,mapdiag_status
+  integer(kind=8)::mapdiag_count,mapdiag_total
+  logical,save::mapdiag_checked=.false.,mapdiag_enabled=.false.
+  character(len=8)::mapdiag_env
 
   if(numbtot(1,ilevel)==0)return
+  if(.not.mapdiag_checked)then
+     mapdiag_env=''
+     call get_environment_variable('RAR_AMR_MAP_DIAGNOSTICS',mapdiag_env, &
+          & status=mapdiag_status)
+     mapdiag_enabled=(mapdiag_status==0.and.trim(mapdiag_env)=='1')
+     mapdiag_checked=.true.
+  end if
   if(verbose)write(*,111)ilevel
 
   ! Mesh size at level ilevel in coarse cell units
@@ -1656,6 +1666,23 @@ subroutine init_refmap_fine(ilevel)
      end do
      ! End loop over cells
   endif
+
+  ! Record the localized IC refinement map before rho_fine can replace it
+  ! with the live density-based map.
+  if(mapdiag_enabled.and.myid==1)then
+     mapdiag_count=0_8
+     mapdiag_total=0_8
+     do ind=1,twotondim
+        do i=1,active(ilevel)%ngrid
+           icell=ICELL_OF(active(ilevel)%igrid(i),ind)
+           mapdiag_total=mapdiag_total+1_8
+           if(cpu_map2(icell)==1)mapdiag_count=mapdiag_count+1_8
+        end do
+     end do
+     write(*,'(A,I0,A,I0,A,I0)') &
+          '[RAR_AMR_MAP] source=ic_refmap level=',ilevel, &
+          ' active=',mapdiag_total,' flagged=',mapdiag_count
+  end if
 
   ! Deallocate initial conditions array
   if(ncache>0)deallocate(init_array)
