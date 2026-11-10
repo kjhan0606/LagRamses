@@ -1,0 +1,44 @@
+{
+  "status": "NESTED_L9_LCDM_TWOFLUID_IC_GEOMETRY_PASS_NO_EVOLUTION",
+  "candidate_group_id": 205,
+  "candidate_selection": "provisional z=0 mass-screen candidate; not production approval",
+  "model": "two-fluid LCDM IC diagnostic; not a validated production IC",
+  "trace_radius_multiple_R200c": 3.0,
+  "trace_unique_parent_cells": 4536,
+  "provisional_parent_M200c_msun": 340093119374.4374,
+  "domain_shift_base_cells_xyz": [
+    46,
+    -54,
+    56
+  ],
+  "trace_points_covered_by_level8_mask": 4536,
+  "trace_point_coverage_fraction": 1.0,
+  "refinement_masks": {
+    "8": {
+      "shape_xyz": [
+        256,
+        256,
+        256
+      ],
+      "active_cells": 12058
+    },
+    "9": {
+      "shape_xyz": [
+        100,
+        88,
+        66
+      ],
+      "active_cells": 96464
+    }
+  },
+  "base_density_parent_rms": 0.13924621545921284,
+  "base_density_zoom_rms": 0.13921400925872718,
+  "base_density_difference_rms": 0.0024192585820359933,
+  "base_density_correlation_after_integer_registration": 0.9998490645441211,
+  "limits": [
+    "This is IC geometry and field-integrity evidence only; no RAMSES evolution ran.",
+    "Header physics, velocity transfer normalization, reader, and hydro evolution need independent checks.",
+    "No evolved contamination, force convergence, halo relaxation, baryonic response, or RAR was measured.",
+    "A high-resolution multi-fluid production target still requires separate ICs and solver gates."
+  ]
+}
