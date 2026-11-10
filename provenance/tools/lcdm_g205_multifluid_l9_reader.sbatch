@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=24G
+#SBATCH --mem=64G
 #SBATCH --time=01:00:00
 #SBATCH --output=/gpfs/kjhan/RAR_QUMOND/logs/lcdm_g205_twofluid_reader_%j.out
 #SBATCH --error=/gpfs/kjhan/RAR_QUMOND/logs/lcdm_g205_twofluid_reader_%j.err
