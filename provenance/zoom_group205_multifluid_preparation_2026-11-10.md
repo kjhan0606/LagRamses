@@ -97,3 +97,11 @@ The cosmic-fraction estimate \(N_{\rm CDM}\simeq M_{200c}(1-\Omega_b/\Omega_m)/m
 Grammar CPU job 1286049 generated level-8 through level-11 GRAFIC2 initial conditions from the saved two-fluid Lambda-CDM parent at \(z_{\rm start}=49\). The geometry audit returned status NESTED_L11_LCDM_TWOFLUID_IC_GEOMETRY_PASS_NO_EVOLUTION and covered all 4,536 selected trace cells. The registered base-density correlation is 0.999811. MUSIC and the geometry audit completed, but Slurm marked the IC job failed with exit code 1 during the final manifest check. The check ran outside the IC directory, and the artifact manifest stores paths relative to the IC directory. Verification-only CPU job 1286150 checked the artifact manifest from the IC directory and completed with exit code 0:0 in five seconds on Grammar039. The verification job wrote the GENERATION_ONLY and GEOMETRY_AUDIT_COMPLETE markers. The recovery did not regenerate initial conditions or run RAMSES.
 
 The geometry audit does not test high-\(k\) transfer normalization, velocity power spectra, evolved particle counts, contamination, or galaxy formation. A RAMSES reader and an evolved \(R_{200c}\) inventory must verify the million-particle target before the level-11 zoom can support a resolved-galaxy claim.
+
+## Level-11 RAMSES reader-preflight recovery (2026-11-11)
+
+Grammar CPU reader-only job 1286337 started on grammar072 and failed after seven seconds with Slurm exit 1:0. RAMSES reported Fortran input error 17 while parsing line 76 of the effective namelist. The generated line contained a literal backslash before ngridmax_auto=.false., caused by excess escaping in the sed insertion. The failure occurred during namelist parsing, before IC initialization; the run directory contains no RAMSES output or backup snapshots. This is a configuration-generation failure, not a solver or IC verdict.
+
+The runnable and tracked Slurm scripts now use the corrected insertion. Rendering that insertion against the source template produces a clean ngridmax_auto=.false. line. The correction was committed and pushed as ee81361.
+
+Replacement Grammar CPU job 1286645 uses one MPI rank, four CPUs, 64 GiB, and a 45-minute limit. At the latest Slurm query it was pending for priority, with a forecast start of 06:14 KST; this estimate can move. The reader preflight and any RAMSES evolution remain incomplete.
