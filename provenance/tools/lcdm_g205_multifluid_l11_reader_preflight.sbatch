@@ -57,6 +57,7 @@ sed \
     -e "/initfile(1)=/a\\\\  initfile(4)='ic11'" \
     -e 's/levelmax=8/levelmax=11/' \
     -e 's/nsubcycle=1,2,2,2,2,2,2,2,2/nsubcycle=1,2,2,2,2,2,2,2,2,2,2/' \
+    -e 's/m_refine=8\*8\./m_refine=100*-1./' \
     -e 's/ngridmax=3000000/ngridmax=4500000/' \
     -e 's/ngridtot=3000000/ngridtot=4500000/' \
     -e 's/npartmax=20000000/npartmax=32000000/' \
@@ -76,6 +77,7 @@ sed \
 for key in 'cosmo=.true.' 'hydro=.true.' 'pic=.true.' 'poisson=.true.' \
     'use_fftw=.true.' 'use_mond=.false.' 'levelmin=8' 'levelmax=11' \
     'ivar_refine=0' 'ic_refmap_fixed=.true.' \
+    'm_refine=100*-1.' \
     'ngridmax=4500000' 'ngridtot=4500000' 'ngridmax_auto=.false.' \
     'npartmax=32000000' 'nparttot=28000000' \
     'nstepmax=0' 'noutput=1' 'aout=1.1' 'tout=1.0d100' \
