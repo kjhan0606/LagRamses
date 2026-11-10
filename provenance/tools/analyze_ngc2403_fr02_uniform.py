@@ -8,7 +8,7 @@ import torch
 from analyze_qumond_spherical_reference import read_uniform_snapshot
 from analyze_qumond_source_diagnostic import parse_log
 
-parser=argparse.ArgumentParser();parser.add_argument('root',type=Path);parser.add_argument('n',type=int,nargs='?',default=512);parser.add_argument('--output',type=Path)
+parser=argparse.ArgumentParser();parser.add_argument('root',type=Path);parser.add_argument('n',type=int,nargs='?',default=512);parser.add_argument('--output',type=Path);parser.add_argument('--baseline-root',type=Path)
 args=parser.parse_args();root=args.root;n=args.n
 output=args.output if args.output is not None else root/'analysis.json'
 if output.exists():raise FileExistsError(output)
@@ -34,9 +34,63 @@ if not torch.cuda.is_available():raise SystemExit('GPU required')
 inputs=root/'star_profile_code.dat',root/'hi_profile_code.dat',root/'source_contract.json'
 meta=json.loads(inputs[2].read_text())
 if (meta.get('stellar_rows'),meta.get('gas_rows')) != (73,44): raise ValueError('unexpected FR02 tables')
-if not math.isclose(float(meta['stellar_mass_to_light']),0.5,rel_tol=0.0,abs_tol=1e-12): raise ValueError('unexpected stellar M/L')
+if not math.isfinite(float(meta['stellar_mass_to_light'])) or float(meta['stellar_mass_to_light'])<=0:
+    raise ValueError('invalid baseline stellar M/L')
 if not math.isclose(float(meta['gas_helium_factor']),1.33,rel_tol=0.0,abs_tol=1e-12): raise ValueError('unexpected helium factor')
 if not math.isclose(float(meta['box_kpc']),64.0,rel_tol=0.0,abs_tol=1e-12): raise ValueError('unexpected source box')
+override_path=root/'ml_override.json'
+if override_path.is_file():
+    override=json.loads(override_path.read_text())
+    baseline_ml=float(override['baseline']);stellar_ml=float(override['current'])
+    surface_density_multiplier=float(override['surface_density_multiplier'])
+    if min(baseline_ml,stellar_ml,surface_density_multiplier)<=0:
+        raise ValueError('M/L override values must be positive')
+    if not override.get('gas_unchanged',False): raise ValueError('M/L override does not preserve the gas source')
+    if not math.isclose(float(meta['stellar_mass_to_light']),baseline_ml,rel_tol=0.0,abs_tol=1e-12):
+        raise ValueError('source contract M/L must describe the baseline profile')
+    if not math.isclose(stellar_ml/baseline_ml,surface_density_multiplier,rel_tol=1e-13,abs_tol=0.0):
+        raise ValueError('M/L override multiplier is inconsistent')
+    if args.baseline_root is None: raise ValueError('--baseline-root is required for an M/L override')
+    baseline_root=args.baseline_root
+    if not (baseline_root/'COMPLETE').is_file(): raise ValueError('baseline run is incomplete')
+    baseline_meta=json.loads((baseline_root/'source_contract.json').read_text())
+    baseline_gate=json.loads((baseline_root/'analysis.json').read_text())
+    baseline_policy=json.loads((baseline_root/'output_policy.json').read_text())
+    current_policy=json.loads((root/'output_policy.json').read_text())
+    if baseline_gate['status']!='PERIODIC_SOURCE_AND_FORCE_GATE_PASS' or baseline_gate['grid']!={'nmesh':n,'box_kpc':64.0,'cell_width_kpc':64.0/n}:
+        raise ValueError('baseline field gate is not a matched FR02 grid')
+    if not math.isclose(float(baseline_meta['stellar_mass_to_light']),baseline_ml,rel_tol=0.0,abs_tol=1e-12):
+        raise ValueError('baseline run has the wrong stellar M/L')
+    if baseline_gate.get('stellar_ml')!=baseline_ml: raise ValueError('baseline analysis has the wrong stellar M/L')
+    if baseline_policy['binary_sha256']!=current_policy['binary_sha256']:
+        raise ValueError('M/L comparison requires the same lagRamses executable')
+    for key in ('unit_length_cm','star_exp_scaleheight_code','gas_exp_scaleheight_code','gas_taper_start_code','gas_taper_end_code'):
+        if not math.isclose(float(meta[key]),float(baseline_meta[key]),rel_tol=1e-13,abs_tol=0.0):
+            raise ValueError(f'baseline source geometry changed: {key}')
+    def read_profile(path):
+        values=np.loadtxt(path,skiprows=1)
+        if values.ndim!=2 or values.shape[1]!=2 or int(path.read_text().splitlines()[0])!=len(values):
+            raise ValueError(f'invalid profile table: {path}')
+        return values
+    current_star=read_profile(inputs[0]);baseline_star=read_profile(baseline_root/'star_profile_code.dat')
+    current_gas=read_profile(inputs[1]);baseline_gas=read_profile(baseline_root/'hi_profile_code.dat')
+    if not np.array_equal(current_star[:,0],baseline_star[:,0]) or not np.array_equal(current_gas[:,0],baseline_gas[:,0]):
+        raise ValueError('M/L source tables use different radii')
+    nonzero=baseline_star[:,1]!=0
+    if np.any(current_star[~nonzero,1]!=0): raise ValueError('M/L override changed the stellar profile support')
+    ratios=current_star[nonzero,1]/baseline_star[nonzero,1]
+    if not np.allclose(ratios,surface_density_multiplier,rtol=2e-14,atol=0.0):
+        raise ValueError('stellar source table does not match the declared M/L scaling')
+    if not np.array_equal(current_gas,baseline_gas): raise ValueError('gas source changed in the M/L comparison')
+    source_scale_validation={'baseline_run':str(baseline_root),'baseline_stellar_ml':baseline_ml,
+                             'current_stellar_ml':stellar_ml,'stellar_surface_density_multiplier':surface_density_multiplier,
+                             'stellar_profile_ratio_min':float(ratios.min()),'stellar_profile_ratio_max':float(ratios.max()),
+                             'gas_profile_exactly_unchanged':True}
+else:
+    baseline_ml=float(meta['stellar_mass_to_light']);stellar_ml=baseline_ml;surface_density_multiplier=1.0
+    source_scale_validation={'baseline_run':None,'baseline_stellar_ml':baseline_ml,
+                             'current_stellar_ml':stellar_ml,'stellar_surface_density_multiplier':surface_density_multiplier,
+                             'gas_profile_exactly_unchanged':None}
 def table(p):
     a=np.loadtxt(p,skiprows=1);assert len(a)==int(p.read_text().splitlines()[0]);return T(a)
 st=table(inputs[0]);hi=table(inputs[1]);dx=1/n
@@ -98,12 +152,19 @@ for label,reference in [('newtonian',newt),('qumond',qref)]:
         if metric>1e-6:raise ValueError(f'source gate failed: {metric}')
         del xg,child,xyz,pos,ijk,p,pt,lap,diff
     del measured,coords,v,norm,R,mask,errors
+source_hashes={p.name:sha256_file(p) for p in inputs}
+if override_path.is_file():
+    source_hashes[override_path.name]=sha256_file(override_path)
+    source_hashes['baseline_star_profile_code.dat']=sha256_file(baseline_root/'star_profile_code.dat')
+    source_hashes['baseline_hi_profile_code.dat']=sha256_file(baseline_root/'hi_profile_code.dat')
 result={'status':'PERIODIC_SOURCE_AND_FORCE_GATE_PASS','cases':rec,'qumond_diagnostic_calls':len(diags),
         'diagnostic_scope':'source_only' if not post_diags else 'source_and_post_second_poisson',
         'post_second_poisson_diagnostic_calls':len(post_diags),'fft_diagnostic_calls':len(fft_diags),
         'scope':'NGC 2403 graph-digitized FR02 gas plus fixed stellar source; uniform periodic QUMOND, no CDM halo or cosmological evolution',
         'grid':{'nmesh':n,'box_kpc':64.0,'cell_width_kpc':64.0/n},
-        'stellar_ml':float(meta['stellar_mass_to_light']),
-        'source_files_sha256':{p.name:sha256_file(p) for p in inputs}}
+        'stellar_ml':stellar_ml,'stellar_ml_baseline':baseline_ml,
+        'stellar_surface_density_multiplier':surface_density_multiplier,
+        'source_scale_validation':source_scale_validation,
+        'source_files_sha256':source_hashes}
 with output.open('x') as stream:stream.write(json.dumps(result,indent=2)+'\n')
 print(json.dumps(result,indent=2))
