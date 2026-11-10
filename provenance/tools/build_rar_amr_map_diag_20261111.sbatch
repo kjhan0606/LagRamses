@@ -17,7 +17,9 @@ base=/gpfs/kjhan/RAR_QUMOND
 record="$base/builds/rar_amr_map_diag_20261111"
 
 module purge
-module load intel/compiler/2025.3.0 intel/mpi/2021.17
+module load intel/tbb/2022.3
+module load intel/compiler/2025.3.0
+module load intel/mpi/2021.17
 command -v mpiifx
 test "$(git -C "$build_source" rev-parse HEAD)" = "$expected_revision"
 test -z "$(git -C "$build_source" status --porcelain)"

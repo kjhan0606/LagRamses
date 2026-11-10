@@ -21,7 +21,9 @@ build_record="$base/builds/rar_amr_map_diag_20261111"
 root="$base/runs/lcdm_g205_multifluid_l9_amrmapdiag_${SLURM_JOB_ID:?}"
 
 module purge
-module load intel/compiler/2025.3.0 intel/mpi/2021.17
+module load intel/tbb/2022.3
+module load intel/compiler/2025.3.0
+module load intel/mpi/2021.17
 command -v mpiifx
 test -f "$build_record/COMPLETE"
 (cd "$build_record" && sha256sum -c PAYLOAD.sha256 --status)
