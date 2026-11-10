@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=rar-fr02-ml07-audit
-#SBATCH --partition=a100_pcie
+#SBATCH --partition=a40,a100_pcie,h100,h200
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=256G
+#SBATCH --mem=128G
 #SBATCH --time=01:00:00
 #SBATCH --output=/gpfs/kjhan/RAR_QUMOND/logs/ngc2403_fr02_ml07_audit_%j.out
 #SBATCH --error=/gpfs/kjhan/RAR_QUMOND/logs/ngc2403_fr02_ml07_audit_%j.err
@@ -42,8 +42,8 @@ test "$free_bytes" -ge "$minimum_free_bytes"
 
 gpu_record=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | sed -n '1p')
 case "$gpu_record" in
-    *A100*) ;;
-    *) printf 'Expected an A100 GPU, found: %s\n' "$gpu_record" >&2; exit 1;;
+    *A40*|*A100*|*H100*|*H200*) ;;
+    *) printf 'Expected an A40/A100/H100/H200 GPU, found: %s\n' "$gpu_record" >&2; exit 1;;
 esac
 
 mkdir "$output_root"
