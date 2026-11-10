@@ -178,3 +178,11 @@ Use reproducible normalizations in the acceptance report. For cell fields on the
 - A production AMR solution for the shared phantom source across coarse-fine boundaries.
 
 Until the unresolved relativistic inputs are supplied by a validated action, the code target is the nonrelativistic BIMOND field solver. Cosmological runs using an imposed background remain phenomenological. The fixed-source RAR comparison can proceed independently, with the present no-twin BIMOND limit numerically equal to QUMOND.
+
+## lagCAMB status audit (2026-11-11)
+
+The `kjhan0606/lagCAMB` `master` tip is `d65514d5b99390d5f96cdb8546e9a45e7b422ae9`. Its latest commit corrects the type-1 interacting-dark-energy perturbation prescription and adds an independent spectrum reference; it does not document BIMOND. GitHub code search for `BIMOND` and `use_mond` returned no indexed matches in this audit, so a lagCAMB BIMOND implementation is not verified and must not be reported as complete. This is a bounded repository-state check, not proof that no unindexed experimental code exists.
+
+The available linear BIMOND cosmology calculation by Milgrom treats the matter-twin-matter symmetric branch (`alpha=beta`) with equal mean sector populations. In that branch the sum mode is Newtonian while the difference mode has nonlinear MOND growth, including at arbitrarily small perturbation amplitude. Those transfer/growth equations are not initial conditions for the selected `alpha+beta=0`, `beta=1` branch ([Milgrom 2010](https://arxiv.org/abs/1006.3809)). The extended BIMOND formalism has multiple relativistic scalar couplings and possible cosmological solutions; the galactic nonrelativistic limit does not fix how those scalars behave in cosmology ([Milgrom 2022](https://journals.aps.org/prd/abstract/10.1103/PhysRevD.106.084010)).
+
+Before adding a lagCAMB model, select and document the relativistic action, a stable background branch, the linear perturbation equations and gauge, and the twin-sector abundance and initial modes. Then cross-check the resulting transfer functions and confirm that their nonlinear limit matches the lagRamses quasi-static branch. Until those inputs exist, lagCAMB should not emit a BIMOND-labeled transfer file; using standard Lambda-CDM transfers would remain a phenomenological assumption rather than a BIMOND prediction.
