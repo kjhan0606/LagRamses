@@ -1,0 +1,335 @@
+   _/_/_/   _/    _/   _/_/_/         _/_/     _/    _/    _/_/_/    _/_/_/_/   
+  _/_/_/ 
+  _/        _/    _/    _/    _/     _/  _/    _/_/_/_/   _/    _/   _/         
+ _/    _/
+ _/         _/    _/    _/    _/    _/    _/   _/ _/ _/   _/         _/         
+ _/      
+ _/         _/    _/    _/_/_/     _/_/_/_/    _/    _/     _/_/     _/_/_/     
+   _/_/  
+ _/         _/    _/    _/    _/   _/    _/    _/    _/         _/   _/         
+       _/
+  _/        _/    _/    _/    _/   _/    _/    _/    _/   _/    _/   _/         
+ _/    _/
+   _/_/_/    _/_/_/     _/    _/   _/    _/    _/    _/    _/_/_/    _/_/_/_/   
+  _/_/_/ 
+                               Version 3.0                                      
+        
+              written by Romain Teyssier (University of Zurich)                 
+        
+              GPU acceleration by Juhan Kim (KIAS)                              
+          
+                      (c) CEA 1999-2007, UZH 2008-2014                          
+        
+         GPU & optimization by Juhan Kim (KIAS) 2026                            
+        
+  
+ Working with nproc =    1 for ndim = 3
+  
+ IOGROUPSIZECONE=           2
+  
+  
+ compile date = 11/03/26-10:37:23
+ patch dir    = ../patch/lagRamses
+ remote repo  = git@github.com:kjhan0606/LagRamses.git
+ local branch = HEAD
+ last commit  = fd43ea8eaa988e08ac51111c0665e44e9f918b6c
+  
+Radiation transport selector: none
+ Fine MG max iterations = 100
+ Restart phi policy = cold predictor; checkpoint phi I/O retained
+ Abort on fine MG nonconvergence = T
+ FFTW3 CPU direct Poisson solver enabled (use_fftw=T)
+ Multigrid GPU smoother in merged red/black mode (mg_merged_rb=T)
+ Memory balance: mem_weight_grid=  3228 (nvar= 18)
+ Load-balance grid headroom= 0.850 x ngridmax
+ Memory balance particle placement: exact linked-list mode
+ Particle-tree rebuild: exact remove/add path
+ Stellar feedback mode: legacy
+ Stellar IMF id: 2
+ Stellar population model id: 0
+ Stellar yield source basis: per_star_cumulative
+ Stellar IMF mass support:   8.0000E-02   1.2000E+02
+ Stellar binary fraction:   0.0000E+00
+ Stellar terminal-fate policy: review_only_unresolved
+ Stellar fate-map SHA256: 
+ Stellar fate approval id: 
+ High-mass endpoint preset: source_consistent
+ Maximum remnant correction / initial mass:    0.0000000E+00
+ Stellar terminal-fate policy is review-only; production admission is blocked
+ Hydro var indices:
+    ichem   =            6
+Physics switches: Haardt-Madau UV=F J21=  0.0000E+00 self-shielding=F
+  RAMSES non-equilibrium chemistry (neq_chem)=F
+ K-section comm tree (non-ksection ordering):
+   nksec_levels  =  0
+   ksec_kmax     =  0
+   ksec_nbinodes =     1
+ Morton hash: building per-level hash tables...
+ Morton hash: inserted          0 grids total
+ Morton [init] self-lookups=         0 mismatch=         0
+ Morton hash: ALL CHECKS PASSED
+ Diagnostic: testing MPI after init_amr...
+ Diagnostic: ALLREDUCE OK, sum=     1
+ Reading file ic/ic_deltab
+ IC/namelist omega_b consistent:  0.049302
+ Reading file ic9/ic_deltab
+ IC/namelist omega_b consistent:  0.049302
+ Cosmological parameters:
+ aexp= 2.000E-02 H0= 6.736E+01 km s-1 Mpc-1
+ omega_m=  0.315 omega_l=  0.685
+ box size= 2.500E+01 h-1 Mpc
+ Initial conditions for level =   8
+ dx= 9.766E-02 h-1 Mpc
+ n1= 256 n2= 256 n3= 256
+ xoff= 0.000E+00 yoff= 0.000E+00 zoff= 0.000E+00 h-1 Mpc
+ Initial conditions for level =   9
+ dx= 4.883E-02 h-1 Mpc
+ n1= 100 n2=  88 n3=  66
+ xoff= 9.961E+00 yoff= 1.035E+01 zoff= 1.084E+01 h-1 Mpc
+ Computing Friedman model
+ Building initial AMR grid
+ Reading file ic/ic_deltab
+ Reading file ic/ic_velbx
+ Reading file ic/ic_velby
+ Reading file ic/ic_velbz
+ File ic/ic_tempb not found
+ Initialize corresponding variable to default value
+ Reading file ic/ic_pvar_00001
+ File ic/ic_pvar_00002 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00003 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00004 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00005 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00006 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00007 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00008 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00009 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00010 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00011 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00012 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00013 not found
+ Initialize corresponding variable to default value
+ DEBUG init_refine: ilevel=           9  ivar_refine=           0  initfile=ic9
+ Reading file ic/ic_refmap
+ Reading file ic9/ic_deltab
+ Reading file ic9/ic_velbx
+ Reading file ic9/ic_velby
+ Reading file ic9/ic_velbz
+ File ic9/ic_tempb not found
+ Initialize corresponding variable to default value
+ Reading file ic9/ic_pvar_00001
+ File ic9/ic_pvar_00002 not found
+ Initialize corresponding variable to default value
+ File ic9/ic_pvar_00003 not found
+ Initialize corresponding variable to default value
+ File ic9/ic_pvar_00004 not found
+ Initialize corresponding variable to default value
+ File ic9/ic_pvar_00005 not found
+ Initialize corresponding variable to default value
+ File ic9/ic_pvar_00006 not found
+ Initialize corresponding variable to default value
+ File ic9/ic_pvar_00007 not found
+ Initialize corresponding variable to default value
+ File ic9/ic_pvar_00008 not found
+ Initialize corresponding variable to default value
+ File ic9/ic_pvar_00009 not found
+ Initialize corresponding variable to default value
+ File ic9/ic_pvar_00010 not found
+ Initialize corresponding variable to default value
+ File ic9/ic_pvar_00011 not found
+ Initialize corresponding variable to default value
+ File ic9/ic_pvar_00012 not found
+ Initialize corresponding variable to default value
+ File ic9/ic_pvar_00013 not found
+ Initialize corresponding variable to default value
+ Reading file ic/ic_deltab
+ Reading file ic/ic_velbx
+ Reading file ic/ic_velby
+ Reading file ic/ic_velbz
+ File ic/ic_tempb not found
+ Initialize corresponding variable to default value
+ Reading file ic/ic_pvar_00001
+ File ic/ic_pvar_00002 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00003 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00004 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00005 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00006 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00007 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00008 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00009 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00010 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00011 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00012 not found
+ Initialize corresponding variable to default value
+ File ic/ic_pvar_00013 not found
+ Initialize corresponding variable to default value
+GRAFIC slab I/O: concurrent readers=1, rank stride=1
+ Reading file ic/ic_poscx
+ Reading file ic/ic_poscy
+ Reading file ic/ic_poscz
+ Reading file ic/ic_velcx
+ Reading file ic/ic_velcy
+ Reading file ic/ic_velcz
+GRAFIC slab I/O: concurrent readers=1, rank stride=1
+ Reading file ic9/ic_poscx
+ Reading file ic9/ic_poscy
+ Reading file ic9/ic_poscz
+ Reading file ic9/ic_velcx
+ Reading file ic9/ic_velcy
+ Reading file ic9/ic_velcz
+ npart=    16898099 /    20000000  for PE=           1
+ Used memory:   4.8 Gb
+ Morton hash: building per-level hash tables...
+ Morton hash: inserted    2414014 grids total
+ Morton [init] self-lookups=   2414014 mismatch=         0
+ Morton hash: ALL CHECKS PASSED
+ Time elapsed since startup:   65.4247819767334     
+ Initial mesh structure
+ Level  1 has          1 grids (       1,       1,       1,)
+ Level  2 has          8 grids (       8,       8,       8,)
+ Level  3 has         64 grids (      64,      64,      64,)
+ Level  4 has        512 grids (     512,     512,     512,)
+ Level  5 has       4096 grids (    4096,    4096,    4096,)
+ Level  6 has      32768 grids (   32768,   32768,   32768,)
+ Level  7 has     262144 grids (  262144,  262144,  262144,)
+ Level  8 has    2097152 grids ( 2097152, 2097152, 2097152,)
+ Level  9 has      17269 grids (   17269,   17269,   17269,)
+ Starting time integration
+ defrag total:    4.067 s
+ NaN_CHK post_maketree: uold=         0 f=         0 d0=         0
+ NaN_CHK post_kinfb: uold=         0 f=         0 d0=         0
+ NaN_CHK post_agnfb: uold=         0 f=         0 d0=         0
+ NaN_CHK pre_rho: uold=         0 f=         0 d0=         0
+ NaN_CHK post_rho: uold=         0 f=         0 d0=         0
+ NaN_CHK pre_sync1: uold=         0 f=         0 d0=         0
+ NaN_CHK post_sync1: uold=         0 f=         0 d0=         0
+ FFTW3 Poisson: level=  8 grid=  256x  256x  256 N=       16777216 distributed=F
+   FFTW3 initialized with   4 threads
+   ==> Level=    8 FFT direct solve DONE (fast path)
+ NaN_CHK post_force: uold=         0 f=         0 d0=         0
+ NaN_CHK post_sync2: uold=         0 f=         0 d0=         0
+ SGS_DT: level= 8 dt= 1.260E+00
+ Dynamic exchange [MG forward L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L7 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L7 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L8 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L8 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+   ==> Level=    9 Step=    4 Error= 3.759E-05
+ SGS_DT: level= 9 dt= 1.242E+00
+ Fine step=      0 t=-2.11419E+01 dt= 1.242E+00 a= 2.000E-02 mem=80.5% 84.5%
+ Mtot= 1.57E-01 Ekin_tot=-1.03E-07 Epop_tot= 6.72E-08 Eint_tot= 4.24E-12
+ === Direct cooling timings ===
+   cooling_fine :      0.000 s
+   cooling_table:      0.000 s
+ === Direct SNRT timings ===
+   snrt_advance :      0.000 s
+   snrt_diagnose:      0.000 s
+ === Particle sub-timers ===
+   make_tree  :      0.978 s
+   kill+virt  :      0.147 s
+   synchro    :      1.328 s
+   move       :      1.424 s
+   merge      :      0.018 s
+   TOTAL      :      3.895 s
+ === Sink sub-timers ===
+   AGN_feedback :      0.338 s
+   create_sink  :      0.000 s
+   grow_bondi   :      0.000 s
+   bondi_hoyle  :      0.000 s
+   TOTAL        :      0.338 s
+ Time elapsed since last coarse step:   47.28 s        2.80 mus/pt        2.80 mus/pt (av)
+ Used memory:   8.8 Gb
+ Memory min/max:      8.8 /      8.8 Gb
+ Total running time:   112.7000     s
+[RESIZABLE] GRID_GROW rank=1 old=3000000 new=19164480
+ NaN_CHK post_maketree: uold=         0 f=         0 d0=         0
+ NaN_CHK post_kinfb: uold=         0 f=         0 d0=         0
+ NaN_CHK post_agnfb: uold=         0 f=         0 d0=         0
+ NaN_CHK pre_rho: uold=         0 f=         0 d0=         0
+ NaN_CHK post_rho: uold=         0 f=         0 d0=         0
+ NaN_CHK pre_sync1: uold=         0 f=         0 d0=         0
+ NaN_CHK post_sync1: uold=         0 f=         0 d0=         0
+ FFTW3 Poisson: level=  8 grid=  256x  256x  256 N=       16777216 distributed=F
+   ==> Level=    8 FFT direct solve DONE (fast path)
+ NaN_CHK post_force: uold=         0 f=         0 d0=         0
+ NaN_CHK post_sync2: uold=         0 f=         0 d0=         0
+ SGS_DT: level= 8 dt= 1.198E+00
+ Dynamic exchange [MG forward L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L1 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L2 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L3 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L4 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L5 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L6 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L7 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L7 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG forward L8 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+ Dynamic exchange [MG reverse L8 cached]: sparse-p2p density= 0.000 max_partners=     0 max_rank_payload=      0.00 MiB
+   ==> Level=    9 Step=   44 Error= 9.362E-05
+ SGS_DT: level= 9 dt= 8.227E-01
+ Mesh structure
+ Level  1 has          1 grids (       1,       1,       1,)
+ Level  2 has          8 grids (       8,       8,       8,)
+ Level  3 has         64 grids (      64,      64,      64,)
+ Level  4 has        512 grids (     512,     512,     512,)
+ Level  5 has       4096 grids (    4096,    4096,    4096,)
+ Level  6 has      32768 grids (   32768,   32768,   32768,)
+ Level  7 has     262144 grids (  262144,  262144,  262144,)
+ Level  8 has    2097152 grids ( 2097152, 2097152, 2097152,)
+ Level  9 has   16767731 grids (16767731,16767731,16767731,)
+ Main step=      1 mcons= 0.00E+00 econs= 0.00E+00 epot=-1.39E-07 ekin= 9.13E-08 eint= 1.07E-11
+ Fine step=      1 t=-1.99002E+01 dt= 8.227E-01 a= 2.213E-02 mem=****% 84.5%
+ Run completed
+ Total elapsed time:   951.790045046713     
+
+     seconds         %    STEP (rank=      1)
+     127.847      13.3    refine                  
+       4.067       0.4    loadbalance             
+      21.333       2.2    particles               
+       3.374       0.4    feedback                
+       7.385       0.8    sinks                   
+     104.198      10.8    poisson                 
+       1.432       0.1    poisson-fftw3 base      
+       2.250       0.2    courant                 
+       1.388       0.1    hydro - set unew        
+     662.553      68.8    poisson - mg AMR        
+      23.547       2.4    hydro - godunov         
+       1.931       0.2    hydro - set uold        
+       1.121       0.1    flag                    
+     963.483     100.0    TOTAL

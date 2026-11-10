@@ -1,0 +1,139 @@
+! N=256, z=49 standard Lambda-CDM reader and one-initialization-step preflight.
+! This is a matched-phase control using the LCDM member of the conditional GR-CAMB pair.
+&RUN_PARAMS
+  cosmo=.true.
+  hydro=.true.
+  pic=.true.
+  poisson=.true.
+  sink=.false.
+  rt=.false.
+  radiation_transport='none'
+  clumpfind=.false.
+  lightcone=.false.
+  nrestart=0
+  nstepmax=0
+  ncontrol=1
+  nremap=10
+  nsubcycle=1,2,2,2,2,2,2,2,2
+  use_fftw=.true.
+  gpu_hydro=.false.
+  gpu_poisson=.false.
+  gpu_fft=.false.
+  gpu_particle=.false.
+  use_neutrino=.false.
+  sidm=.false.
+  use_mond=.false.
+  use_fR=.false.
+  use_nDGP=.false.
+  use_symmetron=.false.
+  use_dilaton=.false.
+  use_galileon=.false.
+  use_coupled_de=.false.
+  use_quintessence=.false.
+  use_kessence=.false.
+  use_chaplygin=.false.
+  use_rvm=.false.
+  use_horndeski=.false.
+  use_ede=.false.
+  use_sgs=.false.
+  use_adm=.false.
+  use_fdm=.false.
+  use_pbh=.false.
+/
+
+&MOND_PARAMS
+  a0_mond=1.2d-8
+  mond_mu_type=1
+  mond_type=1
+/
+
+&COSMO_PARAMS
+  omega_b=0.04930169880390167
+  omega_m=0.3149999976158142
+  omega_l=0.6850000023841858
+  h0=67.36000061035156
+/
+
+&OUTPUT_PARAMS
+  noutput=1
+  aout=1.1
+  tout=1.0d100
+  foutput=1000000000
+  fbackup=1000000000
+  outformat='hdf5'
+/
+
+&INIT_PARAMS
+  filetype='grafic'
+  initfile(1)='ic'
+  initfile(2)='ic9'
+  grafic_nreaders=1
+/
+
+&AMR_PARAMS
+  levelmin=8
+  levelmax=9
+  boxlen=1.0
+  ngridmax=3000000
+  ngridtot=3000000
+  npartmax=20000000
+  nparttot=18000000
+  nexpand=1
+/
+
+&POISSON_PARAMS
+  epsilon=1.0d-4
+  maxiter_fine=100
+  abort_on_mg_nonconvergence=.true.
+/
+
+&HYDRO_PARAMS
+  gamma=1.666666666666667d0
+  courant_factor=0.8
+  slope_type=2
+  scheme='muscl'
+  riemann='llf'
+  pressure_fix=.true.
+  mhd_enabled=.false.
+/
+
+&PHYSICS_PARAMS
+  cooling=.false.
+  haardt_madau=.false.
+  metal=.false.
+  isothermal=.false.
+  t_star=0.0
+  eps_star=0.0
+  self_shielding=.false.
+  neq_chem=.false.
+  cr_enabled=.false.
+  dust_mass_enabled=.false.
+/
+
+&STELLAR_ENRICHMENT_PARAMS
+  feedback_mode='legacy'
+  use_h=.false.
+  use_he=.false.
+  use_c=.false.
+  use_n=.false.
+  use_o=.false.
+  use_ne=.false.
+  use_mg=.false.
+  use_si=.false.
+  use_s=.false.
+  use_ca=.false.
+  use_fe=.false.
+  use_wind=.false.
+  use_agb=.false.
+  use_snii=.false.
+  use_snia=.false.
+  use_pisn=.false.
+  allow_legacy_prompt_snia=.false.
+/
+
+&REFINE_PARAMS
+  ivar_refine=0
+  m_refine=8*8.
+  interpol_var=1
+  interpol_type=0
+/

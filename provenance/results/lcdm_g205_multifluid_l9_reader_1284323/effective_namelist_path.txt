@@ -1,0 +1,1 @@
+/gpfs/kjhan/RAR_QUMOND/runs/lcdm_g205_multifluid_l9_reader_1284323/effective.nml

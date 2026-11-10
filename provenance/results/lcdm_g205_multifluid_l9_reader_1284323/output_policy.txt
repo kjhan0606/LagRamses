@@ -1,0 +1,23 @@
+purpose=standard Lambda-CDM gas and CDM multilevel GRAFIC reader and base FFTW/refined MG initialization preflight
+cosmology=Omega_m 0.315, Omega_b 0.0493017, Omega_Lambda 0.685, h 0.6736
+transfer=CAMB LCDM input; independent field normalization validation pending
+levelmin=8
+levelmax=9
+ivar_refine=0
+nstepmax=0
+noutput=1
+aout=1.1
+tout=1e100
+foutput=fbackup=1000000000
+expected_RAMSES_full_dumps=0
+accidental_dump_headroom_bytes=17179869184
+ngridtot=3000000
+nparttot=18000000
+free_bytes_before=138822536921088
+hydro=true
+cooling=false
+metal=false
+sink=false
+AGN=false
+rt=false
+dust=false
