@@ -62,7 +62,7 @@ sed \
     -e 's/ngridtot=3000000/ngridtot=4500000/' \
     -e 's/npartmax=20000000/npartmax=32000000/' \
     -e 's/nparttot=16777216/nparttot=28000000/' \
-    -e '/&AMR_PARAMS/a\\\\  ngridmax_auto=.false.' \
+    -e '/&AMR_PARAMS/a\\  ngridmax_auto=.false.' \
     "$root/template.nml.in" | awk '
 {
     if ($0 == "&REFINE_PARAMS") {
