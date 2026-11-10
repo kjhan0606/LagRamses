@@ -75,6 +75,7 @@ subroutine read_hydro_params(nml_ok)
        & ,err_jump_u,ekin_flux_refine,d_keflux_max,floor_keflux &
        & ,void_web_jump_compression_gate,void_web_jump_pressure_min &
        & ,floor_d,floor_u,floor_p,ivar_refine,var_cut_refine &
+       & ,ic_refmap_fixed &
        & ,interpol_var,interpol_type,sink_refine,d_jeans_thre &
        & ,q_refine_holdback,m_refine_effective,ref_fall_rate & !(ONS)
        & ,dr_proper
@@ -146,6 +147,30 @@ subroutine read_hydro_params(nml_ok)
         if(myid==1)write(*,*)'ERROR: invalid optional &REFINE_PARAMS on uniform grid'
         call clean_stop
      endif
+  endif
+  if(ic_refmap_fixed)then
+     if(filetype/='grafic')then
+        if(myid==1)write(*,*)'ic_refmap_fixed requires filetype=grafic'
+        nml_ok=.false.
+     endif
+     if(.not.poisson)then
+        if(myid==1)write(*,*)'ic_refmap_fixed requires poisson=.true.'
+        nml_ok=.false.
+     endif
+     if(ivar_refine/=0)then
+        if(myid==1)write(*,*)'ic_refmap_fixed requires ivar_refine=0'
+        nml_ok=.false.
+     endif
+     if(nlevelmax<=levelmin)then
+        if(myid==1)write(*,*)'ic_refmap_fixed requires nlevelmax>levelmin'
+        nml_ok=.false.
+     endif
+     if(void_web_refine)then
+        if(myid==1)write(*,*)'ic_refmap_fixed cannot be combined with void_web_refine'
+        nml_ok=.false.
+     endif
+     if(myid==1)write(*,'(A)') &
+          ' IC refinement map fixed: initialize from GRAFIC ic_refmap and preserve existing refined cells'
   endif
   rewind(1)
   if(hydro)read(1,NML=hydro_params)

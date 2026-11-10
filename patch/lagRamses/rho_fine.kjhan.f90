@@ -114,7 +114,7 @@ subroutine rho_fine(ilevel,icount)
   !-------------------------------------------------------------------------
   ! Initialize "number density" field to baryon number density in array phi.
   !-------------------------------------------------------------------------
-  if(m_refine_eff(ilevel)>-1.0d0)then
+  if(m_refine_eff(ilevel)>-1.0d0 .and. .not.ic_refmap_fixed)then
      d_scale=max(mass_sph/dx_loc**ndim,smallr)
 !$omp parallel do private(ind,i, scalar)
      do ind=1,twotondim
@@ -195,7 +195,7 @@ subroutine rho_fine(ilevel,icount)
   if(cic_levelmax>0.and.ilevel>=cic_levelmax)then
      call make_virtual_fine_dp   (rho_top(1),ilevel)
   endif
-  if(m_refine_eff(ilevel)>-1.0d0)then
+  if(m_refine_eff(ilevel)>-1.0d0 .and. .not.ic_refmap_fixed)then
      call make_virtual_reverse_dp(phi(1),ilevel)
      call make_virtual_fine_dp   (phi(1),ilevel)
   endif
@@ -206,7 +206,7 @@ subroutine rho_fine(ilevel,icount)
   ! units of the finest-level mass_sph and opening the full box. The V-web
   ! base and wall floors are added independently in flag_utils. This branch
   ! is a strict no-op for ordinary simulations.
-  if(m_refine_eff(ilevel)>-1.0d0 .and. void_web_refine .and. &
+  if(m_refine_eff(ilevel)>-1.0d0 .and. .not.ic_refmap_fixed .and. void_web_refine .and. &
        & void_web_scope_ivar>ndim+2)then
 !$omp parallel do private(ind,i,scalar)
      do ind=1,twotondim
@@ -256,7 +256,7 @@ subroutine rho_fine(ilevel,icount)
   !-----------------------------------------
   ! Compute quasi Lagrangian refinement map
   !-----------------------------------------
-  if(m_refine_eff(ilevel)>-1.0d0)then
+  if(m_refine_eff(ilevel)>-1.0d0 .and. .not.ic_refmap_fixed)then
 !$omp parallel do private(ind,i)
      do ind=1,twotondim
         do i=1,active(ilevel)%ngrid
@@ -330,6 +330,24 @@ subroutine rho_fine(ilevel,icount)
              & dble(max(void_map_count_all(1),1_8))
         void_map_report_step(ilevel)=nstep_coarse
      end if
+  end if
+
+  ! In fixed-IC-map mode the parent cells with an existing child grid are
+  ! the live spatial support. Report that support before the next refine pass.
+  if(ic_refmap_fixed.and.ivar_refine==0.and.mapdiag_enabled.and.myid==1)then
+     mapdiag_count=0_8
+     mapdiag_total=0_8
+     do ind=1,twotondim
+        do i=1,active(ilevel)%ngrid
+           icell=ICELL_OF(active(ilevel)%igrid(i),ind)
+           mapdiag_total=mapdiag_total+1_8
+           if(son(icell)>0)mapdiag_count=mapdiag_count+1_8
+        end do
+     end do
+     write(*,'(A,I0,A,I0,A,I0,A,I0)') &
+          '[RAR_AMR_MAP] source=ic_refmap_preserved level=',ilevel, &
+          ' step=',nstep_coarse,' active=',mapdiag_total, &
+          ' flagged=',mapdiag_count
   end if
 
   ! Opt-in diagnostic used by the small nDGP AMR source characterization.

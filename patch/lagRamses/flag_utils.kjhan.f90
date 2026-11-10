@@ -389,7 +389,7 @@ subroutine sub_userflag_fine(ilevel,skip_loc,scale,xc,igrid,ngrid,iflag)
      end do
 
      ! Apply purely local Lagrangian refinement criteria
-     if(m_refine_eff(ilevel)>-1.0d0)then
+     if(m_refine_eff(ilevel)>-1.0d0.or.ic_refmap_fixed)then
         call poisson_refine(ind_cell,ok,ngrid,ilevel)
         ! Apply sink particle refinement from pre-computed bitmask
         if(sink_refine .and. sink .and. pic)then
@@ -964,7 +964,14 @@ subroutine poisson_refine(ind_cell,ok,ncell,ilevel)
   if(poisson)then
 
      if(.not. init) then
-        if(ivar_refine < 0 .and. m_refine_eff(ilevel) > 0.0d0)then
+        if(ic_refmap_fixed)then
+           ! The initial GRAFIC map defines a fixed Lagrangian zoom region.
+           ! Preserve its realized AMR topology after initialization; do not
+           ! rebuild the map from coarse-background gas density.
+           do i=1,ncell
+              ok(i)=ok(i).or.(son(ind_cell(i))>0)
+           end do
+        else if(ivar_refine < 0 .and. m_refine_eff(ilevel) > 0.0d0)then
            ! Zoom-in: use density criterion (quasi-Lagrangian)
            d_scale=mass_sph/vol_loc
            if(use_fdm)then
