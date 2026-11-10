@@ -106,7 +106,7 @@ run_rc=$?
 set -e
 printf '%s\n' "$run_rc" > "$root/srun_exit_code.txt"
 
-rg -n '\[RAR_AMR_MAP\]|GRID_CAPACITY_FIXED|GRID_GROW|Level[[:space:]]+8 has|Level[[:space:]]+9 has|FFT direct solve DONE|WARN:' \
+grep -En '\[RAR_AMR_MAP\]|GRID_CAPACITY_FIXED|GRID_GROW|Level[[:space:]]+8 has|Level[[:space:]]+9 has|FFT direct solve DONE|WARN:' \
     "$root/run.log" > "$root/key_diagnostics.txt" || true
 if [ "$run_rc" -ne 0 ]; then
     printf '%s\n' 'FIXED_IC_MAP_RUN_FAILED' > "$root/outcome.txt"
@@ -137,24 +137,25 @@ if compgen -G "$root/output_[0-9]*" >/dev/null || \
     exit 1
 fi
 
-awk '
+last_preserved_level8=$(awk '
 /source=ic_refmap_preserved level=8 / {
     seen=1
     for (i=1;i<=NF;i++) if ($i ~ /^flagged=/) {
         split($i,a,"="); n=a[2]+0
     }
 }
-END { if (!seen || n<1 || n>100000) exit 1 }
-' "$root/run.log"
+END { if (!seen || n<1 || n>100000) exit 1; print n }
+' "$root/run.log")
 last_level9_grids=$(awk '
 /Level[[:space:]]+9 has/ {
     for (i=1;i<=NF;i++) if ($i=="has") {n=$(i+1)+0; seen=1}
 }
 END { if (!seen || n<1 || n>100000) exit 1; print n }
 ' "$root/run.log")
+test "$last_preserved_level8" -eq "$last_level9_grids"
 
-printf 'FIXED_IC_MASK_ONE_STEP_GATE_PASSED\nlast_level9_grids=%s\n' \
-    "$last_level9_grids" > "$root/outcome.txt"
+printf 'FIXED_IC_MASK_ONE_STEP_GATE_PASSED\nlast_preserved_level8=%s\nlast_level9_grids=%s\n' \
+    "$last_preserved_level8" "$last_level9_grids" > "$root/outcome.txt"
 sha256sum "$root/effective.nml" "$root/ramses_final3d" \
     "$root/output_policy.txt" "$root/run.log" "$root/job.sbatch" \
     "$root/effective_namelist_path.txt" "$root/input_ic_path.txt" \
