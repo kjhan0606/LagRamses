@@ -1,0 +1,9 @@
+# NGC 2403 matched FR02 stellar mass-to-light comparison
+
+Syntax job 457508 completed 0:0 for the 512 cubed fixed-source Newtonian and QUMOND fields with stellar M/L 0.7. Grammar job 1284190 completed 0:0 and compared the QUMOND field with the existing matching FR02 M/L 0.5 field and SPARC data at 64 radii from 1.06 to 20.87 kpc. The existing figure and data are `reports/ngc2403_fr02_ml07_comparison_1284190/ml_comparison.pdf` and `comparison.csv`.
+
+The unweighted RMS velocity residual is 11.2313 km/s at M/L 0.5 and 8.5458 km/s at M/L 0.7. The mean signed residual changes from -9.5057 to +0.2576 km/s, but positive inner and negative outer residuals cancel. At 3.29 kpc, observed and QUMOND velocities are 101.0, 101.92, and 114.65 km/s, respectively. At 20.87 kpc, observed and QUMOND velocities are 134.0, 113.59, and 118.94 km/s. The two model values refer to M/L 0.5 and 0.7 in order. The RMS is descriptive, not a likelihood or a fitted optimum.
+
+The calculations use the same 512 cubed, 64 kpc periodic box, FR02 gas profile, gravity code and a0. The run changes the stellar source amplitude by a factor 1.4. The FR02 HI source is not established as the SPARC source. Distance, inclination, stellar mass-to-light, gas-source, disc-height, and observational covariances are not marginalized. A single resolution and periodic domain do not establish numerical convergence. The M/L 0.7 force has not yet passed the independent discrete solver oracle. These are prescribed, static source tests, not live cosmological galaxy formation or evidence for model preference.
+
+Grammar job 1284238 was submitted for a new figure including both compiled baryon-only Newtonian fields, both QUMOND fields and SPARC velocities. Newtonian baryon-only fields are force diagnostics, not Lambda CDM comparisons. The job status and output must be verified before reporting completion. The immutable baseline and QUMOND 0.7 comparison remain in their original report directories.
