@@ -141,6 +141,7 @@ def analyze(snapshot, bound_json, label):
             "level10_cells_with_child_count": int(np.count_nonzero(parent_son == 1)),
             "level11_parent_mapping": "Every level-11 grid centre maps to one level-10 son_flag=1 cell; periodic face neighbors are checked at level 10.",
             "coarser_face_definition": "A level-11 child cell touches a coarser face when its child bit is on that face and the neighboring level-10 cell is unrefined (son_flag=0) or absent from the stored level-10 mesh.",
+            "all_level11_leaf_cells": summarize_mask(leaf, leaf, boundary_same, boundary_missing),
             "all_out_of_bounds": summarize_mask(any_outside, leaf, boundary_same, boundary_missing),
             "beyond_0.001": summarize_mask(severe, leaf, boundary_same, boundary_missing),
             "ratio_0.45_to_0.55": summarize_mask(threshold_band, leaf, boundary_same, boundary_missing),
