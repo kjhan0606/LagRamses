@@ -12,6 +12,11 @@ set -Eeuo pipefail
 umask 077
 ulimit -c 0
 
+# Historical boxlen=25 control; keep the recorded script in job 1289682.
+# Refuse a new launch with the known coordinate mismatch.
+printf '%s\n' 'Retired: use lcdm_g205_multifluid_l11_mpi_unitbox_preflight.sbatch' >&2
+exit 2
+
 project=/home/kjhan/BackUP/rar
 base=/gpfs/kjhan/RAR_QUMOND
 ic="$base/initial_conditions/lcdm_g205_multifluid_l11_1286049"

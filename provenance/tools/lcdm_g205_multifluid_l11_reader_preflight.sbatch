@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=rar-g205-l11-reader
+#SBATCH --job-name=rar-g205-l11-unit1
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
 #SBATCH --time=00:45:00
-#SBATCH --output=/gpfs/kjhan/RAR_QUMOND/logs/g205_multifluid_l11_reader_%j.out
-#SBATCH --error=/gpfs/kjhan/RAR_QUMOND/logs/g205_multifluid_l11_reader_%j.err
+#SBATCH --output=/gpfs/kjhan/RAR_QUMOND/logs/g205_multifluid_l11_unitbox_single_%j.out
+#SBATCH --error=/gpfs/kjhan/RAR_QUMOND/logs/g205_multifluid_l11_unitbox_single_%j.err
 set -Eeuo pipefail
 umask 077
 ulimit -c 0
@@ -17,8 +17,9 @@ base=/gpfs/kjhan/RAR_QUMOND
 ic="$base/initial_conditions/lcdm_g205_multifluid_l11_1286049"
 template="$project/configs/lcdm_grafic_n256_reader_preflight_20261103.nml.in"
 build_record="$base/builds/rar_amr_ic_refmap_fixed_20261111"
-root="$base/runs/lcdm_g205_multifluid_l11_reader_${SLURM_JOB_ID:?}"
+root="$base/runs/lcdm_g205_multifluid_l11_unitbox_single_${SLURM_JOB_ID:?}"
 expected_ic_status=NESTED_L11_LCDM_TWOFLUID_IC_GEOMETRY_PASS_NO_EVOLUTION
+expected_template_sha=b8782fd4e0e06eae478c97d4206c22a10370c0b9747d2187eca9a15ac56658fd
 minimum_free_bytes=206158430208
 
 module purge
@@ -29,6 +30,7 @@ module load intel/compiler/2025.3.0
 module load intel/mpi/2021.17
 command -v mpiifx
 test -f "$build_record/COMPLETE"
+test "$(sha256sum "$template" | awk '{print $1}')" = "$expected_template_sha"
 (cd "$build_record" && sha256sum -c PAYLOAD.sha256 --status)
 (cd "$ic" && sha256sum -c artifacts.sha256 --status)
 test -f "$ic/GENERATION_ONLY"
@@ -56,6 +58,7 @@ sed \
     -e "/initfile(1)=/a\\\\  initfile(3)='ic10'" \
     -e "/initfile(1)=/a\\\\  initfile(4)='ic11'" \
     -e 's/levelmax=8/levelmax=11/' \
+    -e 's/boxlen=25.0/boxlen=1.0/' \
     -e 's/nsubcycle=1,2,2,2,2,2,2,2,2/nsubcycle=1,2,2,2,2,2,2,2,2,2,2/' \
     -e 's/m_refine=8\*8\./m_refine=100*-1./' \
     -e 's/ngridmax=3000000/ngridmax=4500000/' \
@@ -75,7 +78,7 @@ sed \
 }' > "$root/effective.nml"
 
 for key in 'cosmo=.true.' 'hydro=.true.' 'pic=.true.' 'poisson=.true.' \
-    'use_fftw=.true.' 'use_mond=.false.' 'levelmin=8' 'levelmax=11' \
+    'use_fftw=.true.' 'use_mond=.false.' 'levelmin=8' 'levelmax=11' 'boxlen=1.0' \
     'ivar_refine=0' 'ic_refmap_fixed=.true.' \
     'm_refine=100*-1.' \
     'ngridmax=4500000' 'ngridtot=4500000' 'ngridmax_auto=.false.' \
@@ -99,7 +102,7 @@ done
 
 printf '%s\n' "$root/effective.nml" > "$root/effective_namelist_path.txt"
 printf '%s\n' "$ic" > "$root/input_ic_path.txt"
-printf 'purpose=single-rank level-8-through-11 RAMSES IC reader and one-coarse-step preflight\nsource_revision=ca53ce39f455000868f0fbc25d810e45f6766a00\nlevels=8,9,10,11\nrefinement=ic_refmap_fixed=true; ivar_refine=0; no density-derived refinement\ninitial_grid_capacity=4500000; active-mask estimate is about 3.3 million grids and remains unmeasured by RAMSES\nparticle_capacity=28000000 initial; 32000000 maximum; estimate is 24230000 from the prior level-9 count and nested-mask sizes and remains unmeasured by RAMSES\nmemory_request_bytes=68719476736\nprior_level9_maxrss=9264688K\nnstepmax=0; initialization may perform one coarse step\nnoutput=1; aout=1.1; tout=1.0d100; foutput=1000000000; fbackup=1000000000\nexpected_RAMSES_dumps=0\naccidental_single_dump_reserve_bytes=103079215104\nminimum_free_bytes_before=%s\nfree_bytes_before=%s\n' "$minimum_free_bytes" "$free_bytes" > "$root/output_policy.txt"
+printf 'purpose=single-rank unit-box level-8-through-11 RAMSES IC reader and one-coarse-step preflight\nsource_revision=ca53ce39f455000868f0fbc25d810e45f6766a00\nlevels=8,9,10,11\ncode_boxlen=1.0; physical_box_length_from_grafic_header\nrefinement=ic_refmap_fixed=true; ivar_refine=0; no density-derived refinement\ninitial_grid_capacity=4500000; four_rank_final_global_grids=3249981\nparticle_capacity=32000000 per_rank; four_rank_global_particles=23509074\nmemory_request_bytes=68719476736\nprior_level11_one_rank_maxrss=13336244K\nnstepmax=0; initialization may perform one coarse step\nnoutput=1; aout=1.1; tout=1.0d100; foutput=1000000000; fbackup=1000000000\nexpected_RAMSES_dumps=0\naccidental_single_dump_reserve_bytes=103079215104\nminimum_free_bytes_before=%s\nfree_bytes_before=%s\n' "$minimum_free_bytes" "$free_bytes" > "$root/output_policy.txt"
 sha256sum "$root/effective.nml" "$root/ramses_final3d" \
     "$root/template.nml.in" "$root/job.sbatch" \
     "$root/effective_namelist_path.txt" "$root/input_ic_path.txt" \
@@ -145,13 +148,38 @@ if compgen -G "$root/output_[0-9]*" >/dev/null || \
     exit 1
 fi
 npart_count=$(awk '/npart=/ {last=$2} END {if (last=="") exit 1; print last}' "$root/run.log")
-test "$npart_count" -lt 32000000
-printf 'L11_MULTIFLUID_READER_PREFLIGHT_PASSED\nnpart=%s\n' "$npart_count" > "$root/outcome.txt"
+test "$npart_count" -eq 23509074
+python3 - "$root/run.log" "$root/particle_mesh_summary.txt" <<'PYVERIFY'
+import re
+import sys
+from pathlib import Path
+
+log = Path(sys.argv[1]).read_text(errors="replace")
+meshes = {}
+for level, count in re.findall(r"Level\s+(8|9|10|11) has\s+(\d+) grids", log):
+    meshes[int(level)] = int(count)
+if set(meshes) != {8, 9, 10, 11} or any(v <= 0 for v in meshes.values()):
+    raise SystemExit(f"missing or empty mesh level: {meshes}")
+nan_lines = [line for line in log.splitlines() if "NaN_CHK" in line]
+if not nan_lines:
+    raise SystemExit("missing NaN_CHK diagnostics")
+for line in nan_lines:
+    values = re.findall(r"=\s*([+-]?\d+)", line)
+    if len(values) != 3 or any(int(v) != 0 for v in values):
+        raise SystemExit(f"nonzero or malformed NaN diagnostic: {line}")
+reference = {8: 2097152, 9: 41438, 10: 168263, 11: 943128}
+lines = [f"nan_check_lines={len(nan_lines)}"]
+for level in sorted(meshes):
+    lines.append(f"final_level_{level}_grids={meshes[level]}; four_rank_reference={reference[level]}")
+lines.append(f"final_grid_counts_equal_four_rank={meshes == reference}")
+Path(sys.argv[2]).write_text("\n".join(lines) + "\n")
+PYVERIFY
+printf 'L11_UNITBOX_SINGLE_READER_CHECKS_PASSED_REVIEW_REQUIRED\nnpart=%s\n' "$npart_count" > "$root/outcome.txt"
 sha256sum "$root/effective.nml" "$root/ramses_final3d" \
     "$root/output_policy.txt" "$root/run.log" "$root/job.sbatch" \
     "$root/effective_namelist_path.txt" "$root/input_ic_path.txt" \
-    "$root/key_diagnostics.txt" "$root/outcome.txt" \
+    "$root/key_diagnostics.txt" "$root/particle_mesh_summary.txt" "$root/outcome.txt" \
     "$root/srun_exit_code.txt" > "$root/artifacts.sha256"
 sha256sum -c "$root/artifacts.sha256" --status
-printf '%s\n' 'L11_READER_PREFLIGHT_COMPLETE' > "$root/PREFLIGHT_COMPLETE"
+printf '%s\n' 'L11_UNITBOX_SINGLE_READER_AWAITING_REVIEW' > "$root/PREFLIGHT_AWAITING_REVIEW"
 printf 'Level-11 reader preflight captured. Run directory: %s\n' "$root"
