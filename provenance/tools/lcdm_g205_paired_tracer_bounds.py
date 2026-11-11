@@ -11,7 +11,7 @@ results = {}
 for name, expected_a in (("EARLY", 0.0101), ("LATE", 0.02)):
     result = {"levels": {}}
     with h5py.File(os.environ[f"RAR_{name}_SNAPSHOT"], "r") as h:
-        a = float(h["header"].attrs["aexp"])
+        a = np.asarray(h["header"].attrs["aexp"]).item()
         if abs(a - expected_a) > 1e-6:
             raise ValueError(f"{name}: expected a={expected_a}, found {a}")
         result["scale_factor"] = a
