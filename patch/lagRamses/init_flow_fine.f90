@@ -68,6 +68,11 @@ subroutine init_flow_fine(ilevel)
 
   integer,parameter::tag=1107
   integer::dummy_io,info2
+  integer::density_diag_status
+  integer(kind=8)::density_floor_local(2),density_floor_global(2)
+  real(dp)::density_min_local,density_min_global,density_floor_value
+  logical,save::density_diag_checked=.false.,density_diag_enabled=.false.
+  character(len=8)::density_diag_env
   
   integer::dum,ielt!,iHydrogen,iHelium
   character(LEN=1)::a1
@@ -76,6 +81,13 @@ subroutine init_flow_fine(ilevel)
   character(LEN=11)::format_string
 
   if(numbtot(1,ilevel)==0)return
+  if(.not.density_diag_checked)then
+     density_diag_env=''
+     call get_environment_variable('RAR_IC_DENSITY_DIAGNOSTICS',density_diag_env, &
+          & status=density_diag_status)
+     density_diag_enabled=(density_diag_status==0.and.trim(density_diag_env)=='1')
+     density_diag_checked=.true.
+  endif
   if(verbose)write(*,111)ilevel
 
   ! Conversion factor from user units to cgs units
@@ -481,6 +493,9 @@ subroutine init_flow_fine(ilevel)
      ! For cosmology runs: compute pressure, prevent negative density
      !----------------------------------------------------------------
      if(cosmo)then
+        density_floor_local=0_8
+        density_min_local=huge(1.0d0)
+        density_floor_value=0.1*omega_b/omega_m
         ! Loop over grids by vector sweeps
         do igrid=1,ncache,nvector
            ngrid=MIN(nvector,ncache-igrid+1)
@@ -495,6 +510,14 @@ subroutine init_flow_fine(ilevel)
               end do
               ! Prevent negative density
               do i=1,ngrid
+                 if(density_diag_enabled)then
+                    density_min_local=min(density_min_local,uold(ind_cell(i),1))
+                    if(uold(ind_cell(i),1)<density_floor_value)then
+                       density_floor_local(1)=density_floor_local(1)+1_8
+                       if(son(ind_cell(i))==0) &
+                            & density_floor_local(2)=density_floor_local(2)+1_8
+                    endif
+                 endif
                  rr=max(uold(ind_cell(i),1),0.1*omega_b/omega_m)
                  uold(ind_cell(i),1)=rr
               end do
@@ -506,6 +529,22 @@ subroutine init_flow_fine(ilevel)
            ! End loop over cells
         end do
         ! End loop over grids
+        if(density_diag_enabled)then
+#ifndef WITHOUTMPI
+           call MPI_ALLREDUCE(density_floor_local,density_floor_global,2, &
+                & MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+           call MPI_ALLREDUCE(density_min_local,density_min_global,1, &
+                & MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,info)
+#else
+           density_floor_global=density_floor_local
+           density_min_global=density_min_local
+#endif
+           if(myid==1)write(*,'(A,I0,A,ES16.8,A,ES16.8,A,ES16.8,A,I0,A,I0)') &
+                & '[RAR_IC_DENSITY] level=',ilevel,' dfact=',dfact(ilevel), &
+                & ' minimum=',density_min_global,' floor=',density_floor_value, &
+                & ' active_floored=',density_floor_global(1), &
+                & ' leaf_floored=',density_floor_global(2)
+        endif
      end if
 
      !---------------------------------------------------
