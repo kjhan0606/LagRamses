@@ -26,19 +26,30 @@ subroutine rho_fine(ilevel,icount)
   ! - cpu_map2 containing the refinement map due to particle
   !   number density criterion (quasi Lagrangian mesh).
   !------------------------------------------------------------------
-  integer::icpu,ind,i,info,nx_loc,ibound,idim,icell
+  integer::icpu,ind,i,info,nx_loc,ibound,idim,icell,mapdiag_status
   integer,save,dimension(1:MAXLEVEL)::void_map_report_step=-huge(1)
   integer(kind=8),dimension(1:3)::void_map_count,void_map_count_all
+  integer(kind=8)::mapdiag_count,mapdiag_total
   real(dp)::dx,d_scale,scale,dx_loc,scalar
   real(dp)::d0,m_refine_loc,dx_min,vol_min,mstar,msnk,nISM,nCOM
+  real(dp)::mapdiag_phi_min,mapdiag_phi_max
   real(kind=8)::total,total_all,total2,total2_all,tms
   real(kind=8),dimension(2)::totals_in,totals_out
   logical::multigrid=.false.
+  logical,save::mapdiag_checked=.false.,mapdiag_enabled=.false.
+  character(len=8)::mapdiag_env
   real(kind=8),dimension(1:ndim+1)::multipole_in,multipole_out
 
   if(.not. poisson)return
   if(bimond_twin_matter)bimond_rho_twin=0d0
   if(numbtot(1,ilevel)==0)return
+  if(.not.mapdiag_checked)then
+     mapdiag_env=''
+     call get_environment_variable('RAR_AMR_MAP_DIAGNOSTICS',mapdiag_env, &
+          & status=mapdiag_status)
+     mapdiag_enabled=(mapdiag_status==0.and.trim(mapdiag_env)=='1')
+     mapdiag_checked=.true.
+  end if
   if(verbose)write(*,111)ilevel
 
   ! Mesh spacing in that level
@@ -104,7 +115,7 @@ subroutine rho_fine(ilevel,icount)
   !-------------------------------------------------------------------------
   ! Initialize "number density" field to baryon number density in array phi.
   !-------------------------------------------------------------------------
-  if(m_refine_eff(ilevel)>-1.0d0)then
+  if(m_refine_eff(ilevel)>-1.0d0 .and. .not.ic_refmap_fixed)then
      d_scale=max(mass_sph/dx_loc**ndim,smallr)
 !$omp parallel do private(ind,i, scalar)
      do ind=1,twotondim
@@ -186,7 +197,7 @@ subroutine rho_fine(ilevel,icount)
   if(cic_levelmax>0.and.ilevel>=cic_levelmax)then
      call make_virtual_fine_dp   (rho_top(1),ilevel)
   endif
-  if(m_refine_eff(ilevel)>-1.0d0)then
+  if(m_refine_eff(ilevel)>-1.0d0 .and. .not.ic_refmap_fixed)then
      call make_virtual_reverse_dp(phi(1),ilevel)
      call make_virtual_fine_dp   (phi(1),ilevel)
   endif
@@ -197,7 +208,7 @@ subroutine rho_fine(ilevel,icount)
   ! units of the finest-level mass_sph and opening the full box. The V-web
   ! base and wall floors are added independently in flag_utils. This branch
   ! is a strict no-op for ordinary simulations.
-  if(m_refine_eff(ilevel)>-1.0d0 .and. void_web_refine .and. &
+  if(m_refine_eff(ilevel)>-1.0d0 .and. .not.ic_refmap_fixed .and. void_web_refine .and. &
        & void_web_scope_ivar>ndim+2)then
 !$omp parallel do private(ind,i,scalar)
      do ind=1,twotondim
@@ -247,7 +258,7 @@ subroutine rho_fine(ilevel,icount)
   !-----------------------------------------
   ! Compute quasi Lagrangian refinement map
   !-----------------------------------------
-  if(m_refine_eff(ilevel)>-1.0d0)then
+  if(m_refine_eff(ilevel)>-1.0d0 .and. .not.ic_refmap_fixed)then
 !$omp parallel do private(ind,i)
      do ind=1,twotondim
         do i=1,active(ilevel)%ngrid
@@ -260,6 +271,35 @@ subroutine rho_fine(ilevel,icount)
      end do
      ! Update boundaries
      call make_virtual_fine_int(cpu_map2(1),ilevel)
+
+     ! Opt-in diagnostic of the density-derived refinement mask. This is
+     ! emitted before flag/refine consumes cpu_map2, so a zoom-wide mask leak
+     ! can be distinguished from capacity growth alone.
+     if(mapdiag_enabled.and.myid==1)then
+        mapdiag_count=0_8
+        mapdiag_total=0_8
+        mapdiag_phi_min=huge(1.0d0)
+        mapdiag_phi_max=-huge(1.0d0)
+        do ind=1,twotondim
+           do i=1,active(ilevel)%ngrid
+              icell=ICELL_OF(active(ilevel)%igrid(i),ind)
+              mapdiag_total=mapdiag_total+1_8
+              if(cpu_map2(icell)==1)mapdiag_count=mapdiag_count+1_8
+              mapdiag_phi_min=min(mapdiag_phi_min,phi(icell))
+              mapdiag_phi_max=max(mapdiag_phi_max,phi(icell))
+           end do
+        end do
+        if(mapdiag_total==0_8)then
+           mapdiag_phi_min=0.0d0
+           mapdiag_phi_max=0.0d0
+        end if
+        write(*,'(A,I0,A,I0,A,I0,A,I0,A,ES12.4,A,ES12.4,A,ES12.4,A,L1)') &
+             '[RAR_AMR_MAP] source=density level=',ilevel, &
+             ' step=',nstep_coarse,' active=',mapdiag_total, &
+             ' flagged=',mapdiag_count,' m_refine=',m_refine_eff(ilevel), &
+             ' phi_min=',mapdiag_phi_min,' phi_max=',mapdiag_phi_max, &
+             ' init=',init
+     end if
 
      ! Report the localized mass map once per level and coarse step. Besides
      ! documenting production runs, this makes a full-box refinement leak
@@ -292,6 +332,24 @@ subroutine rho_fine(ilevel,icount)
              & dble(max(void_map_count_all(1),1_8))
         void_map_report_step(ilevel)=nstep_coarse
      end if
+  end if
+
+  ! In fixed-IC-map mode the parent cells with an existing child grid are
+  ! the live spatial support. Report that support before the next refine pass.
+  if(ic_refmap_fixed.and.ivar_refine==0.and.mapdiag_enabled.and.myid==1)then
+     mapdiag_count=0_8
+     mapdiag_total=0_8
+     do ind=1,twotondim
+        do i=1,active(ilevel)%ngrid
+           icell=ICELL_OF(active(ilevel)%igrid(i),ind)
+           mapdiag_total=mapdiag_total+1_8
+           if(son(icell)>0)mapdiag_count=mapdiag_count+1_8
+        end do
+     end do
+     write(*,'(A,I0,A,I0,A,I0,A,I0)') &
+          '[RAR_AMR_MAP] source=ic_refmap_preserved level=',ilevel, &
+          ' step=',nstep_coarse,' active=',mapdiag_total, &
+          ' flagged=',mapdiag_count
   end if
 
   ! Opt-in diagnostic used by the small nDGP AMR source characterization.

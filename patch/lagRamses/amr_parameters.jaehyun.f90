@@ -672,6 +672,7 @@ module amr_parameters
   real(dp)::var_cut_refine=-1.0 ! Threshold for variable-based refinement
   real(dp)::mass_cut_refine=-1.0 ! Mass threshold for particle-based refinement
   integer::ivar_refine=-1 ! Variable index for refinement
+  logical::ic_refmap_fixed=.false. ! Keep the GRAFIC IC refinement region fixed
   logical::sink_refine=.false. ! Fully refine on sink particles
   logical::void_refine=.false. ! Enforce a mesh-level floor inside r_refine
   integer::void_refine_min_level=-1 ! Target minimum level inside the void region
