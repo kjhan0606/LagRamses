@@ -1,0 +1,38 @@
+[
+  {
+    "box_kpc": 64,
+    "nmesh": 512,
+    "cell_kpc": 0.125,
+    "stellar_ml": 0.5,
+    "stellar_mass_msun": 5031602817.433399,
+    "gas_mass_msun": 4243050521.6856604,
+    "newton_max_abs_reference_error_km_s": 1.7983836642088136e-11,
+    "qumond_max_abs_reference_error_km_s": 6.403411134670023e-11
+  },
+  {
+    "box_kpc": 64,
+    "nmesh": 512,
+    "cell_kpc": 0.125,
+    "stellar_ml": 0.7,
+    "stellar_mass_msun": 7044243944.406757,
+    "gas_mass_msun": 4243050521.6856604,
+    "newton_max_abs_reference_error_km_s": 2.0236257114447653e-11,
+    "qumond_max_abs_reference_error_km_s": 6.771472271793755e-11
+  },
+  {
+    "box_kpc": 256,
+    "nmesh": 2048,
+    "cell_kpc": 0.125,
+    "stellar_ml": 0.5,
+    "stellar_mass_msun": 5031602817.433399,
+    "gas_mass_msun": 4243050521.6856604
+  },
+  {
+    "box_kpc": 256,
+    "nmesh": 2048,
+    "cell_kpc": 0.125,
+    "stellar_ml": 0.7,
+    "stellar_mass_msun": 7044243944.406757,
+    "gas_mass_msun": 4243050521.6856604
+  }
+]

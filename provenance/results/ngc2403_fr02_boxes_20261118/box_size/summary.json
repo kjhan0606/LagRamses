@@ -1,0 +1,21 @@
+{
+  "boxes_kpc": [
+    64,
+    96,
+    128,
+    192,
+    256
+  ],
+  "cell_kpc": 0.125,
+  "source_runs": [
+    "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_fr02_periodic_boxes_1324354",
+    "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_fr02_periodic_boxes_1324357"
+  ],
+  "sparc_distance_mpc": 3.16,
+  "error_distance_mpc": 0.16,
+  "inclination_deg": 63.0,
+  "error_inclination_deg": 3.0,
+  "geometry": "Common changes to distance and inclination across all rings; distance rescales all physical lengths at fixed angular geometry and surface density; inclination rescales observed speed.",
+  "nfw": "M/L=0.5 held-out historical halo speeds squared added to baryonic speeds squared in each box. Halo parameters are fixed to the archived fits by radial fold.",
+  "statistic": "Unweighted ring mean and RMS. Geometry extrema are over the four coherent catalogue corners."
+}

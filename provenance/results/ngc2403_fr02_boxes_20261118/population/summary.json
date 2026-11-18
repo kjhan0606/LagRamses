@@ -1,0 +1,12 @@
+{
+  "box_kpc": 256,
+  "cell_kpc": 0.125,
+  "upstream": "/gpfs/kjhan/RAR_QUMOND/analysis/ngc2403_fr02_periodic_boxes_1324357",
+  "distance_mpc": 3.16,
+  "error_distance_mpc": 0.16,
+  "inclination_deg": 63.0,
+  "error_inclination_deg": 3.0,
+  "max_reference_error_km_s": 6.403411134670023e-11,
+  "source": "de Blok et al. 2008, AJ 136, 2648, Tables 3 and 4, NGC 2403 (1 comp), outer disk column, DOI 10.1088/0004-6256/136/6/2648",
+  "normalization": "Disc-average values applied as constants to the same 3.6 micron profile; FR02 gas fixed. Geometry changes are coherent across rings."
+}
