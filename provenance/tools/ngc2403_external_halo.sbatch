@@ -32,5 +32,5 @@ sha256sum job.sbatch *.py code_revision.txt inputs/* > inputs.sha256
 export MPLCONFIGDIR="$out/mplconfig" OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 /home/kjhan/miniconda3/bin/python ngc2403_external_halo.py inputs .
 sha256sum -c inputs.sha256 --status
-sha256sum comparison.pdf comparison.png rings.csv zones.csv halo.csv scenarios.csv > results.sha256
+sha256sum comparison.pdf comparison.png rings.csv zones.csv halo.csv scenarios.csv endpoint_mass.csv > results.sha256
 touch COMPLETE

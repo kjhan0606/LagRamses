@@ -24,16 +24,20 @@ def forward_stellar_mass(m200):
     return 2 * 0.0351 * m200 / (ratio**-1.376 + ratio**0.608)
 
 
-def halo_parameters(mstar_chabrier, stellar_offset, concentration_offset):
-    # Offset is in stellar mass at fixed halo mass (forward scatter).
-    target = mstar_chabrier * 10**-stellar_offset
-    m200 = 10**brentq(lambda logm: np.log10(forward_stellar_mass(10**logm)/target), 9, 14)
+def halo_structure(m200, concentration_offset):
     r200 = (G*m200 / (100*H**2))**(1/3)
     # Klypin et al. Table A5, all haloes selected by mass, eq. 24, z = 0.
     ratio = m200 * 0.704 / 1e12
     c200 = 6.60 * ratio**-0.110 * (1 + (ratio / 2e6)**0.4) * 10**concentration_offset
+    return r200, c200
+
+
+def halo_parameters(mstar_chabrier, stellar_offset, concentration_offset):
+    # Offset is in stellar mass at fixed halo mass (forward scatter).
+    target = mstar_chabrier * 10**-stellar_offset
+    m200 = 10**brentq(lambda logm: np.log10(forward_stellar_mass(10**logm)/target), 9, 14)
     np.testing.assert_allclose(forward_stellar_mass(m200), target, rtol=1e-10)
-    return m200, r200, c200
+    return m200, *halo_structure(m200, concentration_offset)
 
 
 def dm_v2(radius, m200, r200, c200):
@@ -64,7 +68,7 @@ def compare(source, out):
     distance, inc = meta['distance_mpc'], meta['inclination_deg']
     dp, ip = meta['error_distance_mpc'], meta['error_inclination_deg']
     draw = {}
-    rings, scenarios, halo_grid = [], [], []
+    rings, scenarios, halo_grid, endpoint = [], [], [], []
     grid = {}
     for d, ds, dc in product((distance-dp, distance, distance+dp), (-.15,0,.15), (-.11,0,.11)):
         dr = d/distance
@@ -86,6 +90,25 @@ def compare(source, out):
         halo_cases = [np.sqrt(vbar**2 + h2) for (d,ds,dc),h2 in grid.items() if d==distance]
         vlo, vhi = np.min(halo_cases, axis=0), np.max(halo_cases, axis=0)
         draw[ml] = (vq,vn,vlo,vhi,gb)
+        # Invert just the final H I measurement as a separate mass diagnostic.
+        # No required mass enters any rotation prediction.
+        radius = r[-1]
+        required_v2 = obs[-1]**2 - vbar[-1]**2
+        required_mass = required_v2*radius/G
+        expected_mass = grid[distance,0,0][-1]*radius/G
+        def terminal_speed2(logm):
+            m = 10**logm
+            return dm_v2(radius, m, *halo_structure(m, 0))
+        matched = brentq(lambda logm: terminal_speed2(logm) - required_v2, 10, 14)
+        np.testing.assert_allclose(terminal_speed2(matched), required_v2, rtol=1e-10)
+        obs_low, obs_high = obs[-1] - err[-1], obs[-1] + err[-1]
+        endpoint.append(dict(stellar_ml=ml, radius_kpc=radius, vobs=obs[-1], sigma_vobs=err[-1],
+                             vbar=vbar[-1], vnfw=vn[-1], vqumond=vq[-1],
+                             expected_dm_inside_msun=expected_mass, required_dm_inside_msun=required_mass,
+                             required_low_speed_error_msun=(obs_low**2-vbar[-1]**2)*radius/G,
+                             required_high_speed_error_msun=(obs_high**2-vbar[-1]**2)*radius/G,
+                             required_over_expected=required_mass/expected_mass,
+                             one_ring_dmo_m200c_at_median_c_msun=10**matched))
         for j,radius in enumerate(r):
             rings.append(dict(stellar_ml=ml,radius_kpc=radius,vobs=obs[j],sigma_vobs=err[j],
                               vbar=vbar[j],vqumond=vq[j],vnfw=vn[j],vnfw_low=vlo[j],vnfw_high=vhi[j],
@@ -106,6 +129,7 @@ def compare(source, out):
                                               mean_dv=delta[mask].mean(),rms_dv=np.sqrt((delta[mask]**2).mean()),
                                               mean_log_g_ratio=(2*np.log10(vc[mask]/vo[mask])).mean()))
     write_table(out/'rings.csv', rings)
+    write_table(out/'endpoint_mass.csv', endpoint)
     write_table(out/'halo.csv', halo_grid)
     write_table(out/'scenarios.csv', scenarios)
     stats = []
