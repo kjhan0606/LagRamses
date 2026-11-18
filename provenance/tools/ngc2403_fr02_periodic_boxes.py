@@ -122,6 +122,21 @@ def ring_speeds(phi, radii, unit_length, unit_time):
     return np.sqrt(accel_cgs * radii * KPC_CM) / 1.e5
 
 
+def solve_disc(stars, gas, contract, ml, n, radii, unit_time, workers):
+    unit_length = contract['unit_length_cm']
+    a0 = 1.2e-8 / (unit_length / unit_time**2)
+    make_rhs, masses = disc_source(stars, gas, contract, ml, n)
+    phi = poisson(make_rhs(), workers)
+    vb = ring_speeds(phi, radii, unit_length, unit_time)
+    rhs = make_rhs()
+    phantom_rhs(phi, a0, rhs)
+    del phi
+    total_phi = poisson(rhs, workers)
+    del rhs
+    vq = ring_speeds(total_phi, radii, unit_length, unit_time)
+    return masses, vb, vq
+
+
 def run(inputs, out, workers, boxes):
     contract = json.loads((inputs / 'source_contract.json').read_text())
     stars = np.loadtxt(inputs / 'star_profile_code.dat', skiprows=1)
@@ -141,23 +156,13 @@ def run(inputs, out, workers, boxes):
     unit_time = units['unit_time_s']
     if not np.isclose(unit_length / KPC_CM, 64) or units['nmesh'] != 512:
         raise ValueError('reference length or mesh changed')
-    a0 = 1.2e-8 / (unit_length / unit_time**2)
     if boxes[0] != 64 or sorted(set(boxes)) != boxes or any(b < 64 for b in boxes):
         raise ValueError('first box must be 64 kpc followed by increasing sizes')
     records = []
     for box in boxes:
         n = box * 4   # half box / 0.125 kpc
         for ml, suffix in [(0.5, '05'), (0.7, '07')]:
-            make_rhs, masses = disc_source(stars, gas, contract, ml, n)
-            phi = poisson(make_rhs(), workers)
-            vb = ring_speeds(phi, radii, unit_length, unit_time)
-            rhs = make_rhs()
-            phantom_rhs(phi, a0, rhs)
-            del phi
-            total_phi = poisson(rhs, workers)
-            del rhs
-            vq = ring_speeds(total_phi, radii, unit_length, unit_time)
-            del total_phi
+            masses, vb, vq = solve_disc(stars, gas, contract, ml, n, radii, unit_time, workers)
             record = dict(box_kpc=box, nmesh=2*n, cell_kpc=0.125, stellar_ml=ml,
                           stellar_mass_msun=masses[0], gas_mass_msun=masses[1])
             if box == 64:
