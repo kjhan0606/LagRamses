@@ -11,6 +11,8 @@ set -euo pipefail
 umask 077
 repo=/home/kjhan/BackUP/rar/build/rar_qumond_amr_history_20261107
 rev=$1
+shift
+if [ "$#" -eq 0 ]; then set -- 64 96 128 192; fi
 test "$(git -C "$repo" rev-parse "$rev^{commit}")" = "$rev"
 archive=provenance/results/rar_ngc2403_fr02_recovery_20261108
 baseline=provenance/results/ngc2403_ml_newton_1284238
@@ -31,7 +33,7 @@ printf '%s\n' "$rev" > code_revision.txt
 sha256sum compute.py job.sbatch code_revision.txt inputs/* > inputs.sha256
 export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1
 /home/kjhan/miniconda3/bin/python -c 'import scipy,numpy; print(scipy.__version__, numpy.__version__)' > versions.txt
-/home/kjhan/miniconda3/bin/python compute.py inputs . --workers "$SLURM_CPUS_PER_TASK" --boxes 64 96 128 192 > analysis.log
+/home/kjhan/miniconda3/bin/python compute.py inputs . --workers "$SLURM_CPUS_PER_TASK" --boxes "$@" > analysis.log
 sha256sum -c inputs.sha256 --status
 sha256sum grid.json rings_*.csv analysis.log versions.txt > results.sha256
 touch COMPLETE
