@@ -3,6 +3,7 @@
 
 import csv
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from scipy.interpolate import CubicSpline
 from scipy.io import FortranFile
 
 
-field_dir, transfer_path, output_dir = map(Path, sys.argv[1:4])
+field_dir, transfer_path, music_power_path, music_log_path, output_dir = map(Path, sys.argv[1:6])
 output_dir.mkdir(parents=True, exist_ok=True)
 n = 256
 box = 25.0  # Mpc/h
@@ -110,6 +111,27 @@ ratios = {
     "gas_over_cdm_density": transfer(2) / transfer(1),
     "gas_over_cdm_velocity": transfer(11) / transfer(10),
 }
+music_power = np.loadtxt(music_power_path)
+if music_power.ndim != 2 or music_power.shape[1] != 7 or np.any(music_power <= 0):
+    raise ValueError("Expected seven positive columns in MUSIC input_powerspec.txt")
+if np.any(np.diff(music_power[:, 0]) <= 0):
+    raise ValueError("Nonmonotone MUSIC input power table")
+if unique_k[0] < music_power[0, 0] or unique_k[-1] > music_power[-1, 0]:
+    raise ValueError("Selected modes lie outside the MUSIC input power table")
+vfact_matches = re.findall(r"cosmology/vfact\s*=\s*([0-9.eE+-]+)", music_log_path.read_text())
+if len(vfact_matches) != 1:
+    raise ValueError("Expected one MUSIC velocity normalization")
+vfact = float(vfact_matches[0])
+if not np.isfinite(vfact) or vfact <= 0:
+    raise ValueError("Invalid MUSIC velocity normalization")
+music_theory = {}
+for name, column in (("cdm_density", 1), ("cdm_velocity", 2),
+                     ("gas_density", 3), ("gas_velocity", 4)):
+    interpolator = CubicSpline(np.log(music_power[:, 0]), np.log(music_power[:, column]),
+                               bc_type="natural", extrapolate=False)
+    music_theory[name] = np.exp(interpolator(np.log(unique_k)))[inverse] * (2.0 * np.pi)**3
+    if name.endswith("velocity"):
+        music_theory[name] *= (vfact / k)**2
 gas_density = read_modes("ic_deltab", select)
 cdm_density = np.zeros(gas_density.size, dtype=np.complex128)
 gas_velocity_power = np.zeros(gas_density.size)
@@ -142,8 +164,10 @@ for index, (low, high) in enumerate(zip(edges[:-1], edges[1:])):
     w = weights[mask]
     for name, power in measured.items():
         expected = theory[name][mask]
+        input_expected = music_theory[name][mask]
         observed_sum = np.sum(w * power[mask])
         expected_sum = np.sum(w * expected)
+        input_sum = np.sum(w * input_expected)
         gaussian_sigma = np.sqrt(2.0 * np.sum(w * expected**2)) / expected_sum
         rows.append({
             "comparison": name,
@@ -151,6 +175,8 @@ for index, (low, high) in enumerate(zip(edges[:-1], edges[1:])):
             "k_max_h_mpc": high * fundamental,
             "weighted_modes": int(w.sum()),
             "measured_over_camb_power": observed_sum / expected_sum,
+            "music_input_over_camb_power": input_sum / expected_sum,
+            "measured_over_music_input_power": observed_sum / input_sum,
             "gaussian_sample_sigma_on_ratio": gaussian_sigma,
             "measured_cross_amplitude": "",
             "input_transfer_cross_amplitude": "",
@@ -163,6 +189,8 @@ for index, (low, high) in enumerate(zip(edges[:-1], edges[1:])):
             "k_max_h_mpc": high * fundamental,
             "weighted_modes": int(w.sum()),
             "measured_over_camb_power": "",
+            "music_input_over_camb_power": "",
+            "measured_over_music_input_power": "",
             "gaussian_sample_sigma_on_ratio": "",
             "measured_cross_amplitude": np.sum(w * cross[mask]) / denominator,
             "input_transfer_cross_amplitude": np.sum(
@@ -176,6 +204,8 @@ with (output_dir / "shells.csv").open("w", newline="") as stream:
 report = {
     "field_directory": str(field_dir),
     "transfer_file": str(transfer_path),
+    "music_input_power_file": str(music_power_path),
+    "music_velocity_factor": vfact,
     "camb_version": camb.__version__,
     "redshift": redshift,
     "box_mpc_h": box,
