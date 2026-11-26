@@ -56,6 +56,7 @@ axes[0, 0].set_ylabel(r"$P_{\rm IC}/P_{\rm CAMB}$")
 axes[1, 0].set_ylabel(r"$P_{\rm IC}/P_{\rm CAMB}$")
 for ax in axes[1]:
     ax.set_xlabel(r"$k\;(h\,{\rm Mpc}^{-1})$")
+axes[1, 0].xaxis.get_major_ticks()[-1].label1.set_visible(False)
 fig.subplots_adjust(left=0.12, right=0.985, bottom=0.11, top=0.98, wspace=0, hspace=0)
 if output_format in ("all", "pdf"):
     fig.savefig(out / "base_spectra.pdf")
