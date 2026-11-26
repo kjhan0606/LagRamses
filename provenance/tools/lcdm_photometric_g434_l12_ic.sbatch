@@ -45,7 +45,7 @@ awk -v p="$parent" '$2 == p "/lcdm_n256.conf" ||
     "$parent/artifacts.sha256" > "$root/parent_inputs.sha256"
 test "$(wc -l < "$root/parent_inputs.sha256")" -eq 12
 sha256sum -c "$root/parent_inputs.sha256" --status
-for tool in lcdm_photometric_l12_geometry lcdm_photometric_base_coherence; do
+for tool in lcdm_photometric_l12_geometry lcdm_photometric_base_coherence lcdm_base_spectra_camb; do
     git -C "$repo" show "$revision:provenance/tools/$tool.py" > "$root/$tool.py"
 done
 printf '%s\n' "$revision" > "$root/source_revision.txt"
@@ -62,7 +62,8 @@ printf '%s\n' "$root/g434/music.conf" > "$root/effective_config_path.txt"
 printf 'purpose=group434 two-fluid Lambda-CDM MUSIC IC generation and validation\nparent_box=25 Mpc/h; zstart=49; levels=8-12\nRAMSES_evolution=none; RAMSES_dumps=0\nprior_g205_L11_IC_and_work_bytes=4924539990\nL12_eightfold_scaling_planning_bytes=39396319920\nIC_and_work_budget_bytes=103079215104\nminimum_free_before_bytes=137438953472\nfree_before_bytes=%s\n' "$free_bytes" > "$root/storage_policy.txt"
 (cd "$root" && sha256sum MUSIC g434/points.txt g434/music.conf g434/original_music.conf \
     200/transfer_z49.dat 200/settings.json job.sbatch source_revision.txt \
-    parent_inputs.sha256 lcdm_photometric_l12_geometry.py lcdm_photometric_base_coherence.py > inputs.sha256)
+    parent_inputs.sha256 lcdm_photometric_l12_geometry.py lcdm_photometric_base_coherence.py \
+    lcdm_base_spectra_camb.py > inputs.sha256)
 
 export OMP_NUM_THREADS=4 OMP_DYNAMIC=FALSE OMP_PROC_BIND=close OMP_PLACES=cores
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
@@ -85,9 +86,13 @@ env -u LD_LIBRARY_PATH /home/kjhan/miniconda3/bin/python3 \
     "$root/lcdm_photometric_l12_geometry.py" "$root" 434 2196 > "$root/geometry_audit.log"
 env -u LD_LIBRARY_PATH /home/kjhan/miniconda3/bin/python3 \
     "$root/lcdm_photometric_base_coherence.py" "$root" "$parent" "$root/analysis" 434 > "$root/analysis.log"
+env -u LD_LIBRARY_PATH /home/kjhan/miniconda3/bin/python3 \
+    "$root/lcdm_base_spectra_camb.py" "$root/ics/level_008" "$root/200/transfer_z49.dat" \
+    "$root/g434/input_powerspec.txt" "$root/g434/music.conf_log.txt" \
+    "$root/analysis/camb" > "$root/camb_spectra.log"
 (cd "$root" && sha256sum -c inputs.sha256 --status)
 sha256sum -c "$root/parent_inputs.sha256" --status
 (cd "$root" && find . -type f ! -name artifacts.sha256 ! -name COMPLETE \
     -print0 | sort -z | xargs -0 sha256sum > artifacts.sha256)
 (cd "$root" && sha256sum -c artifacts.sha256 --status)
-printf 'generation=complete\ngeometry_and_parent_coherence=measured\nRAMSES_evolution=none\n' > "$root/COMPLETE"
+printf 'generation=complete\ngeometry_parent_coherence_and_camb_spectra=measured\nRAMSES_evolution=none\n' > "$root/COMPLETE"
