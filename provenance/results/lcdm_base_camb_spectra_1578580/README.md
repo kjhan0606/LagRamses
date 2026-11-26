@@ -12,6 +12,8 @@ MUSIC records a velocity factor of 396.862 km/s per Mpc/h, while CAMB's aH/h is 
 
 The existing Group 205 zoom uses the same input normalization. At 12.06–16.08 h/Mpc its base-grid gas density power is 0.98308 times CAMB, while the CDM density reconstructed from displacement is 0.92776 and the velocity power is 0.91734. The zoom's multilevel restriction modifies its base fields. The result does not establish the spectrum of the fine zoom cells. [Zoom shell results](zoom/shells.csv)
 
+The four-panel figure compares each base-grid spectrum with CAMB over 1.01–16.08 h/Mpc. Error bars on the parent points show the Gaussian realization scatter estimated from the modes in each shell. The zoom points and MUSIC input are shown separately. Grammar job 1578607 rendered the figure at revision `92f3542`. [Power comparison PDF](base_spectra.pdf)
+
 CAMB describes the density variables in synchronous gauge and the supplied velocity variables in Newtonian gauge. The velocity-power conversion uses aH/(hk) with k in h/Mpc. The two calculations use a matched parameter list, though their numerical accuracy settings and the MUSIC background approximation differ. [CAMB transfer variable definitions](https://camb.readthedocs.io/en/latest/transfer_variables.html)
 
 Group 434 is still configured with the parent-run normalization and common large-scale seeds. Altering its normalization would change its large-scale amplitudes relative to that parent and requires a matching-parent decision. The 434 generation script has not been run. Fine-level spectral validation, a RAMSES reader check, evolved particle counts, contamination, and force convergence remain open.
