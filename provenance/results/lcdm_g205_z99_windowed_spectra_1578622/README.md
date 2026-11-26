@@ -13,4 +13,6 @@ The selected level-11 rectangular array contains 326 × 286 × 188 cells. A sepa
 
 The baseline table's upper endpoint falls inside this range. The MUSIC CAMB plugin extrapolates the baseline table beyond that endpoint. The level-11 axial Nyquist wavenumber is 257.36 h/Mpc. At 200–240 h/Mpc the extended-table realization has 4.2% less gas density power and 5.5% less gas velocity power than the baseline realization. The corresponding CDM velocity difference is 0.6%. The measurements are ratios of tapered patch spectra. The window mixes modes and includes padding. The table's pointwise input-power ratio at a shell midpoint is recorded for context and is not a window-convolved prediction.
 
+The figure plots the measured shell ratios, with the baseline table endpoint and axial Nyquist marked. Wavenumbers above the axial Nyquist use only available diagonal modes. Grammar job 1578633 rendered the figure at revision `a60eb1d`. [Fine-grid power comparison PDF](fine_spectra.pdf)
+
 This result describes one matched z = 99 Group 205 realization. It does not isolate table sampling from extrapolation, certify CAMB solver accuracy, measure AMR leaf spectra, or establish the Group 434 initial fields. The planned Group 434 table extends to 1,525 h/Mpc and covers the level-12 diagonal Nyquist wavenumber of 891.5 h/Mpc. Its realized fine-grid spectrum remains to be measured.
