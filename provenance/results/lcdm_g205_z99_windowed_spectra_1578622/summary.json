@@ -1,0 +1,355 @@
+{
+  "redshift": 99,
+  "level": 11,
+  "patch_shape_xyz": [
+    326,
+    286,
+    188
+  ],
+  "cell_spacing_mpc_h": 0.012207031059265136,
+  "axis_nyquist_h_mpc": 257.3592701820759,
+  "baseline_transfer_kmax_h_mpc": 155.8788,
+  "extended_transfer_kmax_h_mpc": 595.7839355,
+  "music_pnorm_baseline_and_extended": [
+    3.02318099917e-11,
+    3.02318285307e-11
+  ],
+  "rows": [
+    {
+      "field": "gas_density",
+      "k_min_h_mpc": 16.0,
+      "k_max_h_mpc": 32.0,
+      "weighted_modes": 15446,
+      "extended_over_baseline_power": 1.0000002149692104,
+      "cross_coherence": 0.9999999999999466,
+      "difference_rms_over_baseline": 3.425214489272437e-07,
+      "input_power_ratio_at_geometric_midpoint": 0.9999998997979133
+    },
+    {
+      "field": "gas_density",
+      "k_min_h_mpc": 32.0,
+      "k_max_h_mpc": 64.0,
+      "weighted_modes": 123504,
+      "extended_over_baseline_power": 1.0000011074111177,
+      "cross_coherence": 0.999999999999694,
+      "difference_rms_over_baseline": 9.571636846955105e-07,
+      "input_power_ratio_at_geometric_midpoint": 0.9999993680283293
+    },
+    {
+      "field": "gas_density",
+      "k_min_h_mpc": 64.0,
+      "k_max_h_mpc": 96.0,
+      "weighted_modes": 335076,
+      "extended_over_baseline_power": 1.0000125809633276,
+      "cross_coherence": 0.9999999998847324,
+      "difference_rms_over_baseline": 1.6433858683818e-05,
+      "input_power_ratio_at_geometric_midpoint": 0.9999888573092496
+    },
+    {
+      "field": "gas_density",
+      "k_min_h_mpc": 96.0,
+      "k_max_h_mpc": 128.0,
+      "weighted_modes": 652820,
+      "extended_over_baseline_power": 0.9998935202818408,
+      "cross_coherence": 0.999999998305857,
+      "difference_rms_over_baseline": 7.888485496911081e-05,
+      "input_power_ratio_at_geometric_midpoint": 0.9997832563350076
+    },
+    {
+      "field": "gas_density",
+      "k_min_h_mpc": 128.0,
+      "k_max_h_mpc": 155.8788,
+      "weighted_modes": 910288,
+      "extended_over_baseline_power": 1.0006223275556487,
+      "cross_coherence": 0.9999999909674564,
+      "difference_rms_over_baseline": 0.00033891516659535385,
+      "input_power_ratio_at_geometric_midpoint": 1.0009005262120996
+    },
+    {
+      "field": "gas_density",
+      "k_min_h_mpc": 155.8788,
+      "k_max_h_mpc": 200.0,
+      "weighted_modes": 2267648,
+      "extended_over_baseline_power": 0.9905542181057579,
+      "cross_coherence": 0.9999938242380219,
+      "difference_rms_over_baseline": 0.005891071459689486,
+      "input_power_ratio_at_geometric_midpoint": 0.9918803039593962
+    },
+    {
+      "field": "gas_density",
+      "k_min_h_mpc": 200.0,
+      "k_max_h_mpc": 240.0,
+      "weighted_modes": 3136444,
+      "extended_over_baseline_power": 0.9580171599584517,
+      "cross_coherence": 0.9999816549006901,
+      "difference_rms_over_baseline": 0.022046568855547094,
+      "input_power_ratio_at_geometric_midpoint": 0.958991525570899
+    },
+    {
+      "field": "gas_density",
+      "k_min_h_mpc": 240.0,
+      "k_max_h_mpc": 257.3592701820759,
+      "weighted_modes": 1733470,
+      "extended_over_baseline_power": 0.9258016226163172,
+      "cross_coherence": 0.9999940367248845,
+      "difference_rms_over_baseline": 0.03796557651410085,
+      "input_power_ratio_at_geometric_midpoint": 0.9259673877831575
+    },
+    {
+      "field": "gas_density",
+      "k_min_h_mpc": 257.3592701820759,
+      "k_max_h_mpc": 300.0,
+      "weighted_modes": 4101247,
+      "extended_over_baseline_power": 0.8885179145614046,
+      "cross_coherence": 0.9999513734214218,
+      "difference_rms_over_baseline": 0.058180943394487726,
+      "input_power_ratio_at_geometric_midpoint": 0.8865625057854813
+    },
+    {
+      "field": "gas_density",
+      "k_min_h_mpc": 300.0,
+      "k_max_h_mpc": 360.0,
+      "weighted_modes": 3526116,
+      "extended_over_baseline_power": 0.8159139754540026,
+      "cross_coherence": 0.9998628142534829,
+      "difference_rms_over_baseline": 0.0979932466986061,
+      "input_power_ratio_at_geometric_midpoint": 0.8070869591400551
+    },
+    {
+      "field": "gas_density",
+      "k_min_h_mpc": 360.0,
+      "k_max_h_mpc": 445.76033175420133,
+      "weighted_modes": 724106,
+      "extended_over_baseline_power": 0.7211104979555304,
+      "cross_coherence": 0.9998159153751854,
+      "difference_rms_over_baseline": 0.1518507021867838,
+      "input_power_ratio_at_geometric_midpoint": 0.680657194900983
+    },
+    {
+      "field": "gas_velocity",
+      "k_min_h_mpc": 16.0,
+      "k_max_h_mpc": 32.0,
+      "weighted_modes": 15446,
+      "extended_over_baseline_power": 1.0000005595188866,
+      "cross_coherence": 0.9999999999987266,
+      "difference_rms_over_baseline": 1.6193150242937116e-06,
+      "input_power_ratio_at_geometric_midpoint": 1.0000001030975667
+    },
+    {
+      "field": "gas_velocity",
+      "k_min_h_mpc": 32.0,
+      "k_max_h_mpc": 64.0,
+      "weighted_modes": 123504,
+      "extended_over_baseline_power": 1.000000979649225,
+      "cross_coherence": 0.9999999999995033,
+      "difference_rms_over_baseline": 1.1189173674548834e-06,
+      "input_power_ratio_at_geometric_midpoint": 0.9999992341410695
+    },
+    {
+      "field": "gas_velocity",
+      "k_min_h_mpc": 64.0,
+      "k_max_h_mpc": 96.0,
+      "weighted_modes": 335076,
+      "extended_over_baseline_power": 1.0000095003038811,
+      "cross_coherence": 0.9999999998247848,
+      "difference_rms_over_baseline": 1.9313860694876203e-05,
+      "input_power_ratio_at_geometric_midpoint": 0.9999850513586767
+    },
+    {
+      "field": "gas_velocity",
+      "k_min_h_mpc": 96.0,
+      "k_max_h_mpc": 128.0,
+      "weighted_modes": 652820,
+      "extended_over_baseline_power": 0.9998641763632993,
+      "cross_coherence": 0.9999999970112703,
+      "difference_rms_over_baseline": 0.00010290461515133879,
+      "input_power_ratio_at_geometric_midpoint": 0.9997066477312663
+    },
+    {
+      "field": "gas_velocity",
+      "k_min_h_mpc": 128.0,
+      "k_max_h_mpc": 155.8788,
+      "weighted_modes": 910288,
+      "extended_over_baseline_power": 1.0008321317898068,
+      "cross_coherence": 0.9999999839175359,
+      "difference_rms_over_baseline": 0.00045300901317914076,
+      "input_power_ratio_at_geometric_midpoint": 1.001215496610735
+    },
+    {
+      "field": "gas_velocity",
+      "k_min_h_mpc": 155.8788,
+      "k_max_h_mpc": 200.0,
+      "weighted_modes": 2267648,
+      "extended_over_baseline_power": 0.9886301836917893,
+      "cross_coherence": 0.9999893473787185,
+      "difference_rms_over_baseline": 0.007327141368811507,
+      "input_power_ratio_at_geometric_midpoint": 0.9890589103669595
+    },
+    {
+      "field": "gas_velocity",
+      "k_min_h_mpc": 200.0,
+      "k_max_h_mpc": 240.0,
+      "weighted_modes": 3136444,
+      "extended_over_baseline_power": 0.9452706714023704,
+      "cross_coherence": 0.9999669232942128,
+      "difference_rms_over_baseline": 0.028885338771407514,
+      "input_power_ratio_at_geometric_midpoint": 0.9448706936035741
+    },
+    {
+      "field": "gas_velocity",
+      "k_min_h_mpc": 240.0,
+      "k_max_h_mpc": 257.3592701820759,
+      "weighted_modes": 1733470,
+      "extended_over_baseline_power": 0.9010724612650097,
+      "cross_coherence": 0.9999888585272813,
+      "difference_rms_over_baseline": 0.05095959531359262,
+      "input_power_ratio_at_geometric_midpoint": 0.9009082043190314
+    },
+    {
+      "field": "gas_velocity",
+      "k_min_h_mpc": 257.3592701820759,
+      "k_max_h_mpc": 300.0,
+      "weighted_modes": 4101247,
+      "extended_over_baseline_power": 0.8538497352266593,
+      "cross_coherence": 0.9999115754059588,
+      "difference_rms_over_baseline": 0.0770282586242303,
+      "input_power_ratio_at_geometric_midpoint": 0.8491137389185743
+    },
+    {
+      "field": "gas_velocity",
+      "k_min_h_mpc": 300.0,
+      "k_max_h_mpc": 360.0,
+      "weighted_modes": 3526116,
+      "extended_over_baseline_power": 0.761965064984584,
+      "cross_coherence": 0.9997612838211064,
+      "difference_rms_over_baseline": 0.12872300581317989,
+      "input_power_ratio_at_geometric_midpoint": 0.7471486049334508
+    },
+    {
+      "field": "gas_velocity",
+      "k_min_h_mpc": 360.0,
+      "k_max_h_mpc": 445.76033175420133,
+      "weighted_modes": 724106,
+      "extended_over_baseline_power": 0.6439987123751912,
+      "cross_coherence": 0.9996950069983783,
+      "difference_rms_over_baseline": 0.1987400714110269,
+      "input_power_ratio_at_geometric_midpoint": 0.5928136408352845
+    },
+    {
+      "field": "cdm_velocity",
+      "k_min_h_mpc": 16.0,
+      "k_max_h_mpc": 32.0,
+      "weighted_modes": 15446,
+      "extended_over_baseline_power": 1.0000006453250534,
+      "cross_coherence": 0.9999999999996754,
+      "difference_rms_over_baseline": 8.674841482535223e-07,
+      "input_power_ratio_at_geometric_midpoint": 1.0000004850272106
+    },
+    {
+      "field": "cdm_velocity",
+      "k_min_h_mpc": 32.0,
+      "k_max_h_mpc": 64.0,
+      "weighted_modes": 123504,
+      "extended_over_baseline_power": 1.0000003387050793,
+      "cross_coherence": 0.9999999999999397,
+      "difference_rms_over_baseline": 3.8909950601575615e-07,
+      "input_power_ratio_at_geometric_midpoint": 1.00000004530089
+    },
+    {
+      "field": "cdm_velocity",
+      "k_min_h_mpc": 64.0,
+      "k_max_h_mpc": 96.0,
+      "weighted_modes": 335076,
+      "extended_over_baseline_power": 1.0000017889579984,
+      "cross_coherence": 0.9999999999970961,
+      "difference_rms_over_baseline": 2.574053846644251e-06,
+      "input_power_ratio_at_geometric_midpoint": 0.9999988235032524
+    },
+    {
+      "field": "cdm_velocity",
+      "k_min_h_mpc": 96.0,
+      "k_max_h_mpc": 128.0,
+      "weighted_modes": 652820,
+      "extended_over_baseline_power": 0.9999854902279083,
+      "cross_coherence": 0.9999999999593967,
+      "difference_rms_over_baseline": 1.1569091503798256e-05,
+      "input_power_ratio_at_geometric_midpoint": 0.9999675954821643
+    },
+    {
+      "field": "cdm_velocity",
+      "k_min_h_mpc": 128.0,
+      "k_max_h_mpc": 155.8788,
+      "weighted_modes": 910288,
+      "extended_over_baseline_power": 1.00009726671586,
+      "cross_coherence": 0.9999999997803426,
+      "difference_rms_over_baseline": 5.295655508545099e-05,
+      "input_power_ratio_at_geometric_midpoint": 1.0001414302422427
+    },
+    {
+      "field": "cdm_velocity",
+      "k_min_h_mpc": 155.8788,
+      "k_max_h_mpc": 200.0,
+      "weighted_modes": 2267648,
+      "extended_over_baseline_power": 0.9986626765461489,
+      "cross_coherence": 0.9999998646789989,
+      "difference_rms_over_baseline": 0.0008472713205650938,
+      "input_power_ratio_at_geometric_midpoint": 0.9987051991755767
+    },
+    {
+      "field": "cdm_velocity",
+      "k_min_h_mpc": 200.0,
+      "k_max_h_mpc": 240.0,
+      "weighted_modes": 3136444,
+      "extended_over_baseline_power": 0.9939866960651385,
+      "cross_coherence": 0.9999996809865004,
+      "difference_rms_over_baseline": 0.003115019162973389,
+      "input_power_ratio_at_geometric_midpoint": 0.9939459037438058
+    },
+    {
+      "field": "cdm_velocity",
+      "k_min_h_mpc": 240.0,
+      "k_max_h_mpc": 257.3592701820759,
+      "weighted_modes": 1733470,
+      "extended_over_baseline_power": 0.989515968384659,
+      "cross_coherence": 0.9999999086616315,
+      "difference_rms_over_baseline": 0.005273086487688533,
+      "input_power_ratio_at_geometric_midpoint": 0.9895011014102716
+    },
+    {
+      "field": "cdm_velocity",
+      "k_min_h_mpc": 257.3592701820759,
+      "k_max_h_mpc": 300.0,
+      "weighted_modes": 4101247,
+      "extended_over_baseline_power": 0.9848535980189105,
+      "cross_coherence": 0.9999993658941339,
+      "difference_rms_over_baseline": 0.007684428957333477,
+      "input_power_ratio_at_geometric_midpoint": 0.9844060226930973
+    },
+    {
+      "field": "cdm_velocity",
+      "k_min_h_mpc": 300.0,
+      "k_max_h_mpc": 360.0,
+      "weighted_modes": 3526116,
+      "extended_over_baseline_power": 0.9758454260858246,
+      "cross_coherence": 0.9999985929526701,
+      "difference_rms_over_baseline": 0.012264967027584967,
+      "input_power_ratio_at_geometric_midpoint": 0.9744319520275974
+    },
+    {
+      "field": "cdm_velocity",
+      "k_min_h_mpc": 360.0,
+      "k_max_h_mpc": 445.76033175420133,
+      "weighted_modes": 724106,
+      "extended_over_baseline_power": 0.9639581145070809,
+      "cross_coherence": 0.9999985194514278,
+      "difference_rms_over_baseline": 0.018266068365792892,
+      "input_power_ratio_at_geometric_midpoint": 0.9586051376161894
+    }
+  ],
+  "limits": [
+    "A Hann-tapered rectangular patch mixes Fourier modes and includes padded cells.",
+    "The input transfer ratio at each shell midpoint is not a window-convolved prediction.",
+    "The baseline and extended CAMB tables differ in both sampling and k range.",
+    "These ratios do not establish absolute spectrum normalization, AMR leaf statistics, or an evolved halo."
+  ]
+}
