@@ -1,0 +1,1048 @@
+{
+  "status": "CENTER_SENSITIVITY_DIAGNOSTIC_NO_HALO_APPROVAL",
+  "snapshot": "/gpfs/kjhan/RAR_QUMOND/runs/lcdm_z0_parent_direct_1271100/output_00003/data_00003.h5",
+  "aexp": 1.000000000000001,
+  "candidate_groups": [
+    434,
+    295,
+    451,
+    370,
+    446,
+    428,
+    397,
+    461,
+    444,
+    223,
+    438,
+    476
+  ],
+  "density_proxy": "minimum 64th-neighbor radius among HOP member particles; centroids use periodic offsets around that densest member particle",
+  "M200c_method": "same all-particle spherical-overdensity profile and 200*critical-density crossing used by the provisional screening catalogue, with a 1 Mpc query radius",
+  "candidates": [
+    {
+      "group_id": 434,
+      "hop_particles": 1602,
+      "hop_mass_msun": 193638365097.47784,
+      "reference_M200c_msun": 161509931665.3078,
+      "reference_R200c_mpc": 0.11525295058907382,
+      "r64_density_peak_box": 0.0003544262127381459,
+      "centers": [
+        {
+          "center_method": "hop_circular_mean",
+          "center_box": [
+            0.7059001706030695,
+            0.04343216348298239,
+            0.42243487585123374
+          ],
+          "offset_from_HOP_center_box": 0.0,
+          "offset_in_provisional_R200c": 0.0,
+          "m200c_msun": 161509931665.308,
+          "r200c_mpc": 0.11525295058907388,
+          "n200c_equiv": 1336.1965248858296,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 1.3322676295501878e-15
+        },
+        {
+          "center_method": "densest_member_particle_64nn",
+          "center_box": [
+            0.7060545618231654,
+            0.04355558977301621,
+            0.4225377913816401
+          ],
+          "offset_from_HOP_center_box": 0.00022285040792653968,
+          "offset_in_provisional_R200c": 0.07176278823487758,
+          "m200c_msun": 160758913749.3473,
+          "r200c_mpc": 0.11507403168226342,
+          "n200c_equiv": 1329.9832380675723,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.004649979776580104
+        },
+        {
+          "center_method": "density_peak_64nn_centroid",
+          "center_box": [
+            0.7060028903901364,
+            0.04355443557135973,
+            0.4225759764102614
+          ],
+          "offset_from_HOP_center_box": 0.00021309900518102167,
+          "offset_in_provisional_R200c": 0.06862261964945462,
+          "m200c_msun": 160883593030.59995,
+          "r200c_mpc": 0.11510377319542914,
+          "n200c_equiv": 1331.0147289524814,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.003878019315900594
+        },
+        {
+          "center_method": "density_peak_128nn_centroid",
+          "center_box": [
+            0.7060088616857696,
+            0.04355242938907745,
+            0.4225409787574683
+          ],
+          "offset_from_HOP_center_box": 0.00019374071936173196,
+          "offset_in_provisional_R200c": 0.06238882102747562,
+          "m200c_msun": 160804933660.99844,
+          "r200c_mpc": 0.1150850112528538,
+          "n200c_equiv": 1330.3639678802208,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.004365044285761344
+        },
+        {
+          "center_method": "density_peak_256nn_centroid",
+          "center_box": [
+            0.7059960264320041,
+            0.04353994325276644,
+            0.42251322442134415
+          ],
+          "offset_from_HOP_center_box": 0.00016414419622325983,
+          "offset_in_provisional_R200c": 0.05285808225864662,
+          "m200c_msun": 160694676522.81433,
+          "r200c_mpc": 0.11505870226490687,
+          "n200c_equiv": 1329.4517936048285,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.005047709042332427
+        }
+      ]
+    },
+    {
+      "group_id": 295,
+      "hop_particles": 2345,
+      "hop_mass_msun": 283446920195.7463,
+      "reference_M200c_msun": 162104886858.0552,
+      "reference_R200c_mpc": 0.11539429652147397,
+      "r64_density_peak_box": 0.00047995302177237983,
+      "centers": [
+        {
+          "center_method": "hop_circular_mean",
+          "center_box": [
+            0.4246975797222103,
+            0.583461080196895,
+            0.954087187203053
+          ],
+          "offset_from_HOP_center_box": 0.0,
+          "offset_in_provisional_R200c": 0.0,
+          "m200c_msun": 162104886858.05862,
+          "r200c_mpc": 0.11539429652147479,
+          "n200c_equiv": 1341.118680773206,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 2.1094237467877974e-14
+        },
+        {
+          "center_method": "densest_member_particle_64nn",
+          "center_box": [
+            0.42553519441309867,
+            0.585116861522584,
+            0.9546398048339266
+          ],
+          "offset_from_HOP_center_box": 0.001936129235057642,
+          "offset_in_provisional_R200c": 0.6227129855336836,
+          "m200c_msun": 117518590310.76527,
+          "r200c_mpc": 0.10366237766331055,
+          "n200c_equiv": 972.2493865462724,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.2750459743161924
+        },
+        {
+          "center_method": "density_peak_64nn_centroid",
+          "center_box": [
+            0.42554997179594195,
+            0.5851155088108237,
+            0.9545959144189509
+          ],
+          "offset_from_HOP_center_box": 0.0019293806431448218,
+          "offset_in_provisional_R200c": 0.6205424507666407,
+          "m200c_msun": 117294170352.40198,
+          "r200c_mpc": 0.10359634915716406,
+          "n200c_equiv": 970.3927256871651,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.27643038636392925
+        },
+        {
+          "center_method": "density_peak_128nn_centroid",
+          "center_box": [
+            0.42552197216975635,
+            0.585097462379885,
+            0.9545750182135333
+          ],
+          "offset_from_HOP_center_box": 0.001896140461876277,
+          "offset_in_provisional_R200c": 0.6098514844082922,
+          "m200c_msun": 118080188521.4401,
+          "r200c_mpc": 0.10382724268833432,
+          "n200c_equiv": 976.895574986503,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.27158156172777626
+        },
+        {
+          "center_method": "density_peak_256nn_centroid",
+          "center_box": [
+            0.42556118099124546,
+            0.5851179489888677,
+            0.9545856281072848
+          ],
+          "offset_from_HOP_center_box": 0.00193376955211928,
+          "offset_in_provisional_R200c": 0.621954045902561,
+          "m200c_msun": 117415707236.83315,
+          "r200c_mpc": 0.10363211800297452,
+          "n200c_equiv": 971.3982190394805,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.2756806441026882
+        }
+      ]
+    },
+    {
+      "group_id": 451,
+      "hop_particles": 1531,
+      "hop_mass_msun": 185056390115.00537,
+      "reference_M200c_msun": 162203004931.72586,
+      "reference_R200c_mpc": 0.1154175735957849,
+      "r64_density_peak_box": 0.0002990926065578668,
+      "centers": [
+        {
+          "center_method": "hop_circular_mean",
+          "center_box": [
+            0.9643718059433939,
+            0.21808250191851344,
+            0.1469407074066792
+          ],
+          "offset_from_HOP_center_box": 0.0,
+          "offset_in_provisional_R200c": 0.0,
+          "m200c_msun": 162203004931.72693,
+          "r200c_mpc": 0.11541757359578515,
+          "n200c_equiv": 1341.9304266993684,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 6.661338147750939e-15
+        },
+        {
+          "center_method": "densest_member_particle_64nn",
+          "center_box": [
+            0.9643227436226463,
+            0.2179582229859725,
+            0.1469862858238897
+          ],
+          "offset_from_HOP_center_box": 0.00014117278953847468,
+          "offset_in_provisional_R200c": 0.04539593649210998,
+          "m200c_msun": 160460797789.81256,
+          "r200c_mpc": 0.11500285546754181,
+          "n200c_equiv": 1327.516878847207,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.01074090546378359
+        },
+        {
+          "center_method": "density_peak_64nn_centroid",
+          "center_box": [
+            0.9643187450665052,
+            0.21796649765822484,
+            0.14698251035894572
+          ],
+          "offset_from_HOP_center_box": 0.0001342383398269748,
+          "offset_in_provisional_R200c": 0.043166074492923624,
+          "m200c_msun": 160348857624.23715,
+          "r200c_mpc": 0.11497610660095062,
+          "n200c_equiv": 1326.5907806271484,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.011431029334315723
+        },
+        {
+          "center_method": "density_peak_128nn_centroid",
+          "center_box": [
+            0.9643182590434635,
+            0.21793158288693376,
+            0.14698387642122396
+          ],
+          "offset_from_HOP_center_box": 0.0001658535148915273,
+          "offset_in_provisional_R200c": 0.05333234296512251,
+          "m200c_msun": 160419345418.42908,
+          "r200c_mpc": 0.11499295159132325,
+          "n200c_equiv": 1327.1739369982458,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.010996464054704558
+        },
+        {
+          "center_method": "density_peak_256nn_centroid",
+          "center_box": [
+            0.9643511946479467,
+            0.21796174899290582,
+            0.14696579189231
+          ],
+          "offset_from_HOP_center_box": 0.00012504129702690825,
+          "offset_in_provisional_R200c": 0.04020864642033281,
+          "m200c_msun": 161078197288.0128,
+          "r200c_mpc": 0.11515016420900363,
+          "n200c_equiv": 1332.6247199282802,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.006934567236818623
+        }
+      ]
+    },
+    {
+      "group_id": 370,
+      "hop_particles": 1854,
+      "hop_mass_msun": 224098332640.90134,
+      "reference_M200c_msun": 162306087886.4547,
+      "reference_R200c_mpc": 0.1154420184060221,
+      "r64_density_peak_box": 0.0003467740236506993,
+      "centers": [
+        {
+          "center_method": "hop_circular_mean",
+          "center_box": [
+            0.5094635842894564,
+            0.444436305299756,
+            0.5038538277742936
+          ],
+          "offset_from_HOP_center_box": 0.0,
+          "offset_in_provisional_R200c": 0.0,
+          "m200c_msun": 162306087886.45496,
+          "r200c_mpc": 0.11544201840602215,
+          "n200c_equiv": 1342.7832478507512,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 1.5543122344752192e-15
+        },
+        {
+          "center_method": "densest_member_particle_64nn",
+          "center_box": [
+            0.5096282714310147,
+            0.4438204510470897,
+            0.5037046701228197
+          ],
+          "offset_from_HOP_center_box": 0.0006547108675705322,
+          "offset_in_provisional_R200c": 0.21048616808375473,
+          "m200c_msun": 165807074017.44162,
+          "r200c_mpc": 0.11626615936049081,
+          "n200c_equiv": 1371.747444997413,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.021570269954606536
+        },
+        {
+          "center_method": "density_peak_64nn_centroid",
+          "center_box": [
+            0.5096353231502033,
+            0.4437966851316593,
+            0.5037138610183558
+          ],
+          "offset_from_HOP_center_box": 0.0006769038990095943,
+          "offset_in_provisional_R200c": 0.21762111325902667,
+          "m200c_msun": 165799312886.16046,
+          "r200c_mpc": 0.11626434526216539,
+          "n200c_equiv": 1371.6832359637012,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.02152245208540493
+        },
+        {
+          "center_method": "density_peak_128nn_centroid",
+          "center_box": [
+            0.5096319342673791,
+            0.4438003183240358,
+            0.5037275519486131
+          ],
+          "offset_from_HOP_center_box": 0.0006699005392620017,
+          "offset_in_provisional_R200c": 0.21536956921111305,
+          "m200c_msun": 166200879840.9303,
+          "r200c_mpc": 0.11635813390356634,
+          "n200c_equiv": 1375.0054611912146,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.02399658574236785
+        },
+        {
+          "center_method": "density_peak_256nn_centroid",
+          "center_box": [
+            0.5096847307357464,
+            0.4438329280815026,
+            0.5037325000219196
+          ],
+          "offset_from_HOP_center_box": 0.0006539803068212343,
+          "offset_in_provisional_R200c": 0.21025129656979508,
+          "m200c_msun": 165685753766.0312,
+          "r200c_mpc": 0.11623779530855195,
+          "n200c_equiv": 1370.7437438834231,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.0208227918224535
+        }
+      ]
+    },
+    {
+      "group_id": 446,
+      "hop_particles": 1552,
+      "hop_mass_msun": 187594720743.624,
+      "reference_M200c_msun": 160627761099.47214,
+      "reference_R200c_mpc": 0.1150427293841849,
+      "r64_density_peak_box": 0.0003446074681816108,
+      "centers": [
+        {
+          "center_method": "hop_circular_mean",
+          "center_box": [
+            0.5078077852104772,
+            0.18823471598084962,
+            0.6262117274595649
+          ],
+          "offset_from_HOP_center_box": 0.0,
+          "offset_in_provisional_R200c": 0.0,
+          "m200c_msun": 160627761099.47278,
+          "r200c_mpc": 0.11504272938418506,
+          "n200c_equiv": 1328.8981920076492,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 3.9968028886505635e-15
+        },
+        {
+          "center_method": "densest_member_particle_64nn",
+          "center_box": [
+            0.5074380253059547,
+            0.1882429661411413,
+            0.6265674632555992
+          ],
+          "offset_from_HOP_center_box": 0.00051316508914528,
+          "offset_in_provisional_R200c": 0.16555254066394834,
+          "m200c_msun": 159491188622.0643,
+          "r200c_mpc": 0.11477074647758853,
+          "n200c_equiv": 1319.49515295652,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.007075815971212984
+        },
+        {
+          "center_method": "density_peak_64nn_centroid",
+          "center_box": [
+            0.5074409484350616,
+            0.18824660801811482,
+            0.6265770468705093
+          ],
+          "offset_from_HOP_center_box": 0.0005178502798690101,
+          "offset_in_provisional_R200c": 0.16706403325028263,
+          "m200c_msun": 159305309436.6588,
+          "r200c_mpc": 0.11472614257996323,
+          "n200c_equiv": 1317.957345844434,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.008233020579763717
+        },
+        {
+          "center_method": "density_peak_128nn_centroid",
+          "center_box": [
+            0.5074687648404046,
+            0.188257432425479,
+            0.6266070784878863
+          ],
+          "offset_from_HOP_center_box": 0.000521299610373526,
+          "offset_in_provisional_R200c": 0.16817682412536614,
+          "m200c_msun": 159515088058.36145,
+          "r200c_mpc": 0.11477647891369881,
+          "n200c_equiv": 1319.6928766716978,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.006927028263947754
+        },
+        {
+          "center_method": "density_peak_256nn_centroid",
+          "center_box": [
+            0.5074851608579328,
+            0.18827973480038554,
+            0.6265936290274047
+          ],
+          "offset_from_HOP_center_box": 0.0005019581401726419,
+          "offset_in_provisional_R200c": 0.1619370591848756,
+          "m200c_msun": 160315594220.62158,
+          "r200c_mpc": 0.1149681556844647,
+          "n200c_equiv": 1326.315587369008,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.0019434179790206452
+        }
+      ]
+    },
+    {
+      "group_id": 428,
+      "hop_particles": 1608,
+      "hop_mass_msun": 194363602419.9403,
+      "reference_M200c_msun": 160615010270.04178,
+      "reference_R200c_mpc": 0.1150396852258033,
+      "r64_density_peak_box": 0.0003196318243968445,
+      "centers": [
+        {
+          "center_method": "hop_circular_mean",
+          "center_box": [
+            0.05030884886061701,
+            0.7958595275503564,
+            0.7666786314609899
+          ],
+          "offset_from_HOP_center_box": 0.0,
+          "offset_in_provisional_R200c": 0.0,
+          "m200c_msun": 160615010270.0426,
+          "r200c_mpc": 0.11503968522580349,
+          "n200c_equiv": 1328.7927024331175,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 5.10702591327572e-15
+        },
+        {
+          "center_method": "densest_member_particle_64nn",
+          "center_box": [
+            0.050601139041139144,
+            0.7954176563010111,
+            0.7664915670330518
+          ],
+          "offset_from_HOP_center_box": 0.000561851271091752,
+          "offset_in_provisional_R200c": 0.18126401959401764,
+          "m200c_msun": 155817154335.87296,
+          "r200c_mpc": 0.11388260626529224,
+          "n200c_equiv": 1289.0993017856242,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.029871778024371465
+        },
+        {
+          "center_method": "density_peak_64nn_centroid",
+          "center_box": [
+            0.05062056478327464,
+            0.7954251978027507,
+            0.7665202463769256
+          ],
+          "offset_from_HOP_center_box": 0.0005575795736463005,
+          "offset_in_provisional_R200c": 0.17988588789032414,
+          "m200c_msun": 155820962059.2675,
+          "r200c_mpc": 0.11388353391225929,
+          "n200c_equiv": 1289.1308036673663,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.029848070879017308
+        },
+        {
+          "center_method": "density_peak_128nn_centroid",
+          "center_box": [
+            0.050642519955755215,
+            0.7954147055954758,
+            0.7665086801609363
+          ],
+          "offset_from_HOP_center_box": 0.0005814519891310342,
+          "offset_in_provisional_R200c": 0.1875875879857479,
+          "m200c_msun": 155261878832.42352,
+          "r200c_mpc": 0.11374716656181165,
+          "n200c_equiv": 1284.5054220754841,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.03332896115137707
+        },
+        {
+          "center_method": "density_peak_256nn_centroid",
+          "center_box": [
+            0.05062656630285415,
+            0.7954500144628495,
+            0.7664855028905307
+          ],
+          "offset_from_HOP_center_box": 0.0005531220359638184,
+          "offset_in_provisional_R200c": 0.17844780055406437,
+          "m200c_msun": 155853131665.34845,
+          "r200c_mpc": 0.11389137054794411,
+          "n200c_equiv": 1289.3969477701414,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.029647780719169292
+        }
+      ]
+    },
+    {
+      "group_id": 397,
+      "hop_particles": 1739,
+      "hop_mass_msun": 210197950627.03745,
+      "reference_M200c_msun": 160336748809.78958,
+      "reference_R200c_mpc": 0.1149732123710246,
+      "r64_density_peak_box": 0.0003648673457979108,
+      "centers": [
+        {
+          "center_method": "hop_circular_mean",
+          "center_box": [
+            0.3273738239733909,
+            0.6167031271911745,
+            0.6437563892574807
+          ],
+          "offset_from_HOP_center_box": 0.0,
+          "offset_in_provisional_R200c": 0.0,
+          "m200c_msun": 160336748809.7872,
+          "r200c_mpc": 0.11497321237102404,
+          "n200c_equiv": 1326.4906025413695,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -1.4876988529977098e-14
+        },
+        {
+          "center_method": "densest_member_particle_64nn",
+          "center_box": [
+            0.3278585321454901,
+            0.6169795341977506,
+            0.6440855445045001
+          ],
+          "offset_from_HOP_center_box": 0.0006478317852842291,
+          "offset_in_provisional_R200c": 0.20912382319564998,
+          "m200c_msun": 162293065121.57907,
+          "r200c_mpc": 0.11543893079443586,
+          "n200c_equiv": 1342.6755085124198,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.012201297121911203
+        },
+        {
+          "center_method": "density_peak_64nn_centroid",
+          "center_box": [
+            0.3278244814515085,
+            0.6169783171443655,
+            0.6440619490466932
+          ],
+          "offset_from_HOP_center_box": 0.000610072502006278,
+          "offset_in_provisional_R200c": 0.1969349095616142,
+          "m200c_msun": 162293482525.65326,
+          "r200c_mpc": 0.11543902976074862,
+          "n200c_equiv": 1342.6789617605739,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.01220390041826902
+        },
+        {
+          "center_method": "density_peak_128nn_centroid",
+          "center_box": [
+            0.3278269770481343,
+            0.6169343388595263,
+            0.6440694427486723
+          ],
+          "offset_from_HOP_center_box": 0.000597334942120997,
+          "offset_in_provisional_R200c": 0.1928231520314942,
+          "m200c_msun": 163110353542.4243,
+          "r200c_mpc": 0.11563238529140689,
+          "n200c_equiv": 1349.437061418193,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.017298621515178025
+        },
+        {
+          "center_method": "density_peak_256nn_centroid",
+          "center_box": [
+            0.3278023683678948,
+            0.6168957547155385,
+            0.6441080959519188
+          ],
+          "offset_from_HOP_center_box": 0.0005869014057879522,
+          "offset_in_provisional_R200c": 0.1894551465446072,
+          "m200c_msun": 163823180705.09808,
+          "r200c_mpc": 0.115800586596149,
+          "n200c_equiv": 1355.3343902560428,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.021744434268431645
+        }
+      ]
+    },
+    {
+      "group_id": 461,
+      "hop_particles": 1499,
+      "hop_mass_msun": 181188457728.53888,
+      "reference_M200c_msun": 162922855489.6736,
+      "reference_R200c_mpc": 0.11558806118932301,
+      "r64_density_peak_box": 0.0002865679102279428,
+      "centers": [
+        {
+          "center_method": "hop_circular_mean",
+          "center_box": [
+            0.9012041538829181,
+            0.7032282011498145,
+            0.7823583939165458
+          ],
+          "offset_from_HOP_center_box": 0.0,
+          "offset_in_provisional_R200c": 0.0,
+          "m200c_msun": 162922855489.67313,
+          "r200c_mpc": 0.1155880611893229,
+          "n200c_equiv": 1347.885861167374,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -2.9976021664879227e-15
+        },
+        {
+          "center_method": "densest_member_particle_64nn",
+          "center_box": [
+            0.9012857045049949,
+            0.7034031204288226,
+            0.7822760078438079
+          ],
+          "offset_from_HOP_center_box": 0.00020984452127940887,
+          "offset_in_provisional_R200c": 0.06737869250160454,
+          "m200c_msun": 163207141821.8564,
+          "r200c_mpc": 0.11565525252288085,
+          "n200c_equiv": 1350.2378057519525,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.001744913758897404
+        },
+        {
+          "center_method": "density_peak_64nn_centroid",
+          "center_box": [
+            0.9012692593870247,
+            0.703361410525748,
+            0.7823117444875739
+          ],
+          "offset_from_HOP_center_box": 0.0001554336955906248,
+          "offset_in_provisional_R200c": 0.04990799433664498,
+          "m200c_msun": 163640845996.3766,
+          "r200c_mpc": 0.11575760874562138,
+          "n200c_equiv": 1353.8259071451428,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.004406935445275595
+        },
+        {
+          "center_method": "density_peak_128nn_centroid",
+          "center_box": [
+            0.9012544858593685,
+            0.7033523658127767,
+            0.7823217421944131
+          ],
+          "offset_from_HOP_center_box": 0.0001389011163281686,
+          "offset_in_provisional_R200c": 0.04459957090203827,
+          "m200c_msun": 163604209659.95206,
+          "r200c_mpc": 0.11574896939643825,
+          "n200c_equiv": 1353.5228090946991,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.004182066219196701
+        },
+        {
+          "center_method": "density_peak_256nn_centroid",
+          "center_box": [
+            0.9012773775827999,
+            0.7033265409993932,
+            0.7823332208924687
+          ],
+          "offset_from_HOP_center_box": 0.00012516436146411494,
+          "offset_in_provisional_R200c": 0.04018885492855522,
+          "m200c_msun": 163517122299.08167,
+          "r200c_mpc": 0.1157284278276285,
+          "n200c_equiv": 1352.802321953403,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.003647534949114073
+        }
+      ]
+    },
+    {
+      "group_id": 444,
+      "hop_particles": 1556,
+      "hop_mass_msun": 188078212291.9323,
+      "reference_M200c_msun": 160107191033.01126,
+      "reference_R200c_mpc": 0.11491831624134186,
+      "r64_density_peak_box": 0.0003152807514383173,
+      "centers": [
+        {
+          "center_method": "hop_circular_mean",
+          "center_box": [
+            0.16686517372718135,
+            0.3145270217264684,
+            0.15670956843992478
+          ],
+          "offset_from_HOP_center_box": 0.0,
+          "offset_in_provisional_R200c": 0.0,
+          "m200c_msun": 160107191033.0115,
+          "r200c_mpc": 0.11491831624134191,
+          "n200c_equiv": 1324.5914357197041,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 1.5543122344752192e-15
+        },
+        {
+          "center_method": "densest_member_particle_64nn",
+          "center_box": [
+            0.16666554276197024,
+            0.3146560490145657,
+            0.1567574797381653
+          ],
+          "offset_from_HOP_center_box": 0.00024247898021055199,
+          "offset_in_provisional_R200c": 0.07831099933431858,
+          "m200c_msun": 159748884984.73572,
+          "r200c_mpc": 0.11483252646137808,
+          "n200c_equiv": 1321.6271146304982,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.002237913525081292
+        },
+        {
+          "center_method": "density_peak_64nn_centroid",
+          "center_box": [
+            0.16667497124321898,
+            0.3146763613703568,
+            0.15673075512407086
+          ],
+          "offset_from_HOP_center_box": 0.00024275129191680863,
+          "offset_in_provisional_R200c": 0.07839894510936628,
+          "m200c_msun": 159756168864.4669,
+          "r200c_mpc": 0.11483427172885388,
+          "n200c_equiv": 1321.6873752886763,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.0021924197550377
+        },
+        {
+          "center_method": "density_peak_128nn_centroid",
+          "center_box": [
+            0.1666791930404778,
+            0.31467758649701444,
+            0.15672395019038052
+          ],
+          "offset_from_HOP_center_box": 0.00023971942078704862,
+          "offset_in_provisional_R200c": 0.07741977216077416,
+          "m200c_msun": 159945571895.4565,
+          "r200c_mpc": 0.11487963538007885,
+          "n200c_equiv": 1323.2543357176835,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.0010094433392527913
+        },
+        {
+          "center_method": "density_peak_256nn_centroid",
+          "center_box": [
+            0.16667782125939426,
+            0.3146500619208852,
+            0.15672766251493775
+          ],
+          "offset_from_HOP_center_box": 0.0002248715904213017,
+          "offset_in_provisional_R200c": 0.07262451760766431,
+          "m200c_msun": 160566066682.13498,
+          "r200c_mpc": 0.11502799883993449,
+          "n200c_equiv": 1328.3877845967756,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.0028660527123300916
+        }
+      ]
+    },
+    {
+      "group_id": 223,
+      "hop_particles": 3265,
+      "hop_mass_msun": 394649976306.6574,
+      "reference_M200c_msun": 159838626536.1101,
+      "reference_R200c_mpc": 0.1148540254532944,
+      "r64_density_peak_box": 0.0003052113427592949,
+      "centers": [
+        {
+          "center_method": "hop_circular_mean",
+          "center_box": [
+            0.22279633637885204,
+            0.41248770891774866,
+            0.05741993725599714
+          ],
+          "offset_from_HOP_center_box": 0.0,
+          "offset_in_provisional_R200c": 0.0,
+          "m200c_msun": 159838626536.10995,
+          "r200c_mpc": 0.11485402545329436,
+          "n200c_equiv": 1322.3695602983757,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -9.992007221626409e-16
+        },
+        {
+          "center_method": "densest_member_particle_64nn",
+          "center_box": [
+            0.2210221091043111,
+            0.4105099970182864,
+            0.057123122672539633
+          ],
+          "offset_from_HOP_center_box": 0.002673448274411287,
+          "offset_in_provisional_R200c": 0.8639000280220922,
+          "m200c_msun": 220434312889.17136,
+          "r200c_mpc": 0.12784351633612415,
+          "n200c_equiv": 1823.687000614178,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.3791053994033895
+        },
+        {
+          "center_method": "density_peak_64nn_centroid",
+          "center_box": [
+            0.22105668262562933,
+            0.41050688023757065,
+            0.05716137844977687
+          ],
+          "offset_from_HOP_center_box": 0.0026489488665490894,
+          "offset_in_provisional_R200c": 0.8559832714716639,
+          "m200c_msun": 220550574328.2051,
+          "r200c_mpc": 0.12786598812328137,
+          "n200c_equiv": 1824.648849394704,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.379832767008788
+        },
+        {
+          "center_method": "density_peak_128nn_centroid",
+          "center_box": [
+            0.2210405808465979,
+            0.4104923358420777,
+            0.05713200125760815
+          ],
+          "offset_from_HOP_center_box": 0.0026734057565812614,
+          "offset_in_provisional_R200c": 0.8638862887794437,
+          "m200c_msun": 220532736623.45892,
+          "r200c_mpc": 0.12786254084557225,
+          "n200c_equiv": 1824.501275317692,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.3797211687979378
+        },
+        {
+          "center_method": "density_peak_256nn_centroid",
+          "center_box": [
+            0.22107525528558253,
+            0.4104810658688551,
+            0.05712118930455711
+          ],
+          "offset_from_HOP_center_box": 0.00266044860761721,
+          "offset_in_provisional_R200c": 0.8596993061995787,
+          "m200c_msun": 220517758763.7962,
+          "r200c_mpc": 0.12785964611199846,
+          "n200c_equiv": 1824.3773611792535,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.3796274626645251
+        }
+      ]
+    },
+    {
+      "group_id": 438,
+      "hop_particles": 1590,
+      "hop_mass_msun": 192187890452.55292,
+      "reference_M200c_msun": 159541719133.6633,
+      "reference_R200c_mpc": 0.11478286587684788,
+      "r64_density_peak_box": 0.00036505371040377785,
+      "centers": [
+        {
+          "center_method": "hop_circular_mean",
+          "center_box": [
+            0.7034361916319899,
+            0.5099281925309489,
+            0.588581502870412
+          ],
+          "offset_from_HOP_center_box": 0.0,
+          "offset_in_provisional_R200c": 0.0,
+          "m200c_msun": 159541719133.66394,
+          "r200c_mpc": 0.11478286587684804,
+          "n200c_equiv": 1319.913199656831,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 3.9968028886505635e-15
+        },
+        {
+          "center_method": "densest_member_particle_64nn",
+          "center_box": [
+            0.7039454413407886,
+            0.5098558310186915,
+            0.5890715842315125
+          ],
+          "offset_from_HOP_center_box": 0.0007104584399286888,
+          "offset_in_provisional_R200c": 0.22972038597731906,
+          "m200c_msun": 159262639917.6993,
+          "r200c_mpc": 0.11471589863085763,
+          "n200c_equiv": 1317.6043343462286,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.0017492554140662309
+        },
+        {
+          "center_method": "density_peak_64nn_centroid",
+          "center_box": [
+            0.7039095668487052,
+            0.509863883534272,
+            0.589038371977197
+          ],
+          "offset_from_HOP_center_box": 0.000661021273173846,
+          "offset_in_provisional_R200c": 0.2137353200110572,
+          "m200c_msun": 160116229097.43503,
+          "r200c_mpc": 0.11492047858353235,
+          "n200c_equiv": 1324.666209017853,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.003601001461507325
+        },
+        {
+          "center_method": "density_peak_128nn_centroid",
+          "center_box": [
+            0.7039033237956862,
+            0.5098711819037937,
+            0.589034844946037
+          ],
+          "offset_from_HOP_center_box": 0.0006534383731463854,
+          "offset_in_provisional_R200c": 0.21128345706843313,
+          "m200c_msun": 159935274193.4384,
+          "r200c_mpc": 0.11487716991296591,
+          "n200c_equiv": 1323.1691412438263,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 0.0024667846248125347
+        },
+        {
+          "center_method": "density_peak_256nn_centroid",
+          "center_box": [
+            0.70384803406031,
+            0.5098861744513362,
+            0.5890053544734588
+          ],
+          "offset_from_HOP_center_box": 0.0005924777516365726,
+          "offset_in_provisional_R200c": 0.19157238501183674,
+          "m200c_msun": 159521978517.97168,
+          "r200c_mpc": 0.1147781315291653,
+          "n200c_equiv": 1319.749882504659,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.0001237332517087797
+        }
+      ]
+    },
+    {
+      "group_id": 476,
+      "hop_particles": 1435,
+      "hop_mass_msun": 173452592955.60596,
+      "reference_M200c_msun": 163546442414.89532,
+      "reference_R200c_mpc": 0.11573534446948731,
+      "r64_density_peak_box": 0.00028939478055622144,
+      "centers": [
+        {
+          "center_method": "hop_circular_mean",
+          "center_box": [
+            0.6307040772669448,
+            0.5594408512441138,
+            0.6178736943587616
+          ],
+          "offset_from_HOP_center_box": 0.0,
+          "offset_in_provisional_R200c": 0.0,
+          "m200c_msun": 163546442414.89575,
+          "r200c_mpc": 0.11573534446948741,
+          "n200c_equiv": 1353.0448917845958,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": 2.6645352591003757e-15
+        },
+        {
+          "center_method": "densest_member_particle_64nn",
+          "center_box": [
+            0.6308650713089549,
+            0.5594788540503697,
+            0.6178707377768576
+          ],
+          "offset_from_HOP_center_box": 0.00016544496433141263,
+          "offset_in_provisional_R200c": 0.05305489603271339,
+          "m200c_msun": 162261382395.2693,
+          "r200c_mpc": 0.11543141833937501,
+          "n200c_equiv": 1342.4133924409339,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.007857462385919778
+        },
+        {
+          "center_method": "density_peak_64nn_centroid",
+          "center_box": [
+            0.6308344252135337,
+            0.559484371376987,
+            0.6178937243074475
+          ],
+          "offset_from_HOP_center_box": 0.00013887328033001308,
+          "offset_in_provisional_R200c": 0.04453388762483948,
+          "m200c_msun": 162606149258.78714,
+          "r200c_mpc": 0.11551311527870606,
+          "n200c_equiv": 1345.2657017706351,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.00574939535353991
+        },
+        {
+          "center_method": "density_peak_128nn_centroid",
+          "center_box": [
+            0.6308079429218384,
+            0.559511021462749,
+            0.6179018104317604
+          ],
+          "offset_from_HOP_center_box": 0.00012846185196651265,
+          "offset_in_provisional_R200c": 0.041195150470706106,
+          "m200c_msun": 162679931895.6945,
+          "r200c_mpc": 0.11553058401840162,
+          "n200c_equiv": 1345.8761168826718,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.0052982535505273765
+        },
+        {
+          "center_method": "density_peak_256nn_centroid",
+          "center_box": [
+            0.6308046279408795,
+            0.5594918671462784,
+            0.6179105543613482
+          ],
+          "offset_from_HOP_center_box": 0.00011862428121211998,
+          "offset_in_provisional_R200c": 0.03804043799155652,
+          "m200c_msun": 162739657834.23184,
+          "r200c_mpc": 0.11554472083338181,
+          "n200c_equiv": 1346.3702387654332,
+          "crossing_bracketed": true,
+          "fractional_M200c_change_from_HOP_center": -0.004933061023833063
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "A 64-neighbor density peak is not a potential minimum or an unbound halo center.",
+    "Center and M200c sensitivity at this parent resolution do not measure concentration or establish a production zoom target.",
+    "No gas, galaxy counterpart, high-resolution IC, or contamination rerun is included."
+  ]
+}

@@ -1,0 +1,805 @@
+{
+  "status": "PRELIMINARY_Z0_LAGRANGIAN_TRACE_NO_TARGET_APPROVAL",
+  "parent_snapshot": "/gpfs/kjhan/RAR_QUMOND/runs/lcdm_z0_parent_direct_1271100/output_00003/data_00003.h5",
+  "parent_scale_factor": 1.000000000000001,
+  "parent_IC": "same 256^3 one-fluid GRAFIC input used by the verified ID-to-cell mapping",
+  "particle_mass_msun": 120872887.07707731,
+  "parent_IC_grid": [
+    256,
+    256,
+    256
+  ],
+  "reference": {
+    "source": "NGC 2403 Kroupa photometry and Moster z=0 relation",
+    "original_m200c_msun": 158089790331.11835,
+    "original_r200c_kpc": 111.11512981713406,
+    "original_h0": 70.4,
+    "original_concentration": 8.413479436608895,
+    "parent_h0": 67.36000061035156,
+    "r200c_kpc": 115.25809300343,
+    "comparison_m200c_msun": 161531551768.07782,
+    "reference_distance_mpc": 3.16
+  },
+  "eligible_parent_candidates": 830,
+  "candidate_selection": "Top 12 resolved provisional M200c candidates by absolute log-mass distance to NGC 2403 Kroupa photometry and Moster z=0 relation",
+  "trace_definition": "Union of HOP members and every z=0 parent particle within 2 or 3 provisional R200c from the HOP circular-mean center; IDs are mapped to inferred initial grid cells.",
+  "candidates": [
+    {
+      "rank_by_M200c_proximity": 1,
+      "group_id": 434,
+      "hop_particles": 1602,
+      "hop_mass_msun": 193638365097.47784,
+      "center_box": [
+        0.7059001706030695,
+        0.04343216348298239,
+        0.42243487585123374
+      ],
+      "center_definition": "HOP periodic circular mean",
+      "provisional_M200c_msun": 161509931665.3078,
+      "provisional_R200c_mpc": 0.11525295058907382,
+      "equivalent_particles_inside_M200c": 1336.1965248858278,
+      "log10_mass_offset_from_NGC2403_NFW_reference_dex": 5.8131799330681224e-05,
+      "nearest_HOP_neighbor": {
+        "group_id": 507,
+        "hop_mass_msun": 159431338054.66498,
+        "center_distance_mpc_h": 1.4414589560905917,
+        "definition": "nearest listed HOP center with >=500 members and >=half this candidate's HOP mass; not an isolation criterion"
+      },
+      "traces": [
+        {
+          "radius_multiple_R200c": 2.0,
+          "sphere_particle_count": 1907,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 1907,
+          "unique_parent_IC_cells": 1907,
+          "parent_IC_cell_fraction": 0.00011366605758666992,
+          "periodic_minimum_bbox_start_xyz": [
+            0.658203125,
+            0.986328125,
+            0.435546875
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.07421875,
+            0.09765625,
+            0.05859375
+          ],
+          "bbox_volume_fraction": 0.0004246830940246582,
+          "saved_array_prefix": "g434_r2"
+        },
+        {
+          "radius_multiple_R200c": 3.0,
+          "sphere_particle_count": 2196,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 2196,
+          "unique_parent_IC_cells": 2196,
+          "parent_IC_cell_fraction": 0.0001308917999267578,
+          "periodic_minimum_bbox_start_xyz": [
+            0.658203125,
+            0.978515625,
+            0.427734375
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.07421875,
+            0.109375,
+            0.06640625
+          ],
+          "bbox_volume_fraction": 0.0005390644073486328,
+          "saved_array_prefix": "g434_r3"
+        }
+      ]
+    },
+    {
+      "rank_by_M200c_proximity": 2,
+      "group_id": 295,
+      "hop_particles": 2345,
+      "hop_mass_msun": 283446920195.7463,
+      "center_box": [
+        0.4246975797222103,
+        0.583461080196895,
+        0.954087187203053
+      ],
+      "center_definition": "HOP periodic circular mean",
+      "provisional_M200c_msun": 162104886858.0552,
+      "provisional_R200c_mpc": 0.11539429652147397,
+      "equivalent_particles_inside_M200c": 1341.1186807731776,
+      "log10_mass_offset_from_NGC2403_NFW_reference_dex": 0.0015387422219564006,
+      "nearest_HOP_neighbor": {
+        "group_id": 88,
+        "hop_mass_msun": 1146841952587.3096,
+        "center_distance_mpc_h": 0.6812389513962086,
+        "definition": "nearest listed HOP center with >=500 members and >=half this candidate's HOP mass; not an isolation criterion"
+      },
+      "traces": [
+        {
+          "radius_multiple_R200c": 2.0,
+          "sphere_particle_count": 2614,
+          "HOP_members_outside_sphere": 49,
+          "union_particle_count": 2663,
+          "unique_parent_IC_cells": 2663,
+          "parent_IC_cell_fraction": 0.00015872716903686523,
+          "periodic_minimum_bbox_start_xyz": [
+            0.361328125,
+            0.587890625,
+            0.708984375
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.171875,
+            0.22265625,
+            0.50390625
+          ],
+          "bbox_volume_fraction": 0.01928400993347168,
+          "saved_array_prefix": "g295_r2"
+        },
+        {
+          "radius_multiple_R200c": 3.0,
+          "sphere_particle_count": 3152,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 3152,
+          "unique_parent_IC_cells": 3152,
+          "parent_IC_cell_fraction": 0.00018787384033203125,
+          "periodic_minimum_bbox_start_xyz": [
+            0.353515625,
+            0.576171875,
+            0.708984375
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.19140625,
+            0.25,
+            0.50390625
+          ],
+          "bbox_volume_fraction": 0.024112701416015625,
+          "saved_array_prefix": "g295_r3"
+        }
+      ]
+    },
+    {
+      "rank_by_M200c_proximity": 3,
+      "group_id": 451,
+      "hop_particles": 1531,
+      "hop_mass_msun": 185056390115.00537,
+      "center_box": [
+        0.9643718059433939,
+        0.21808250191851344,
+        0.1469407074066792
+      ],
+      "center_definition": "HOP periodic circular mean",
+      "provisional_M200c_msun": 162203004931.72586,
+      "provisional_R200c_mpc": 0.1154175735957849,
+      "equivalent_particles_inside_M200c": 1341.9304266993595,
+      "log10_mass_offset_from_NGC2403_NFW_reference_dex": 0.001801530395473504,
+      "nearest_HOP_neighbor": {
+        "group_id": 562,
+        "hop_mass_msun": 142025642315.56586,
+        "center_distance_mpc_h": 0.6640942866696232,
+        "definition": "nearest listed HOP center with >=500 members and >=half this candidate's HOP mass; not an isolation criterion"
+      },
+      "traces": [
+        {
+          "radius_multiple_R200c": 2.0,
+          "sphere_particle_count": 1814,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 1814,
+          "unique_parent_IC_cells": 1814,
+          "parent_IC_cell_fraction": 0.0001081228256225586,
+          "periodic_minimum_bbox_start_xyz": [
+            0.880859375,
+            0.080078125,
+            0.240234375
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.09765625,
+            0.05859375,
+            0.078125
+          ],
+          "bbox_volume_fraction": 0.0004470348358154297,
+          "saved_array_prefix": "g451_r2"
+        },
+        {
+          "radius_multiple_R200c": 3.0,
+          "sphere_particle_count": 2015,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 2015,
+          "unique_parent_IC_cells": 2015,
+          "parent_IC_cell_fraction": 0.00012010335922241211,
+          "periodic_minimum_bbox_start_xyz": [
+            0.880859375,
+            0.080078125,
+            0.240234375
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.1015625,
+            0.0625,
+            0.08203125
+          ],
+          "bbox_volume_fraction": 0.0005207061767578125,
+          "saved_array_prefix": "g451_r3"
+        }
+      ]
+    },
+    {
+      "rank_by_M200c_proximity": 4,
+      "group_id": 370,
+      "hop_particles": 1854,
+      "hop_mass_msun": 224098332640.90134,
+      "center_box": [
+        0.5094635842894564,
+        0.444436305299756,
+        0.5038538277742936
+      ],
+      "center_definition": "HOP periodic circular mean",
+      "provisional_M200c_msun": 162306087886.4547,
+      "provisional_R200c_mpc": 0.1154420184060221,
+      "equivalent_particles_inside_M200c": 1342.7832478507491,
+      "log10_mass_offset_from_NGC2403_NFW_reference_dex": 0.0020774447591298856,
+      "nearest_HOP_neighbor": {
+        "group_id": 652,
+        "hop_mass_msun": 119905903980.4607,
+        "center_distance_mpc_h": 0.9727902230128086,
+        "definition": "nearest listed HOP center with >=500 members and >=half this candidate's HOP mass; not an isolation criterion"
+      },
+      "traces": [
+        {
+          "radius_multiple_R200c": 2.0,
+          "sphere_particle_count": 2200,
+          "HOP_members_outside_sphere": 24,
+          "union_particle_count": 2224,
+          "unique_parent_IC_cells": 2224,
+          "parent_IC_cell_fraction": 0.00013256072998046875,
+          "periodic_minimum_bbox_start_xyz": [
+            0.462890625,
+            0.271484375,
+            0.447265625
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.13671875,
+            0.05859375,
+            0.1171875
+          ],
+          "bbox_volume_fraction": 0.0009387731552124023,
+          "saved_array_prefix": "g370_r2"
+        },
+        {
+          "radius_multiple_R200c": 3.0,
+          "sphere_particle_count": 2558,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 2558,
+          "unique_parent_IC_cells": 2558,
+          "parent_IC_cell_fraction": 0.00015246868133544922,
+          "periodic_minimum_bbox_start_xyz": [
+            0.462890625,
+            0.271484375,
+            0.447265625
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.13671875,
+            0.05859375,
+            0.1171875
+          ],
+          "bbox_volume_fraction": 0.0009387731552124023,
+          "saved_array_prefix": "g370_r3"
+        }
+      ]
+    },
+    {
+      "rank_by_M200c_proximity": 5,
+      "group_id": 446,
+      "hop_particles": 1552,
+      "hop_mass_msun": 187594720743.624,
+      "center_box": [
+        0.5078077852104772,
+        0.18823471598084962,
+        0.6262117274595649
+      ],
+      "center_definition": "HOP periodic circular mean",
+      "provisional_M200c_msun": 160627761099.47214,
+      "provisional_R200c_mpc": 0.1150427293841849,
+      "equivalent_particles_inside_M200c": 1328.8981920076437,
+      "log10_mass_offset_from_NGC2403_NFW_reference_dex": 0.0024367591699685936,
+      "nearest_HOP_neighbor": {
+        "group_id": 322,
+        "hop_mass_msun": 252986952652.3228,
+        "center_distance_mpc_h": 0.3127476562132035,
+        "definition": "nearest listed HOP center with >=500 members and >=half this candidate's HOP mass; not an isolation criterion"
+      },
+      "traces": [
+        {
+          "radius_multiple_R200c": 2.0,
+          "sphere_particle_count": 1936,
+          "HOP_members_outside_sphere": 15,
+          "union_particle_count": 1951,
+          "unique_parent_IC_cells": 1951,
+          "parent_IC_cell_fraction": 0.00011628866195678711,
+          "periodic_minimum_bbox_start_xyz": [
+            0.498046875,
+            0.083984375,
+            0.517578125
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.09765625,
+            0.08203125,
+            0.09765625
+          ],
+          "bbox_volume_fraction": 0.000782310962677002,
+          "saved_array_prefix": "g446_r2"
+        },
+        {
+          "radius_multiple_R200c": 3.0,
+          "sphere_particle_count": 2286,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 2286,
+          "unique_parent_IC_cells": 2286,
+          "parent_IC_cell_fraction": 0.00013625621795654297,
+          "periodic_minimum_bbox_start_xyz": [
+            0.498046875,
+            0.083984375,
+            0.517578125
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.09765625,
+            0.08203125,
+            0.09765625
+          ],
+          "bbox_volume_fraction": 0.000782310962677002,
+          "saved_array_prefix": "g446_r3"
+        }
+      ]
+    },
+    {
+      "rank_by_M200c_proximity": 6,
+      "group_id": 428,
+      "hop_particles": 1608,
+      "hop_mass_msun": 194363602419.9403,
+      "center_box": [
+        0.05030884886061701,
+        0.7958595275503564,
+        0.7666786314609899
+      ],
+      "center_definition": "HOP periodic circular mean",
+      "provisional_M200c_msun": 160615010270.04178,
+      "provisional_R200c_mpc": 0.1150396852258033,
+      "equivalent_particles_inside_M200c": 1328.7927024331107,
+      "log10_mass_offset_from_NGC2403_NFW_reference_dex": 0.0024712353690164064,
+      "nearest_HOP_neighbor": {
+        "group_id": 290,
+        "hop_mass_msun": 289853183210.8314,
+        "center_distance_mpc_h": 0.37773202816662615,
+        "definition": "nearest listed HOP center with >=500 members and >=half this candidate's HOP mass; not an isolation criterion"
+      },
+      "traces": [
+        {
+          "radius_multiple_R200c": 2.0,
+          "sphere_particle_count": 1987,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 1987,
+          "unique_parent_IC_cells": 1987,
+          "parent_IC_cell_fraction": 0.00011843442916870117,
+          "periodic_minimum_bbox_start_xyz": [
+            0.833984375,
+            0.654296875,
+            0.572265625
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.3671875,
+            0.2421875,
+            0.25
+          ],
+          "bbox_volume_fraction": 0.0222320556640625,
+          "saved_array_prefix": "g428_r2"
+        },
+        {
+          "radius_multiple_R200c": 3.0,
+          "sphere_particle_count": 2758,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 2758,
+          "unique_parent_IC_cells": 2758,
+          "parent_IC_cell_fraction": 0.00016438961029052734,
+          "periodic_minimum_bbox_start_xyz": [
+            0.833984375,
+            0.654296875,
+            0.572265625
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.3671875,
+            0.26953125,
+            0.26953125
+          ],
+          "bbox_volume_fraction": 0.026675105094909668,
+          "saved_array_prefix": "g428_r3"
+        }
+      ]
+    },
+    {
+      "rank_by_M200c_proximity": 7,
+      "group_id": 397,
+      "hop_particles": 1739,
+      "hop_mass_msun": 210197950627.03745,
+      "center_box": [
+        0.3273738239733909,
+        0.6167031271911745,
+        0.6437563892574807
+      ],
+      "center_definition": "HOP periodic circular mean",
+      "provisional_M200c_msun": 160336748809.78958,
+      "provisional_R200c_mpc": 0.1149732123710246,
+      "equivalent_particles_inside_M200c": 1326.490602541389,
+      "log10_mass_offset_from_NGC2403_NFW_reference_dex": 0.003224292135799297,
+      "nearest_HOP_neighbor": {
+        "group_id": 47,
+        "hop_mass_msun": 2016401502219.8037,
+        "center_distance_mpc_h": 0.3612475407080514,
+        "definition": "nearest listed HOP center with >=500 members and >=half this candidate's HOP mass; not an isolation criterion"
+      },
+      "traces": [
+        {
+          "radius_multiple_R200c": 2.0,
+          "sphere_particle_count": 2078,
+          "HOP_members_outside_sphere": 47,
+          "union_particle_count": 2125,
+          "unique_parent_IC_cells": 2125,
+          "parent_IC_cell_fraction": 0.00012665987014770508,
+          "periodic_minimum_bbox_start_xyz": [
+            0.220703125,
+            0.537109375,
+            0.521484375
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.1796875,
+            0.19140625,
+            0.1171875
+          ],
+          "bbox_volume_fraction": 0.004030466079711914,
+          "saved_array_prefix": "g397_r2"
+        },
+        {
+          "radius_multiple_R200c": 3.0,
+          "sphere_particle_count": 2798,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 2798,
+          "unique_parent_IC_cells": 2798,
+          "parent_IC_cell_fraction": 0.00016677379608154297,
+          "periodic_minimum_bbox_start_xyz": [
+            0.220703125,
+            0.533203125,
+            0.517578125
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.1796875,
+            0.1953125,
+            0.125
+          ],
+          "bbox_volume_fraction": 0.00438690185546875,
+          "saved_array_prefix": "g397_r3"
+        }
+      ]
+    },
+    {
+      "rank_by_M200c_proximity": 8,
+      "group_id": 461,
+      "hop_particles": 1499,
+      "hop_mass_msun": 181188457728.53888,
+      "center_box": [
+        0.9012041538829181,
+        0.7032282011498145,
+        0.7823583939165458
+      ],
+      "center_definition": "HOP periodic circular mean",
+      "provisional_M200c_msun": 162922855489.6736,
+      "provisional_R200c_mpc": 0.11558806118932301,
+      "equivalent_particles_inside_M200c": 1347.8858611673782,
+      "log10_mass_offset_from_NGC2403_NFW_reference_dex": 0.003724648018602764,
+      "nearest_HOP_neighbor": {
+        "group_id": 420,
+        "hop_mass_msun": 196297568613.17355,
+        "center_distance_mpc_h": 1.1162212422714233,
+        "definition": "nearest listed HOP center with >=500 members and >=half this candidate's HOP mass; not an isolation criterion"
+      },
+      "traces": [
+        {
+          "radius_multiple_R200c": 2.0,
+          "sphere_particle_count": 1948,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 1948,
+          "unique_parent_IC_cells": 1948,
+          "parent_IC_cell_fraction": 0.00011610984802246094,
+          "periodic_minimum_bbox_start_xyz": [
+            0.794921875,
+            0.701171875,
+            0.544921875
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.0703125,
+            0.09765625,
+            0.1328125
+          ],
+          "bbox_volume_fraction": 0.0009119510650634766,
+          "saved_array_prefix": "g461_r2"
+        },
+        {
+          "radius_multiple_R200c": 3.0,
+          "sphere_particle_count": 2333,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 2333,
+          "unique_parent_IC_cells": 2333,
+          "parent_IC_cell_fraction": 0.00013905763626098633,
+          "periodic_minimum_bbox_start_xyz": [
+            0.794921875,
+            0.701171875,
+            0.544921875
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.0703125,
+            0.1015625,
+            0.140625
+          ],
+          "bbox_volume_fraction": 0.0010042190551757812,
+          "saved_array_prefix": "g461_r3"
+        }
+      ]
+    },
+    {
+      "rank_by_M200c_proximity": 9,
+      "group_id": 444,
+      "hop_particles": 1556,
+      "hop_mass_msun": 188078212291.9323,
+      "center_box": [
+        0.16686517372718135,
+        0.3145270217264684,
+        0.15670956843992478
+      ],
+      "center_definition": "HOP periodic circular mean",
+      "provisional_M200c_msun": 160107191033.01126,
+      "provisional_R200c_mpc": 0.11491831624134186,
+      "equivalent_particles_inside_M200c": 1324.591435719702,
+      "log10_mass_offset_from_NGC2403_NFW_reference_dex": 0.0038465269818448,
+      "nearest_HOP_neighbor": {
+        "group_id": 431,
+        "hop_mass_msun": 193880110871.63202,
+        "center_distance_mpc_h": 1.0678214315336187,
+        "definition": "nearest listed HOP center with >=500 members and >=half this candidate's HOP mass; not an isolation criterion"
+      },
+      "traces": [
+        {
+          "radius_multiple_R200c": 2.0,
+          "sphere_particle_count": 1858,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 1858,
+          "unique_parent_IC_cells": 1858,
+          "parent_IC_cell_fraction": 0.00011074542999267578,
+          "periodic_minimum_bbox_start_xyz": [
+            0.119140625,
+            0.197265625,
+            0.306640625
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.0703125,
+            0.0625,
+            0.06640625
+          ],
+          "bbox_volume_fraction": 0.0002918243408203125,
+          "saved_array_prefix": "g444_r2"
+        },
+        {
+          "radius_multiple_R200c": 3.0,
+          "sphere_particle_count": 2064,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 2064,
+          "unique_parent_IC_cells": 2064,
+          "parent_IC_cell_fraction": 0.00012302398681640625,
+          "periodic_minimum_bbox_start_xyz": [
+            0.119140625,
+            0.197265625,
+            0.306640625
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.0703125,
+            0.0625,
+            0.0703125
+          ],
+          "bbox_volume_fraction": 0.000308990478515625,
+          "saved_array_prefix": "g444_r3"
+        }
+      ]
+    },
+    {
+      "rank_by_M200c_proximity": 10,
+      "group_id": 223,
+      "hop_particles": 3265,
+      "hop_mass_msun": 394649976306.6574,
+      "center_box": [
+        0.22279633637885204,
+        0.41248770891774866,
+        0.05741993725599714
+      ],
+      "center_definition": "HOP periodic circular mean",
+      "provisional_M200c_msun": 159838626536.1101,
+      "provisional_R200c_mpc": 0.1148540254532944,
+      "equivalent_particles_inside_M200c": 1322.369560298377,
+      "log10_mass_offset_from_NGC2403_NFW_reference_dex": 0.004575626098185913,
+      "nearest_HOP_neighbor": {
+        "group_id": 252,
+        "hop_mass_msun": 342553761976.43713,
+        "center_distance_mpc_h": 1.8166324903290376,
+        "definition": "nearest listed HOP center with >=500 members and >=half this candidate's HOP mass; not an isolation criterion"
+      },
+      "traces": [
+        {
+          "radius_multiple_R200c": 2.0,
+          "sphere_particle_count": 3341,
+          "HOP_members_outside_sphere": 139,
+          "union_particle_count": 3480,
+          "unique_parent_IC_cells": 3480,
+          "parent_IC_cell_fraction": 0.00020742416381835938,
+          "periodic_minimum_bbox_start_xyz": [
+            0.111328125,
+            0.236328125,
+            0.013671875
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.08203125,
+            0.2578125,
+            0.1640625
+          ],
+          "bbox_volume_fraction": 0.003469705581665039,
+          "saved_array_prefix": "g223_r2"
+        },
+        {
+          "radius_multiple_R200c": 3.0,
+          "sphere_particle_count": 3893,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 3893,
+          "unique_parent_IC_cells": 3893,
+          "parent_IC_cell_fraction": 0.0002320408821105957,
+          "periodic_minimum_bbox_start_xyz": [
+            0.111328125,
+            0.232421875,
+            0.009765625
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.08203125,
+            0.265625,
+            0.171875
+          ],
+          "bbox_volume_fraction": 0.0037450790405273438,
+          "saved_array_prefix": "g223_r3"
+        }
+      ]
+    },
+    {
+      "rank_by_M200c_proximity": 11,
+      "group_id": 438,
+      "hop_particles": 1590,
+      "hop_mass_msun": 192187890452.55292,
+      "center_box": [
+        0.7034361916319899,
+        0.5099281925309489,
+        0.588581502870412
+      ],
+      "center_definition": "HOP periodic circular mean",
+      "provisional_M200c_msun": 159541719133.6633,
+      "provisional_R200c_mpc": 0.11478286587684788,
+      "equivalent_particles_inside_M200c": 1319.9131996568258,
+      "log10_mass_offset_from_NGC2403_NFW_reference_dex": 0.0053830977251220335,
+      "nearest_HOP_neighbor": {
+        "group_id": 575,
+        "hop_mass_msun": 137432472606.6369,
+        "center_distance_mpc_h": 0.5821370890957966,
+        "definition": "nearest listed HOP center with >=500 members and >=half this candidate's HOP mass; not an isolation criterion"
+      },
+      "traces": [
+        {
+          "radius_multiple_R200c": 2.0,
+          "sphere_particle_count": 1922,
+          "HOP_members_outside_sphere": 6,
+          "union_particle_count": 1928,
+          "unique_parent_IC_cells": 1928,
+          "parent_IC_cell_fraction": 0.00011491775512695312,
+          "periodic_minimum_bbox_start_xyz": [
+            0.712890625,
+            0.337890625,
+            0.478515625
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.06640625,
+            0.13671875,
+            0.078125
+          ],
+          "bbox_volume_fraction": 0.0007092952728271484,
+          "saved_array_prefix": "g438_r2"
+        },
+        {
+          "radius_multiple_R200c": 3.0,
+          "sphere_particle_count": 2446,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 2446,
+          "unique_parent_IC_cells": 2446,
+          "parent_IC_cell_fraction": 0.00014579296112060547,
+          "periodic_minimum_bbox_start_xyz": [
+            0.708984375,
+            0.337890625,
+            0.455078125
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.09375,
+            0.2734375,
+            0.1015625
+          ],
+          "bbox_volume_fraction": 0.0026035308837890625,
+          "saved_array_prefix": "g438_r3"
+        }
+      ]
+    },
+    {
+      "rank_by_M200c_proximity": 12,
+      "group_id": 476,
+      "hop_particles": 1435,
+      "hop_mass_msun": 173452592955.60596,
+      "center_box": [
+        0.6307040772669448,
+        0.5594408512441138,
+        0.6178736943587616
+      ],
+      "center_definition": "HOP periodic circular mean",
+      "provisional_M200c_msun": 163546442414.89532,
+      "provisional_R200c_mpc": 0.11573534446948731,
+      "equivalent_particles_inside_M200c": 1353.0448917845924,
+      "log10_mass_offset_from_NGC2403_NFW_reference_dex": 0.005383736280247264,
+      "nearest_HOP_neighbor": {
+        "group_id": 100,
+        "hop_mass_msun": 949335655103.3652,
+        "center_distance_mpc_h": 0.5538695998955898,
+        "definition": "nearest listed HOP center with >=500 members and >=half this candidate's HOP mass; not an isolation criterion"
+      },
+      "traces": [
+        {
+          "radius_multiple_R200c": 2.0,
+          "sphere_particle_count": 1711,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 1711,
+          "unique_parent_IC_cells": 1711,
+          "parent_IC_cell_fraction": 0.00010198354721069336,
+          "periodic_minimum_bbox_start_xyz": [
+            0.568359375,
+            0.384765625,
+            0.447265625
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.1328125,
+            0.31640625,
+            0.16015625
+          ],
+          "bbox_volume_fraction": 0.006730198860168457,
+          "saved_array_prefix": "g476_r2"
+        },
+        {
+          "radius_multiple_R200c": 3.0,
+          "sphere_particle_count": 1941,
+          "HOP_members_outside_sphere": 0,
+          "union_particle_count": 1941,
+          "unique_parent_IC_cells": 1941,
+          "parent_IC_cell_fraction": 0.0001156926155090332,
+          "periodic_minimum_bbox_start_xyz": [
+            0.564453125,
+            0.380859375,
+            0.447265625
+          ],
+          "periodic_minimum_bbox_width_xyz": [
+            0.15234375,
+            0.32421875,
+            0.16015625
+          ],
+          "bbox_volume_fraction": 0.007910549640655518,
+          "saved_array_prefix": "g476_r3"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Parent is a 256^3, 25 Mpc/h one-fluid DMO screening run; centers and M200c values are provisional.",
+    "HOP circular-mean centers are not potential minima; members are not unbound-cleaned.",
+    "The ID-to-cell map is inferred from the same IC's early output, not directly recorded particle provenance.",
+    "A 2-3 R200c z=0 trace is a feasibility region only; it does not include a validated dynamical buffer or prove low-resolution contamination control.",
+    "No high-resolution IC, rerun, galaxy counterpart, gas, or RAR prediction is produced by this analysis."
+  ],
+  "hop_groups_in_tag_file": 7501,
+  "saved_arrays": "candidate_traces.npz stores particle IDs and inferred initial-cell coordinates for each candidate and radius."
+}
