@@ -1,0 +1,297 @@
+{
+  "scope": "GR CAMB transfer comparison on equally spaced log-k points, not an IC power-spectrum or solver-accuracy convergence test",
+  "reference": "/gpfs/kjhan/RAR_QUMOND/transfer_probes/lcdm_g205_z99_highk_1290351_1/transfer_z99.dat",
+  "sampling_100": "/gpfs/kjhan/RAR_QUMOND/transfer_probes/lcdm_g205_z99_highk_1290351_0/transfer_z99.dat",
+  "original_table": "lcdm_g205_multifluid_l11_z99_diag_1290084/transfer.dat",
+  "interpolation": "natural cubic in log(k) and log(T) for strictly positive columns, otherwise signed T; high-k original uses last-two-node extrapolation",
+  "bands": [
+    {
+      "k_h_Mpc": [
+        0.25,
+        1
+      ],
+      "fields": {
+        "cdm_density": {
+          "sample100_vs_200_relative_l2": 1.2572856626064179e-06,
+          "original_vs_200_relative_l2": 6.339214273622065e-06,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_density": {
+          "sample100_vs_200_relative_l2": 4.207595964571307e-06,
+          "original_vs_200_relative_l2": 5.277273171994037e-05,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "cdm_velocity": {
+          "sample100_vs_200_relative_l2": 1.5240251970670996e-06,
+          "original_vs_200_relative_l2": 1.0374929281909359e-05,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_velocity": {
+          "sample100_vs_200_relative_l2": 2.044941233964207e-06,
+          "original_vs_200_relative_l2": 1.9582921251568517e-05,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        }
+      }
+    },
+    {
+      "k_h_Mpc": [
+        1,
+        4
+      ],
+      "fields": {
+        "cdm_density": {
+          "sample100_vs_200_relative_l2": 1.1838992596095778e-06,
+          "original_vs_200_relative_l2": 5.635923967102126e-06,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_density": {
+          "sample100_vs_200_relative_l2": 1.6496922405890098e-06,
+          "original_vs_200_relative_l2": 2.073370845487656e-05,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "cdm_velocity": {
+          "sample100_vs_200_relative_l2": 1.26249048751805e-06,
+          "original_vs_200_relative_l2": 6.840416212076285e-06,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_velocity": {
+          "sample100_vs_200_relative_l2": 1.3124483759083803e-06,
+          "original_vs_200_relative_l2": 9.626241341977926e-06,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        }
+      }
+    },
+    {
+      "k_h_Mpc": [
+        4,
+        16
+      ],
+      "fields": {
+        "cdm_density": {
+          "sample100_vs_200_relative_l2": 2.710029879725644e-07,
+          "original_vs_200_relative_l2": 1.1466116462330248e-06,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_density": {
+          "sample100_vs_200_relative_l2": 3.7604835849880125e-07,
+          "original_vs_200_relative_l2": 1.4109698877955607e-06,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "cdm_velocity": {
+          "sample100_vs_200_relative_l2": 2.866671605030335e-07,
+          "original_vs_200_relative_l2": 1.1517459120125721e-06,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_velocity": {
+          "sample100_vs_200_relative_l2": 2.9362896609320033e-07,
+          "original_vs_200_relative_l2": 1.0856601764491301e-06,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        }
+      }
+    },
+    {
+      "k_h_Mpc": [
+        16,
+        32
+      ],
+      "fields": {
+        "cdm_density": {
+          "sample100_vs_200_relative_l2": 1.0250986817442762e-07,
+          "original_vs_200_relative_l2": 2.545728331701312e-07,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_density": {
+          "sample100_vs_200_relative_l2": 1.3040391498547504e-07,
+          "original_vs_200_relative_l2": 2.8497634562029253e-07,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "cdm_velocity": {
+          "sample100_vs_200_relative_l2": 1.052120265958948e-07,
+          "original_vs_200_relative_l2": 2.025764204085234e-07,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_velocity": {
+          "sample100_vs_200_relative_l2": 1.1011399431100187e-07,
+          "original_vs_200_relative_l2": 2.7949729057385286e-07,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        }
+      }
+    },
+    {
+      "k_h_Mpc": [
+        32,
+        64
+      ],
+      "fields": {
+        "cdm_density": {
+          "sample100_vs_200_relative_l2": 7.344141180942684e-08,
+          "original_vs_200_relative_l2": 2.4259731302817915e-07,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_density": {
+          "sample100_vs_200_relative_l2": 8.082167677017115e-08,
+          "original_vs_200_relative_l2": 4.924939908521516e-07,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "cdm_velocity": {
+          "sample100_vs_200_relative_l2": 6.593145266387329e-08,
+          "original_vs_200_relative_l2": 2.657837277860015e-07,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_velocity": {
+          "sample100_vs_200_relative_l2": 7.217002300068532e-08,
+          "original_vs_200_relative_l2": 6.57456410642075e-07,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        }
+      }
+    },
+    {
+      "k_h_Mpc": [
+        64,
+        128
+      ],
+      "fields": {
+        "cdm_density": {
+          "sample100_vs_200_relative_l2": 5.253700814799169e-08,
+          "original_vs_200_relative_l2": 3.501580930861327e-06,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_density": {
+          "sample100_vs_200_relative_l2": 6.404814638640648e-08,
+          "original_vs_200_relative_l2": 3.0600317821219346e-05,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "cdm_velocity": {
+          "sample100_vs_200_relative_l2": 6.122310467990797e-08,
+          "original_vs_200_relative_l2": 4.784636974230764e-06,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_velocity": {
+          "sample100_vs_200_relative_l2": 5.746759203695502e-08,
+          "original_vs_200_relative_l2": 4.12237297626209e-05,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        }
+      }
+    },
+    {
+      "k_h_Mpc": [
+        128,
+        155
+      ],
+      "fields": {
+        "cdm_density": {
+          "sample100_vs_200_relative_l2": 5.7393451461333885e-08,
+          "original_vs_200_relative_l2": 3.8774651527377966e-05,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_density": {
+          "sample100_vs_200_relative_l2": 3.8808758106565416e-08,
+          "original_vs_200_relative_l2": 0.000335124266531741,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "cdm_velocity": {
+          "sample100_vs_200_relative_l2": 4.668467317842722e-08,
+          "original_vs_200_relative_l2": 5.2578066716449846e-05,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_velocity": {
+          "sample100_vs_200_relative_l2": 6.441700320044074e-08,
+          "original_vs_200_relative_l2": 0.000452060473677471,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        }
+      }
+    },
+    {
+      "k_h_Mpc": [
+        155,
+        257
+      ],
+      "fields": {
+        "cdm_density": {
+          "sample100_vs_200_relative_l2": 5.5642255769390296e-08,
+          "original_vs_200_relative_l2": 0.0014094728585031116,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_density": {
+          "sample100_vs_200_relative_l2": 5.603817011465532e-08,
+          "original_vs_200_relative_l2": 0.013664883368526552,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "cdm_velocity": {
+          "sample100_vs_200_relative_l2": 5.732841619046028e-08,
+          "original_vs_200_relative_l2": 0.001982360358015732,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_velocity": {
+          "sample100_vs_200_relative_l2": 5.653272834161296e-08,
+          "original_vs_200_relative_l2": 0.018367659729377563,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        }
+      }
+    },
+    {
+      "k_h_Mpc": [
+        257,
+        445
+      ],
+      "fields": {
+        "cdm_density": {
+          "sample100_vs_200_relative_l2": 5.390896176788571e-08,
+          "original_vs_200_relative_l2": 0.008333583493055812,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_density": {
+          "sample100_vs_200_relative_l2": 6.184555444708856e-08,
+          "original_vs_200_relative_l2": 0.10964743694608392,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "cdm_velocity": {
+          "sample100_vs_200_relative_l2": 5.046860058833961e-08,
+          "original_vs_200_relative_l2": 0.012671940224668065,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        },
+        "baryon_velocity": {
+          "sample100_vs_200_relative_l2": 6.306614790766226e-08,
+          "original_vs_200_relative_l2": 0.14943426346181,
+          "sample100_sign_disagreement_fraction": 0.0,
+          "original_sign_disagreement_fraction": 0.0
+        }
+      }
+    }
+  ]
+}
