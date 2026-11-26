@@ -1,0 +1,163 @@
+{
+  "status": "BASE_FIELDS_MATCHED_DESCRIPTIVE_AUDIT_COMPLETE",
+  "purpose": "Compare realized level-8 baryon density, velocity, and CDM displacement modes against the two-fluid Lambda-CDM parent.",
+  "scope": {
+    "candidate_group": 205,
+    "zoom_ic": "/gpfs/kjhan/RAR_QUMOND/analysis/lcdm_photo_audit_reference_1578549/reference",
+    "parent_ic": "/gpfs/kjhan/RAR_QUMOND/initial_conditions/qumond_lcdm_grafic_z49_n256_1260246",
+    "grid": [
+      256,
+      256,
+      256
+    ],
+    "box_length_mpc_h": 25.0,
+    "start_redshift": 49,
+    "registered_parent_shift_xyz_base_cells": [
+      46,
+      -54,
+      56
+    ],
+    "zoom_transfer_sha256": "96d94a9ba8b69f102511435032698bdc53199f15b3d6d89012e7ce9224d28493",
+    "parent_transfer_sha256": "96d94a9ba8b69f102511435032698bdc53199f15b3d6d89012e7ce9224d28493",
+    "transfer_relative_l2_at_parent_nodes": {
+      "cdm_density": 4.707170727454577e-16,
+      "gas_density": 5.429204324965412e-16,
+      "total_density": 5.419768872917329e-16,
+      "cdm_velocity": 5.185655309309313e-16,
+      "gas_velocity": 5.33579601889065e-16
+    },
+    "base_level_random_seed": 20261103,
+    "fields": [
+      "ic_deltab",
+      "ic_velbx",
+      "ic_velby",
+      "ic_velbz",
+      "ic_velcx",
+      "ic_velcy",
+      "ic_velcz",
+      "ic_poscx",
+      "ic_poscy",
+      "ic_poscz"
+    ],
+    "shells_csv": "shell_coherence.csv"
+  },
+  "field_results": {
+    "ic_deltab": {
+      "zoom_mean": 1.3496287420977637e-12,
+      "parent_mean": -1.7444379274422772e-14,
+      "zoom_rms_after_mean_removal": 0.139196023307017,
+      "parent_rms_after_mean_removal": 0.13924621545921284,
+      "zoom_to_parent_rms_ratio": 0.999639543868174,
+      "difference_rms_over_parent_rms": 0.019424632084634942,
+      "registered_pearson_correlation": 0.9998113387944115,
+      "zoom_file_sha256": "0760a1ee8d764a9bba4a10bc6e2d2e393834482016532b3b02b06cf536e6576c",
+      "parent_file_sha256": "57b3beb5241318fddf7044e3c8088af26efb0ad3187f877a76089e4d51268f48"
+    },
+    "ic_velbx": {
+      "zoom_mean": -0.0001634412499976116,
+      "parent_mean": 1.3741131903123247e-10,
+      "zoom_rms_after_mean_removal": 23.29984037846694,
+      "parent_rms_after_mean_removal": 23.3069367191333,
+      "zoom_to_parent_rms_ratio": 0.9996955266686532,
+      "difference_rms_over_parent_rms": 0.011615884851688928,
+      "registered_pearson_correlation": 0.9999325614283143,
+      "zoom_file_sha256": "6f42b3aaaed7508b4b1fba45788bd3f72e0a7a1beea72e949b60b0b7f0b753b7",
+      "parent_file_sha256": "7c08b420aac6ef54eb9bf6b7976e03bd52c555d57a81d40ed62689fd29ef540b"
+    },
+    "ic_velby": {
+      "zoom_mean": -0.000371892849164418,
+      "parent_mean": 1.1571718670083664e-10,
+      "zoom_rms_after_mean_removal": 26.295823223453947,
+      "parent_rms_after_mean_removal": 26.301608115301228,
+      "zoom_to_parent_rms_ratio": 0.9997800555836008,
+      "difference_rms_over_parent_rms": 0.010312737884911242,
+      "registered_pearson_correlation": 0.9999468362133536,
+      "zoom_file_sha256": "efe48c3166ad3406ba19bc9fd9575f4cb5986c21eb2d0a5ffb88705ddd5b88b7",
+      "parent_file_sha256": "e3fb4c3b85063868bb55394aacd5a7eb32f9b071905860c4861bad6c92c23b3c"
+    },
+    "ic_velbz": {
+      "zoom_mean": -0.00026664911272789027,
+      "parent_mean": 1.8898216325169415e-10,
+      "zoom_rms_after_mean_removal": 28.551827094134016,
+      "parent_rms_after_mean_removal": 28.5569858992083,
+      "zoom_to_parent_rms_ratio": 0.9998193505052496,
+      "difference_rms_over_parent_rms": 0.009421375625188444,
+      "registered_pearson_correlation": 0.99995562714185,
+      "zoom_file_sha256": "8b998dcccdf867bad416a8b8120d1427cf2a79edd751c25ad965a400962a94b2",
+      "parent_file_sha256": "9919fb06ac9b35e4dccc61001741a9cfb3f1252e1f2c6b7e989ba06800c1adc9"
+    },
+    "ic_velcx": {
+      "zoom_mean": -0.00016571728287797605,
+      "parent_mean": -8.490449257897372e-11,
+      "zoom_rms_after_mean_removal": 23.631074058295923,
+      "parent_rms_after_mean_removal": 23.63829246023363,
+      "zoom_to_parent_rms_ratio": 0.9996946309912254,
+      "difference_rms_over_parent_rms": 0.011644218735679047,
+      "registered_pearson_correlation": 0.9999322320158914,
+      "zoom_file_sha256": "dec627573796b314fb7fc5dd483c4b78c6594add8367dbcfe02969cb1e9b7087",
+      "parent_file_sha256": "e66288c065df67984eaa3160991b5aeab4bf59a17f8050e24b654e3a2487715b"
+    },
+    "ic_velcy": {
+      "zoom_mean": -0.000377189201678319,
+      "parent_mean": -3.993799388424257e-11,
+      "zoom_rms_after_mean_removal": 26.670154033662428,
+      "parent_rms_after_mean_removal": 26.676038529061497,
+      "zoom_to_parent_rms_ratio": 0.9997794089481218,
+      "difference_rms_over_parent_rms": 0.010337625535288672,
+      "registered_pearson_correlation": 0.9999465792952228,
+      "zoom_file_sha256": "751a0c0c8c906e268cb8a3cec0b5d164c884f680e9589c13b40e16f2bdd64a05",
+      "parent_file_sha256": "bfbc0f252b656d702ee2174af6ea47c3c5dc090cc03c79946e7f5a713df97361"
+    },
+    "ic_velcz": {
+      "zoom_mean": -0.0002702505442542247,
+      "parent_mean": -2.326423498288932e-10,
+      "zoom_rms_after_mean_removal": 28.95297544426768,
+      "parent_rms_after_mean_removal": 28.95822289164395,
+      "zoom_to_parent_rms_ratio": 0.9998187924930372,
+      "difference_rms_over_parent_rms": 0.00944570235967943,
+      "registered_pearson_correlation": 0.999955397689273,
+      "zoom_file_sha256": "4c8f279ce87700149772520591aaec7e0242db5a3c539b42bfaed76783a08c9a",
+      "parent_file_sha256": "d067c950125014069bb14565b3833769877c70df44e15991c0fc5ff48948f70c"
+    },
+    "ic_poscx": {
+      "zoom_mean": -4.313871464186026e-07,
+      "parent_mean": -4.711280827781137e-13,
+      "zoom_rms_after_mean_removal": 0.061526458258772815,
+      "parent_rms_after_mean_removal": 0.061545254031145934,
+      "zoom_to_parent_rms_ratio": 0.999694602408114,
+      "difference_rms_over_parent_rms": 0.011646521102175266,
+      "registered_pearson_correlation": 0.9999322052025849,
+      "zoom_file_sha256": "b381b68f25f742ef749c3e928f03e6117e3bf86610335f5bdf20a2b2a25518a9",
+      "parent_file_sha256": "bf971bc35c95a032670330cfe232dc431eb3fd778bf6797eb29bb11ec386684f"
+    },
+    "ic_poscy": {
+      "zoom_mean": -9.820815810988592e-07,
+      "parent_mean": -5.973616817400804e-13,
+      "zoom_rms_after_mean_removal": 0.0694401559753913,
+      "parent_rms_after_mean_removal": 0.06945548056549515,
+      "zoom_to_parent_rms_ratio": 0.9997793609664913,
+      "difference_rms_over_parent_rms": 0.010339506782157996,
+      "registered_pearson_correlation": 0.9999465598495593,
+      "zoom_file_sha256": "257c4c65832361e76c9676789e6e0b84fd83b24f2919ceaff5f6b3d155e1d698",
+      "parent_file_sha256": "ce001e42c8913f8aaf5db79cea74644e61bd0e2997e3657fe31a1e29caa73b17"
+    },
+    "ic_poscz": {
+      "zoom_mean": -7.033141428448852e-07,
+      "parent_mean": -3.7255094842425507e-13,
+      "zoom_rms_after_mean_removal": 0.07537451662623963,
+      "parent_rms_after_mean_removal": 0.07538818363854691,
+      "zoom_to_parent_rms_ratio": 0.9998187114790721,
+      "difference_rms_over_parent_rms": 0.009448576165582936,
+      "registered_pearson_correlation": 0.9999553705461779,
+      "zoom_file_sha256": "6a9ff51a723f835f4aacf86a0db69a707d29d6449f62fc67393ec16c4757fddb",
+      "parent_file_sha256": "5785b3b36fa5b8169e2ac19160ba0c0a953730ad8276314d6323deeb16bedf28"
+    }
+  },
+  "limits": [
+    "This comparison checks parent-to-zoom base-field coherence, not absolute physical transfer-function normalization against an independent CAMB solution.",
+    "It does not validate level-9 through level-12 short-wavelength modes or the velocity growth law outside the matched base field.",
+    "CDM displacement components are reported directly. They are not an absolute CDM density power spectrum.",
+    "It is a Lambda-CDM IC integrity analysis, not a QUMOND IC or simulation.",
+    "It does not measure evolved halo membership, the one-million-CDM-particle target, contamination, galaxy formation, rotation curves, or RAR residuals."
+  ]
+}
