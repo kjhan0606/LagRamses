@@ -124,6 +124,23 @@ if len(vfact_matches) != 1:
 vfact = float(vfact_matches[0])
 if not np.isfinite(vfact) or vfact <= 0:
     raise ValueError("Invalid MUSIC velocity normalization")
+music_text = music_log_path.read_text()
+growth_matches = re.findall(r"cosmology/dplus\s*=\s*([0-9.eE+-]+)", music_text)
+sigma_matches = re.findall(r"cosmology/sigma_8\s*=\s*([0-9.eE+-]+)", music_text)
+if len(growth_matches) != 1 or len(sigma_matches) != 1:
+    raise ValueError("Expected one MUSIC growth factor and sigma8")
+music_growth, music_sigma8 = float(growth_matches[0]), float(sigma_matches[0])
+redshifts = np.asarray(list(results.transfer_redshifts))
+sigma8 = np.asarray(results.get_sigma8())
+matches = np.flatnonzero(np.isclose(redshifts, redshift))
+if matches.size != 1 or sigma8.shape != redshifts.shape:
+    raise ValueError("CAMB sigma8 redshifts do not match the requested epochs")
+camb_sigma8_at_start = float(sigma8[matches[0]])
+if min(music_growth, music_sigma8, camb_sigma8_at_start) <= 0:
+    raise ValueError("Invalid growth or sigma8 normalization")
+density_normalization = (music_growth * music_sigma8 / camb_sigma8_at_start)**2
+camb_velocity_factor = results.hubble_parameter(redshift) / (1 + redshift) / h
+velocity_normalization = density_normalization * (vfact / camb_velocity_factor)**2
 music_theory = {}
 for name, column in (("cdm_density", 1), ("cdm_velocity", 2),
                      ("gas_density", 3), ("gas_velocity", 4)):
@@ -206,6 +223,12 @@ report = {
     "transfer_file": str(transfer_path),
     "music_input_power_file": str(music_power_path),
     "music_velocity_factor": vfact,
+    "music_growth_factor": music_growth,
+    "music_sigma8_z0_input": music_sigma8,
+    "camb_sigma8_at_start": camb_sigma8_at_start,
+    "camb_velocity_factor": float(camb_velocity_factor),
+    "predicted_music_over_camb_density_power": float(density_normalization),
+    "predicted_music_over_camb_velocity_power": float(velocity_normalization),
     "camb_version": camb.__version__,
     "redshift": redshift,
     "box_mpc_h": box,
