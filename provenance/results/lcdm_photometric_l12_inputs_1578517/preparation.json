@@ -1,0 +1,36 @@
+{
+  "redshift": 49,
+  "level12_axis_nyquist_h_mpc": 514.7185403641517,
+  "level12_corner_h_mpc": 891.5186635084027,
+  "original_kmax_h_mpc": 155.8788,
+  "extended_kmax_h_mpc": 1525.195801,
+  "sampling_max_relative_l2": 2.8036664858321487e-06,
+  "old_nodes_max_relative_l2": 3.068164574583007e-07,
+  "targets": [
+    {
+      "group": 434,
+      "level": 11,
+      "cdm_particle_mass_msun": 199130.21213089913,
+      "expected_cdm_count": 684132.6207415438
+    },
+    {
+      "group": 434,
+      "level": 12,
+      "cdm_particle_mass_msun": 24891.27651636239,
+      "expected_cdm_count": 5473060.965932351
+    },
+    {
+      "group": 451,
+      "level": 11,
+      "cdm_particle_mass_msun": 199130.21213089913,
+      "expected_cdm_count": 687068.378470072
+    },
+    {
+      "group": 451,
+      "level": 12,
+      "cdm_particle_mass_msun": 24891.27651636239,
+      "expected_cdm_count": 5496547.027760576
+    }
+  ],
+  "scope": "Inputs for MUSIC. Evolved masses, contamination, rotation curves, and realized IC spectra require simulations."
+}

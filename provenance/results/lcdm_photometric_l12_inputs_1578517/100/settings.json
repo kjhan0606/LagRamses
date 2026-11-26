@@ -1,0 +1,13 @@
+{
+  "camb_version": "1.6.5",
+  "sampling_per_log": 100,
+  "requested_kmax_Mpc_inv": 1024.0,
+  "first_k_h_Mpc": 1.0489645319466945e-05,
+  "last_k_h_Mpc": 1532.8408203125,
+  "rows": 973,
+  "redshift": 49.0,
+  "sigma8_z0": 0.8252602265460957,
+  "cosmology": "Omega_m=.315 Omega_b=.0493017 h=.6736 As=2.1e-9 ns=.965 mnu=0 nnu=3.046",
+  "accuracy": "CAMB defaults",
+  "scope": "GR comparison; not MOND and not convergence validated"
+}
