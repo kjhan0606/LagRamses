@@ -20,6 +20,7 @@ For other idealized problems (Sedov, tubes, ...) use namelist/*.nml.
 Run: python3 mkrun.py                 # terminal wizard
      python3 mkrun.py --mode gui      # graphical setup, preview and confirmed save
      python3 mkrun.py --gui            # legacy alias for --mode gui
+     python3 mkrun.py --mode text --help  # non-interactive options and templates
 """
 import argparse
 import math
@@ -1975,7 +1976,34 @@ def write_genetic_param(path, name, omega_m, omega_l, h, ns, sigma8, z_start, se
     write_text(path, '\n'.join(lines) + '\n')
 
 
+def _legacy_command_line(argv):
+    """Preserve the local main's text/template interface alongside the GUI."""
+    legacy_options = {
+        '--template', '--name', '--outdir', '--run-mode', '--dm', '--grav',
+        '--omega-m', '--omega-b', '--h', '--sigma8', '--ns', '--boxlen',
+        '--levelmin', '--levelmax', '--zoom', '--zoom-levelmin',
+        '--zoom-levelmax', '--zoom-center', '--zoom-radius', '--ic', '--zstart',
+        '--seed', '--redshifts', '--physics', '--gamma', '--courant',
+        '--slope-type', '--riemann', '--scheme', '--advanced', '--set',
+    }
+    mode = None
+    for index, arg in enumerate(argv):
+        if arg.startswith('--mode='):
+            mode = arg.split('=', 1)[1]
+        elif arg == '--mode' and index + 1 < len(argv):
+            mode = argv[index + 1]
+    if '--gui' in argv:
+        return False
+    if mode is not None:
+        return mode in ('ui', 'text')
+    return any(arg.split('=', 1)[0] in legacy_options for arg in argv)
+
+
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if _legacy_command_line(argv):
+        from mkrun_legacy import main as legacy_main
+        return legacy_main(argv)
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--mode', choices=('cli', 'gui'), default=None,
