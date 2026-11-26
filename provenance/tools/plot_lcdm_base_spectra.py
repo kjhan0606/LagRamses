@@ -13,6 +13,9 @@ import numpy as np
 
 source = Path("/gpfs/kjhan/RAR_QUMOND/analysis/lcdm_base_camb_spectra_1578580")
 out = Path(os.environ["RAR_PLOT_OUTPUT"])
+output_format = os.environ.get("RAR_PLOT_FORMAT", "all")
+if output_format not in ("all", "pdf", "png"):
+    raise ValueError("RAR_PLOT_FORMAT must be all, pdf, or png")
 
 
 def read(case, field):
@@ -54,6 +57,8 @@ axes[1, 0].set_ylabel(r"$P_{\rm IC}/P_{\rm CAMB}$")
 for ax in axes[1]:
     ax.set_xlabel(r"$k\;(h\,{\rm Mpc}^{-1})$")
 fig.subplots_adjust(left=0.12, right=0.985, bottom=0.11, top=0.98, wspace=0, hspace=0)
-fig.savefig(out / "base_spectra.pdf")
-fig.savefig(out / "base_spectra.png", dpi=180)
+if output_format in ("all", "pdf"):
+    fig.savefig(out / "base_spectra.pdf")
+if output_format in ("all", "png"):
+    fig.savefig(out / "base_spectra.png", dpi=180)
 plt.close(fig)
