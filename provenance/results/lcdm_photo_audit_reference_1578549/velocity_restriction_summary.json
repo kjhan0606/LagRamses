@@ -1,0 +1,42 @@
+{
+  "status": "VELOCITY_RESTRICTION_MODEL_AUDIT_COMPLETE",
+  "purpose": "Test the predicted high-k transfer from MUSIC's repeated real-space restriction of zoom velocity fields onto the common L8 grid.",
+  "inputs": {
+    "zoom_ic": "/gpfs/kjhan/RAR_QUMOND/initial_conditions/lcdm_g205_multifluid_l11_1286049",
+    "parent_ic": "/gpfs/kjhan/RAR_QUMOND/initial_conditions/qumond_lcdm_grafic_z49_n256_1260246",
+    "base_grid": [
+      256,
+      256,
+      256
+    ],
+    "refinement_ratio_per_axis": 8,
+    "successive_restrictions": 3,
+    "registered_parent_shift_xyz_base_cells": [
+      46,
+      -54,
+      56
+    ],
+    "zoom_transfer_sha256": "96d94a9ba8b69f102511435032698bdc53199f15b3d6d89012e7ce9224d28493",
+    "parent_transfer_sha256": "96d94a9ba8b69f102511435032698bdc53199f15b3d6d89012e7ce9224d28493"
+  },
+  "model": {
+    "operation": "three successive 2x2x2 cell averages, equivalent to an 8-child-cell box average per axis",
+    "one_dimensional_amplitude": "sinc(n/N) / sinc(n/(8*N))",
+    "power_prediction": "parent-mode power weighted by the squared separable 3D transfer",
+    "code_path": "lagMUSIC src/main.cc: coarsen_density(..., data_forIO, false); src/densities.cc: mg_straight().restrict; src/mg_operators.hh: eight-child arithmetic mean"
+  },
+  "fields": [
+    "ic_velbx",
+    "ic_velby",
+    "ic_velbz",
+    "ic_velcx",
+    "ic_velcy",
+    "ic_velcz"
+  ],
+  "results_csv": "velocity_restriction_model.csv",
+  "limits": [
+    "This is a diagnostic model of the restriction filter; extra fine-level modes can alias into the coarse field and leave residuals.",
+    "It does not validate absolute CAMB velocity normalization or fine-level modes L9-L11.",
+    "It is not a RAMSES evolution, QUMOND run, halo-resolution validation, or RAR measurement."
+  ]
+}
