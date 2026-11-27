@@ -339,7 +339,6 @@ endif
 
 # SIDM object (depends on amr_commons, pm_commons, random)
 SIDM_OBJ = sidm_scatter.o sidm_cell_geometry.o sidm_angular.o sidm_estimator.o
-sidm_cell_geometry.o: pm_commons.o amr_commons.kjhan.o
 # Atomic Dark Matter objects
 ADM_OBJ = dark_cooling_fine.o adm_hpm_mod.o adm_hpm_fine.o
 # Evaporating primordial black hole objects
@@ -499,6 +498,7 @@ snrt_ionization_benchmark_cuda: snrt_moment_transport.o snrt_moment_cuda.o ../pa
 snrt_moment_m5_regression: snrt_moment_transport.o ../patch/lagRamses/snrt_moment_m5_regression.f90
 	$(F90) $(FFLAGS) -I. ../patch/lagRamses/snrt_moment_m5_regression.f90 snrt_moment_transport.o $(MN_BENCH_LIBS) -o $@
 amr_commons.kjhan.o: amr_parameters.jaehyun.o
+sidm_cell_geometry.o: pm_commons.o amr_commons.kjhan.o
 morton_keys.o: amr_commons.kjhan.o
 random.o: amr_commons.kjhan.o
 snrt_state.o: amr_commons.kjhan.o snrt_spectral_contract.o snrt_thermochemistry.o dust_composition_optics.o dust_iron_optics.o snrt_moment_live.o
