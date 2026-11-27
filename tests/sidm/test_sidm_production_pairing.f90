@@ -90,11 +90,15 @@ contains
 end module random
 
 program test_sidm_production_pairing
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite,ieee_value,ieee_quiet_nan
   use pm_commons
   use amr_commons
   use random
   implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+  integer :: mpi_test_rank,mpi_test_size,mpi_test_ierr
+#endif
   integer :: sidm_n_scatter,sidm_n_pairs,sidm_n_up,sidm_n_down
   integer :: sidm_n_vrel_reject
   integer :: sidm_n_leaf_occupied,sidm_n_leaf_active,sidm_n_dm_leaf
@@ -119,11 +123,47 @@ program test_sidm_production_pairing
   real(dp),parameter :: reject_draw=0.999999d0,accept_draw=1.0d-7
   integer :: seeds(IRandNumSize,0:0)
   real(dp) :: velocity_fixture(4,3)
+  character(len=32) :: requested_case
 
   velocity_fixture(1,:)=(/ 0.10d0, 0.02d0,-0.01d0 /)
   velocity_fixture(2,:)=(/-0.05d0, 0.20d0, 0.04d0 /)
   velocity_fixture(3,:)=(/ 0.03d0,-0.12d0, 0.08d0 /)
   velocity_fixture(4,:)=(/ 0.22d0, 0.05d0,-0.03d0 /)
+
+  call get_command_argument(1,requested_case)
+  if(len_trim(requested_case)>0) then
+#ifndef WITHOUTMPI
+     if(trim(requested_case)=='mpi_invalid') then
+        call MPI_INIT(mpi_test_ierr)
+        call MPI_COMM_RANK(MPI_COMM_WORLD,mpi_test_rank,mpi_test_ierr)
+        call MPI_COMM_SIZE(MPI_COMM_WORLD,mpi_test_size,mpi_test_ierr)
+        if(mpi_test_size/=2) call MPI_ABORT(MPI_COMM_WORLD,2,mpi_test_ierr)
+        call setup_single_cell(2)
+        myid=mpi_test_rank+1
+        if(mpi_test_rank==1) then
+           sidm_cross_section=1.0d0
+        else
+           sidm_cross_section=0.0d0
+        endif
+        call rng_set(4,(/0.90d0,0.10d0,0.20d0,0.30d0/))
+        write(*,'(A,I0)') 'MPI_GUARD_READY_RANK=',mpi_test_rank
+        flush(6)
+        call MPI_BARRIER(MPI_COMM_WORLD,mpi_test_ierr)
+        call run_production_scatter(16,myid,2,1,seeds,0,1)
+        call MPI_BARRIER(MPI_COMM_WORLD,mpi_test_ierr)
+        print '(A)', 'UNEXPECTED: invalid probability did not abort MPI'
+        call MPI_FINALIZE(mpi_test_ierr)
+        stop
+     endif
+#endif
+     if(trim(requested_case)=='zero'.or.trim(requested_case)=='one') then
+        call test_probability_boundary(trim(requested_case))
+        stop
+     endif
+     call test_invalid_probability(trim(requested_case))
+     print '(A)', 'UNEXPECTED: invalid probability was accepted'
+     stop
+  endif
 
   production_calls=0
   call test_membership_and_eligibility()
@@ -477,6 +517,52 @@ contains
     end do
     call link_particles(.false.)
   end subroutine setup_single_cell
+
+  subroutine test_invalid_probability(which)
+    character(len=*),intent(in) :: which
+    call setup_single_cell(2)
+    select case(which)
+    case('above_one')
+       sidm_cross_section=1.0d0
+    case('negative')
+       sidm_cross_section=-1.0d-6
+    case('nonfinite')
+       sidm_cross_section=ieee_value(0.0d0,ieee_quiet_nan)
+    case default
+       error stop 'unknown probability fixture'
+    end select
+    call rng_set(4,(/0.90d0,0.10d0,0.20d0,0.30d0/))
+    call run_production_scatter(16,1,2,1,seeds,0,1)
+  end subroutine test_invalid_probability
+
+  subroutine test_probability_boundary(which)
+    character(len=*),intent(in) :: which
+    call setup_single_cell(2)
+    unit_scale_l=1.0d0; unit_scale_t=1.0d0
+    unit_scale_d=1.0d0; unit_scale_v=1.0d0
+    dtnew(16)=1.0d0
+    mp(1:2)=1.0d0
+    vp(1,:)=(/0.0d0,0.0d0,0.0d0/)
+    vp(2,:)=(/1.0d0,0.0d0,0.0d0/)
+    if(which=='zero') then
+       sidm_cross_section=0.0d0
+       call rng_set(2,(/0.90d0,0.10d0/))
+    else
+       ! In this two-particle setup, probability = sigma / cell volume.
+       sidm_cross_section=dx_local**3
+       call rng_set(4,(/0.90d0,0.10d0,0.20d0,0.30d0/))
+    endif
+    call run_production_scatter(16,1,2,1,seeds,0,1)
+    call rng_require_consumed()
+    if(which=='zero') then
+       call assert_close(sidm_Pmax_level,0.0d0,'zero probability boundary')
+       call assert_integer(sidm_n_scatter,0,'zero probability scattering')
+    else
+       call assert_close(sidm_Pmax_level,1.0d0,'unit probability boundary')
+       call assert_integer(sidm_n_scatter,1,'unit probability scattering')
+    endif
+    print '(A,A)', 'Valid probability boundary passed: ',which
+  end subroutine test_probability_boundary
 
   subroutine matching_case(n,case_id,order,shuffle,nshuffle)
     integer,intent(in)::n,case_id

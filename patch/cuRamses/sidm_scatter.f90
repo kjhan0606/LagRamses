@@ -158,7 +158,12 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   use pm_commons
   use amr_commons
   use random
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use, intrinsic :: iso_fortran_env, only: error_unit
   implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
   integer,intent(in)::ilevel,icpu,kgrid,subnump
   integer,intent(in)::mythread_loc,nthreads_in
   integer,dimension(IRandNumSize,0:nthreads_in-1)::thread_seeds
@@ -201,6 +206,10 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   integer,dimension(:),allocatable::ind_dm
   integer::itemp,ipair
   integer,dimension(IRandNumSize)::seed_loc
+  logical::invalid_probability
+#ifndef WITHOUTMPI
+  integer::mpi_abort_ierr
+#endif
 
   ! Scattering counters (thread-local)
   integer::n_scatter_loc,n_pairs_loc,n_up_loc,n_down_loc
@@ -419,19 +428,30 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
            ! reproduce the exact N(N-1)/2 pair rate for odd N too
            call sidm_pair_probability(sigma_over_m,m1,m2,v_rel_mag, &
                 & dt_phys,vol_phys,ndm_cell,npairs,P_scatter)
+           ! A Bernoulli draw cannot represent an invalid probability.  The
+           ! next-step Pmax constraint cannot repair the current sweep.
+           invalid_probability=.not.ieee_is_finite(P_scatter)
+           if(.not.invalid_probability) then
+              invalid_probability=(P_scatter<0.0d0.or.P_scatter>1.0d0)
+           end if
+           if(invalid_probability) then
+              write(error_unit,'(A,ES24.16,A,I0,A,I0,A,I0)') &
+                   'ERROR: invalid SIDM probability ',P_scatter, &
+                   ' rank=',myid,' level=',ilevel,' cell=',icell
+              flush(error_unit)
+#ifndef WITHOUTMPI
+              ! Any rank may encounter the invalid pair; do not wait for a
+              ! collective finalization while the other ranks continue.
+              call MPI_ABORT(MPI_COMM_WORLD,1,mpi_abort_ierr)
+#endif
+              error stop 1
+           end if
            if(dt_phys>0.0d0) then
               expected_rate_loc = expected_rate_loc + P_scatter/dt_phys
            end if
 
            ! Track P_max for timestep constraint
            if(P_scatter > P_max_loc) P_max_loc = P_scatter
-
-           ! Warning if P > 1 (timestep too large for SIDM)
-           if(P_scatter > 1.0d0 .and. myid==1) then
-              write(*,'(A,ES10.3,A,I2,A,I10)') &
-                   ' WARNING: SIDM P=', P_scatter, &
-                   ' > 1 at level ', ilevel, ' cell ', icell
-           end if
 
            ! Monte Carlo: scatter if random < P
            call ranf(seed_loc, R1)

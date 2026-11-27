@@ -32,3 +32,18 @@ gfortran -cpp -DNDIM=3 -DWITHOUTMPI -ffree-line-length-none \
   "$SOURCE_ROOT/patch/cuRamses/sidm_angular.f90" \
   scatter_routine.f90 -o ./test_sidm_production_pairing
 ./test_sidm_production_pairing
+for case_name in zero one; do
+  ./test_sidm_production_pairing "$case_name"
+done
+for case_name in above_one negative nonfinite; do
+  if ./test_sidm_production_pairing "$case_name" > "$case_name.log" 2>&1; then
+    echo "Invalid probability case was accepted: $case_name" >&2
+    exit 1
+  fi
+  if ! grep -Fq 'ERROR: invalid SIDM probability' "$case_name.log"; then
+    echo "Invalid probability case failed for the wrong reason: $case_name" >&2
+    cat "$case_name.log" >&2
+    exit 1
+  fi
+  echo "Invalid SIDM probability rejected: $case_name"
+done
