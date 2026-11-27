@@ -337,6 +337,9 @@ module amr_parameters
   ! Timestep constraint
   real(dp)::sidm_courant=0.1d0      ! Max allowed scattering probability per step
   real(dp),dimension(1:MAXLEVEL)::sidm_Pmax=0.0d0  ! Max P per level (runtime)
+  ! Optional all-pair probability preflight and collision-only subcycling.
+  logical::sidm_probability_guard=.false.
+  real(dp),dimension(1:MAXLEVEL)::sidm_rate_bound=0.0d0
   ! Optional estimator accounting for controlled convergence tests
   logical::sidm_estimator_diagnostics=.false.
   ! Angular distribution: 'isotropic' or 'rutherford'

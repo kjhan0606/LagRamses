@@ -12,7 +12,9 @@
 subroutine sidm_scatter(ilevel)
   use pm_commons
   use pm_parameters, only: iseed
-  use amr_parameters, only: sidm_estimator_diagnostics
+  use amr_parameters, only: sidm_estimator_diagnostics, &
+       & sidm_probability_guard,sidm_rate_bound
+  use, intrinsic :: iso_fortran_env, only: int64
   use amr_commons
   use random
 #include "amr_index.h"
@@ -22,7 +24,12 @@ subroutine sidm_scatter(ilevel)
 #endif
   integer,intent(in)::ilevel
 
-  integer::icpu,info
+  integer::icpu,info,sidm_n_substeps
+  integer(int64)::sidm_particles_local,sidm_particles_global
+  integer,parameter::sidm_max_subcycles=4096
+  real(dp)::sidm_dt_interval,sidm_dt_remaining,sidm_dt_sub,sidm_dt_elapsed
+  real(dp)::sidm_dt_previous,sidm_rate_current,sidm_p_remaining,sidm_p_substep
+  real(dp)::sidm_scale_l,sidm_scale_t,sidm_scale_d,sidm_scale_v,sidm_scale_nH,sidm_scale_T2
   integer::sidm_n_scatter,sidm_n_pairs,sidm_n_up,sidm_n_down
   integer::sidm_n_vrel_reject
   integer::sidm_n_leaf_occupied,sidm_n_leaf_active,sidm_n_dm_leaf
@@ -43,7 +50,26 @@ subroutine sidm_scatter(ilevel)
   common /sidm_estimator_rate/ sidm_expected_rate
 
   if(.not.sidm) return
-  if(numbtot(1,ilevel)==0) return
+  sidm_dt_interval=dtnew(ilevel)
+  sidm_dt_elapsed=0.0d0
+  sidm_n_substeps=0
+  if(sidm_probability_guard) then
+     ! All ranks participate even if a rank has no local grids.
+     sidm_rate_bound(ilevel)=0.0d0
+     call sidm_preflight_rate_gate(ilevel,sidm_dt_interval,sidm_dt_sub, &
+          & sidm_rate_current,sidm_p_remaining,sidm_p_substep)
+     if(npart<0) call sidm_probability_guard_abort('negative local particle count')
+     sidm_particles_local=int(npart,kind=int64)
+     call MPI_ALLREDUCE(sidm_particles_local,sidm_particles_global, &
+          & 1,MPI_INTEGER8,MPI_SUM,MPI_COMM_WORLD,info)
+     if(info/=0 .or. sidm_particles_global<0_int64) &
+          call sidm_probability_guard_abort('invalid global particle count')
+     if(sidm_particles_global==0_int64) return
+     call units(sidm_scale_l,sidm_scale_t,sidm_scale_d,sidm_scale_v, &
+          & sidm_scale_nH,sidm_scale_T2)
+  else
+     if(numbtot(1,ilevel)==0) return
+  end if
   if(verbose) write(*,111) ilevel
 
   ! Initialize excited DM fraction (once, for iSIDM)
@@ -85,9 +111,53 @@ subroutine sidm_scatter(ilevel)
   ! Only local grids: after virtual_tree_fine all particles sit on
   ! grids owned by myid (virtual grids carry no particles here)
   icpu = myid
-  if(numbl(icpu,ilevel)>0) then
-     call sub_sidm_scatter(ilevel,icpu,headl(icpu,ilevel),numbl(icpu,ilevel), &
-          & sidm_seeds,0,1)
+  do
+     if(sidm_probability_guard) then
+        sidm_dt_remaining=sidm_dt_interval-sidm_dt_elapsed
+        if(sidm_n_substeps>0) then
+           if(sidm_dt_remaining<=0.0d0) exit
+           call sidm_preflight_rate_gate(ilevel,sidm_dt_remaining,sidm_dt_sub, &
+                & sidm_rate_current,sidm_p_remaining,sidm_p_substep)
+        end if
+        if(sidm_n_substeps>=sidm_max_subcycles) &
+             call sidm_probability_guard_abort('collision subcycle limit exceeded')
+        sidm_n_substeps=sidm_n_substeps+1
+        if(sidm_particles_global>int(huge(sidm_n_dm_leaf),kind=int64)/ &
+             int(sidm_n_substeps,kind=int64)) &
+             call sidm_probability_guard_abort('diagnostic visit counter may overflow')
+        if(myid==1) write(*,'(A,I0,A,I0,A,I0,A,5ES25.16E3)') &
+             ' SIDM_SUBCYCLE_PREFLIGHT: coarse=',nstep_coarse,' level=',ilevel, &
+             ' index=',sidm_n_substeps, &
+             ' rate_s,remaining_s,dt_s,P_remaining,P_substep=', &
+             sidm_rate_current,sidm_dt_remaining*sidm_scale_t, &
+             sidm_dt_sub*sidm_scale_t,sidm_p_remaining,sidm_p_substep
+     else
+        sidm_n_substeps=1
+        sidm_dt_remaining=sidm_dt_interval
+        sidm_dt_sub=sidm_dt_interval
+     end if
+     if(numbl(icpu,ilevel)>0) then
+        call sub_sidm_scatter(ilevel,icpu,headl(icpu,ilevel),numbl(icpu,ilevel), &
+             & sidm_seeds,0,1,sidm_dt_sub,sidm_dt_interval)
+     end if
+     if(.not.sidm_probability_guard) exit
+     if(sidm_dt_interval==0.0d0) exit
+     sidm_dt_previous=sidm_dt_elapsed
+     if(sidm_dt_sub>=sidm_dt_remaining) then
+        sidm_dt_elapsed=sidm_dt_interval
+     else
+        sidm_dt_elapsed=sidm_dt_elapsed+sidm_dt_sub
+     end if
+     if(.not.(sidm_dt_elapsed>sidm_dt_previous) .or. &
+          sidm_dt_elapsed>sidm_dt_interval) &
+          call sidm_probability_guard_abort('collision subcycle made invalid progress')
+     if(sidm_dt_elapsed>=sidm_dt_interval) exit
+  end do
+  if(sidm_probability_guard .and. myid==1) then
+     write(*,'(A,I0,A,I0,A,I0,A,2ES25.16E3)') &
+          ' SIDM_SUBCYCLE_SUMMARY: coarse=',nstep_coarse,' level=',ilevel, &
+          ' nsub=',sidm_n_substeps,' interval_s,covered_s=', &
+          sidm_dt_interval*sidm_scale_t,sidm_dt_elapsed*sidm_scale_t
   end if
 #endif
 
@@ -112,6 +182,11 @@ subroutine sidm_scatter(ilevel)
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_Pmax_level,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,info)
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_dEdiss,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_expected_rate,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,info)
+  if(sidm_probability_guard .and. myid==1) then
+     write(*,'(A,I0,A,I0,A,ES25.16E3)') &
+          ' SIDM_SUBCYCLE_ACTUAL: coarse=',nstep_coarse,' level=',ilevel, &
+          ' Pmax=',sidm_Pmax_level
+  end if
 
   ! Store P_max for timestep constraint in newdt_fine
   sidm_Pmax(ilevel) = sidm_Pmax_level
@@ -142,6 +217,10 @@ subroutine sidm_scatter(ilevel)
      end if
   end if
   if(myid==1 .and. sidm_estimator_diagnostics) then
+     if(sidm_probability_guard) then
+        write(*,'(A,I0,A,I0)') ' SIDM estimator: counts are visits; substeps=',sidm_n_substeps, &
+             ' level=',ilevel
+     end if
      write(*,'(A,I2,A,I10,A,I10,A,I10,A,I10,A,ES12.4,A)') &
           ' SIDM estimator level ',ilevel,': dm=',sidm_n_dm_leaf, &
           ' occupied=',sidm_n_leaf_occupied, &
@@ -153,8 +232,363 @@ subroutine sidm_scatter(ilevel)
 end subroutine sidm_scatter
 !################################################################
 !################################################################
+subroutine sidm_preflight_rate_gate(ilevel,dt_remaining_code,dt_sub_code, &
+     & rate_out,p_remaining_out,p_substep_out)
+  use pm_commons
+  use amr_commons
+  use amr_parameters, only: sidm_estimator_diagnostics,sidm_rate_bound, &
+       & sidm_courant,sidm_cross_section,sidm_npart_min,sidm_type,sidm_a_type, &
+       & sidm_inelastic,sidm_fdiss
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+#include "amr_index.h"
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  integer,intent(in)::ilevel
+  real(dp),intent(in)::dt_remaining_code
+  real(dp),intent(out)::dt_sub_code,rate_out,p_remaining_out,p_substep_out
+  integer::igrid,jgrid,ind,icell,ipart,jp,npart1,ndm_cell,nx_loc
+  integer::info,invalid_local,invalid_global,invalid_cell
+  integer::invalid_reason_local,invalid_reason_global
+  integer::gate_failed,gate_failed_global,sidm_dt_invalid
+  integer::schedule_consistent
+  integer::bad_ipart,bad_grid,bad_cell,bad_npart,bad_helper_status
+  integer::bad_jp,bad_expected
+  logical::geometry_valid
+  integer,external::cell_index_from_part
+  real(dp)::scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2
+  real(dp)::dx,dx_loc,scale,vol_phys,dt_phys
+  real(dp)::mass_max,mass_phys,rate_cell,rate_local,rate_global
+  real(dp)::p_bound,p_sub_bound,p_limit,p_limit_global
+  real(dp)::dt_code_min,dt_code_max,scale_t_min,scale_t_max
+  real(dp)::courant_min,courant_max
+  real(dp)::v_min(1:3),v_upper(1:3),v_phys(1:3)
+  real(dp)::bad_mass,bad_rate,bad_velocity(1:3)
+  real(dp)::bad_v_min(1:3),bad_v_upper(1:3)
+  external sidm_probability_rate_bound
+  external sidm_choose_collision_substep
+  external sidm_collision_schedule_agrees
+
+  dt_sub_code=0.0d0
+  rate_out=0.0d0
+  p_remaining_out=0.0d0
+  p_substep_out=0.0d0
+
+  call units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
+  invalid_reason_local=0
+  invalid_reason_global=0
+  bad_ipart=0
+  bad_grid=0
+  bad_cell=0
+  bad_npart=0
+  bad_helper_status=0
+  bad_jp=0
+  bad_expected=0
+  bad_mass=0.0d0
+  bad_rate=0.0d0
+  bad_velocity=0.0d0
+  bad_v_min=0.0d0
+  bad_v_upper=0.0d0
+  geometry_valid=.false.
+  invalid_local=0
+  ! Check finiteness before ordered comparisons: Fortran does not promise
+  ! short-circuit evaluation, and comparisons with NaN may trap.
+  if(any(.not.ieee_is_finite((/scale_t,scale_l,scale_d,scale_v, &
+       sidm_courant,sidm_cross_section,sidm_fdiss,dt_remaining_code,boxlen/)))) then
+     invalid_local=1
+     invalid_reason_local=1 ! nonfinite unit, parameter, or interval
+  end if
+  if(invalid_local==0) then
+     if(scale_t<=0.0d0 .or. scale_l<=0.0d0 .or. scale_d<=0.0d0 .or. &
+          scale_v<=0.0d0 .or. boxlen<=0.0d0 .or. dt_remaining_code<0.0d0 .or. &
+          sidm_cross_section<=0.0d0 .or. sidm_courant<=0.0d0 .or. &
+          sidm_courant>1.0d0 .or. sidm_fdiss/=0.0d0) then
+        invalid_local=1
+        invalid_reason_local=2 ! invalid unit, parameter, or interval
+     end if
+  end if
+  if(sidm_npart_min<2 .or. trim(sidm_type)/='constant' .or. &
+       trim(sidm_a_type)/='none' .or. sidm_inelastic) then
+     invalid_local=1
+     if(invalid_reason_local==0) invalid_reason_local=2 ! unsupported mode/parameters
+  end if
+#if NDIM != 3
+  invalid_local=1
+  if(invalid_reason_local==0) invalid_reason_local=3 ! unsupported dimension
+#endif
+  dt_phys=0.0d0
+  if(invalid_local==0) then
+     dt_phys=dt_remaining_code*scale_t
+     if(.not.ieee_is_finite(dt_phys)) then
+        invalid_local=1
+        invalid_reason_local=4 ! invalid physical timestep
+     end if
+  end if
+
+  rate_local=0.0d0
+  dx=0.5d0**ilevel
+  nx_loc=icoarse_max-icoarse_min+1
+  if(nx_loc<=0 .or. invalid_local/=0) then
+     invalid_local=1
+     if(invalid_reason_local==0) invalid_reason_local=5 ! invalid grid geometry
+     vol_phys=0.0d0
+  else
+     scale=boxlen/dble(nx_loc)
+     dx_loc=dx*scale
+     vol_phys=(dx_loc*scale_l)**3
+     if(.not.ieee_is_finite(vol_phys) .or. vol_phys<=0.0d0) then
+        invalid_local=1
+        if(invalid_reason_local==0) invalid_reason_local=6 ! invalid cell volume
+     else
+        geometry_valid=.true.
+     end if
+  end if
+
+#if NDIM == 3
+  ! The particle classifier divides by boxlen/nx_loc.  Do not call it when
+  ! the geometry preflight above has already found invalid inputs.
+  if(geometry_valid) then
+  igrid=headl(myid,ilevel)
+  do jgrid=1,numbl(myid,ilevel)
+     if(igrid<lbound(numbp,1) .or. igrid>ubound(numbp,1) .or. &
+          igrid<lbound(next,1) .or. igrid>ubound(next,1) .or. &
+          igrid<lbound(headp,1) .or. igrid>ubound(headp,1) .or. &
+          igrid<lbound(xg,1) .or. igrid>ubound(xg,1)) then
+        invalid_local=1
+        if(invalid_reason_local==0) invalid_reason_local=12 ! bad grid index
+        exit
+     end if
+     if(any(.not.ieee_is_finite(xg(igrid,1:3)))) then
+        invalid_local=1
+        if(invalid_reason_local==0) invalid_reason_local=13 ! bad grid position
+        exit
+     end if
+     npart1=numbp(igrid)
+     if(npart1<0) then
+        invalid_local=1
+        if(invalid_reason_local==0) invalid_reason_local=14 ! bad occupancy
+        exit
+     end if
+     if(npart1==0) then
+        igrid=next(igrid)
+        cycle
+     end if
+     do ind=1,twotondim
+        icell=ICELL_OF(igrid,ind)
+        if(icell<lbound(son,1) .or. icell>ubound(son,1)) then
+           invalid_local=1
+           if(invalid_reason_local==0) invalid_reason_local=15 ! bad leaf index
+           exit
+        end if
+        if(son(icell)/=0) cycle
+        ndm_cell=0
+        mass_max=0.0d0
+        v_min=huge(1.0d0)
+        v_upper=-huge(1.0d0)
+        ipart=headp(igrid)
+        jp=0
+        ! The linked-list zero sentinel must never be dereferenced, even if
+        ! numbp and the chain length disagree.
+        do while(jp<npart1 .and. ipart>0)
+           jp=jp+1
+           if(ipart<lbound(idp,1) .or. ipart>ubound(idp,1) .or. &
+                ipart<lbound(ptypep,1) .or. ipart>ubound(ptypep,1) .or. &
+                ipart<lbound(nextp,1) .or. ipart>ubound(nextp,1) .or. &
+                ipart<lbound(xp,1) .or. ipart>ubound(xp,1) .or. &
+                ipart<lbound(mp,1) .or. ipart>ubound(mp,1) .or. &
+                ipart<lbound(vp,1) .or. ipart>ubound(vp,1)) then
+              invalid_local=1
+              if(invalid_reason_local==0) then
+                 invalid_reason_local=11 ! particle index outside array bounds
+                 bad_ipart=ipart
+                 bad_grid=igrid
+                 bad_cell=ind
+                 bad_npart=ndm_cell
+                 bad_jp=jp
+                 bad_expected=npart1
+              end if
+              exit
+           end if
+           if(any(.not.ieee_is_finite(xp(ipart,1:3)))) then
+              invalid_local=1
+              if(invalid_reason_local==0) invalid_reason_local=16 ! bad particle position
+              exit
+           end if
+           if(cell_index_from_part(ipart,igrid,ilevel)==ind) then
+              if(idp(ipart)>0 .and. ptypep(ipart)/=PTYPE_STAR .and. &
+                   ptypep(ipart)/=PTYPE_SINK) then
+                 ndm_cell=ndm_cell+1
+                 mass_phys=mp(ipart)*scale_d*scale_l**3
+                 v_phys(1:3)=vp(ipart,1:3)*scale_v
+                 if(.not.ieee_is_finite(mass_phys) .or. any(.not.ieee_is_finite(v_phys))) then
+                    invalid_local=1
+                    if(invalid_reason_local==0) then
+                       invalid_reason_local=7 ! invalid particle mass or velocity
+                       bad_ipart=ipart
+                       bad_grid=igrid
+                       bad_cell=ind
+                       bad_npart=ndm_cell
+                       bad_jp=jp
+                       bad_expected=npart1
+                       bad_mass=mass_phys
+                       bad_velocity=v_phys
+                       bad_v_min=v_phys
+                       bad_v_upper=v_phys
+                    end if
+                 else if(mass_phys<=0.0d0) then
+                    invalid_local=1
+                    if(invalid_reason_local==0) invalid_reason_local=7
+                 else
+                    mass_max=max(mass_max,mass_phys)
+                    v_min=min(v_min,v_phys)
+                    v_upper=max(v_upper,v_phys)
+                 end if
+              end if
+           end if
+           ipart=nextp(ipart)
+        end do
+        if(jp/=npart1 .or. ipart>0) then
+           invalid_local=1
+           if(invalid_reason_local==0) then
+              invalid_reason_local=10 ! numbp disagrees with linked-list length
+              bad_grid=igrid
+              bad_cell=ind
+              bad_ipart=ipart
+              bad_npart=ndm_cell
+              bad_jp=jp
+              bad_expected=npart1
+           end if
+        end if
+        if(ndm_cell>=sidm_npart_min .and. mass_max>0.0d0) then
+           call sidm_probability_rate_bound(sidm_cross_section,mass_max, &
+                & v_min,v_upper,vol_phys,ndm_cell,rate_cell,invalid_cell)
+           if(invalid_cell/=0 .or. .not.ieee_is_finite(rate_cell)) then
+              invalid_local=1
+              if(invalid_reason_local==0) then
+                 invalid_reason_local=8 ! rate-helper rejection
+                 bad_grid=igrid
+                 bad_cell=ind
+                 bad_npart=ndm_cell
+                 bad_jp=jp
+                 bad_expected=npart1
+                 bad_helper_status=invalid_cell
+                 bad_mass=mass_max
+                 bad_rate=rate_cell
+                 bad_v_min=v_min
+                 bad_v_upper=v_upper
+                 bad_velocity=v_upper-v_min
+              end if
+           else
+              rate_local=max(rate_local,rate_cell)
+           end if
+        end if
+     end do
+     igrid=next(igrid)
+  end do
+  end if
+#endif
+
+  call MPI_ALLREDUCE(rate_local,rate_global,1,MPI_DOUBLE_PRECISION, &
+       & MPI_MAX,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(invalid_local,invalid_global,1,MPI_INTEGER, &
+       & MPI_MAX,MPI_COMM_WORLD,info)
+  if(.not.ieee_is_finite(rate_global)) then
+     invalid_global=1
+     if(invalid_reason_local==0) invalid_reason_local=9 ! invalid reduced rate
+  else if(rate_global<0.0d0) then
+     invalid_global=1
+     if(invalid_reason_local==0) invalid_reason_local=9
+  end if
+  if(invalid_local/=0 .or. invalid_global/=0) then
+     write(*,*) 'SIDM_PREFLIGHT_INVALID rank/reason=',myid,invalid_reason_local, &
+          ' scales(t,l,d,v)=',scale_t,scale_l,scale_d,scale_v, &
+          ' dt,nx,boxlen,volume,rate,sigma=',dt_phys,nx_loc,boxlen, &
+          vol_phys,rate_local,sidm_cross_section, &
+          ' grid,cell_index,particle,npart=', &
+          bad_grid,bad_cell,bad_ipart,bad_npart, &
+          ' linked_nodes,expected=',bad_jp,bad_expected, &
+          ' helper_status,rate_cell,mass_max=',bad_helper_status,bad_rate,bad_mass, &
+          ' v_min,v_upper=',bad_v_min,bad_v_upper, &
+          ' mode,courant,npart_min=',trim(sidm_type),trim(sidm_a_type), &
+          sidm_inelastic,sidm_fdiss,sidm_courant,sidm_npart_min
+  end if
+  call MPI_ALLREDUCE(invalid_reason_local,invalid_reason_global,1,MPI_INTEGER, &
+       & MPI_MAX,MPI_COMM_WORLD,info)
+  if(invalid_global/=0) then
+     if(myid==1) write(*,'(A,I0)') &
+          'ERROR: invalid input or unsupported mode in SIDM probability preflight; reason=', &
+          invalid_reason_global
+     call sidm_probability_guard_abort('invalid preflight input or unsupported mode')
+  end if
+
+  call MPI_ALLREDUCE(dt_remaining_code,dt_code_min,1,MPI_DOUBLE_PRECISION, &
+       & MPI_MIN,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(dt_remaining_code,dt_code_max,1,MPI_DOUBLE_PRECISION, &
+       & MPI_MAX,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(scale_t,scale_t_min,1,MPI_DOUBLE_PRECISION, &
+       & MPI_MIN,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(scale_t,scale_t_max,1,MPI_DOUBLE_PRECISION, &
+       & MPI_MAX,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(sidm_courant,courant_min,1,MPI_DOUBLE_PRECISION, &
+       & MPI_MIN,MPI_COMM_WORLD,info)
+  call MPI_ALLREDUCE(sidm_courant,courant_max,1,MPI_DOUBLE_PRECISION, &
+       & MPI_MAX,MPI_COMM_WORLD,info)
+  ! newdt_fine broadcasts an identical interval.  Reject even a one-bit
+  ! disagreement rather than allowing rank-local loop termination to split
+  ! the collective substep schedule.
+  call sidm_collision_schedule_agrees(dt_code_min,dt_code_max, &
+       & scale_t_min,scale_t_max,courant_min,courant_max,schedule_consistent)
+  gate_failed=1-schedule_consistent
+  call MPI_ALLREDUCE(gate_failed,gate_failed_global,1,MPI_INTEGER, &
+       & MPI_MAX,MPI_COMM_WORLD,info)
+  if(gate_failed_global/=0) then
+     call sidm_probability_guard_abort('MPI ranks disagree on collision interval or guard limit')
+  end if
+
+  call sidm_choose_collision_substep(dt_code_min,rate_global,scale_t_min, &
+       & courant_min,dt_sub_code,p_bound,p_sub_bound,sidm_dt_invalid)
+  call MPI_ALLREDUCE(sidm_dt_invalid,gate_failed_global,1,MPI_INTEGER, &
+       & MPI_MAX,MPI_COMM_WORLD,info)
+  if(gate_failed_global/=0) then
+     call sidm_probability_guard_abort('invalid or unsafe collision substep')
+  end if
+
+  sidm_rate_bound(ilevel)=max(sidm_rate_bound(ilevel),rate_global)
+  rate_out=rate_global
+  p_remaining_out=p_bound
+  p_substep_out=p_sub_bound
+  p_limit=min(0.1d0,courant_min)
+  p_limit_global=p_limit
+  if(myid==1 .and. sidm_estimator_diagnostics) then
+     write(*,'(A,I0,A,I0,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6)') &
+          ' SIDM_RATE_PREFLIGHT: coarse=',nstep_coarse,' level=',ilevel, &
+          ' rate_s=',rate_global,' remaining_dt_s=',dt_code_min*scale_t_min, &
+          ' P_remaining=',p_bound,' sub_dt_s=',dt_sub_code*scale_t_min, &
+          ' P_substep=',p_sub_bound,' P_limit=',p_limit_global
+  end if
+end subroutine sidm_preflight_rate_gate
+
+! Fail the complete MPI job with a nonzero status for P-safe violations.
+subroutine sidm_probability_guard_abort(message)
+  use amr_commons, only: myid
+  implicit none
+#ifndef WITHOUTMPI
+  include 'mpif.h'
+#endif
+  character(len=*),intent(in)::message
+  integer::info
+
+  if(myid==1) write(*,'(A,A)') 'ERROR: SIDM probability guard: ',trim(message)
+  flush(6)
+#ifndef WITHOUTMPI
+  call MPI_ABORT(MPI_COMM_WORLD,1,info)
+#endif
+  stop 1
+end subroutine sidm_probability_guard_abort
+!################################################################
 subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
-     & mythread_loc,nthreads_in)
+     & mythread_loc,nthreads_in,dt_step_code,dt_interval_code)
   use pm_commons
   use amr_commons
   use random
@@ -166,6 +600,7 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
 #endif
   integer,intent(in)::ilevel,icpu,kgrid,subnump
   integer,intent(in)::mythread_loc,nthreads_in
+  real(dp),intent(in)::dt_step_code,dt_interval_code
   integer,dimension(IRandNumSize,0:nthreads_in-1)::thread_seeds
   external sidm_sample_rutherford_cosine,sidm_rotate_scattered_direction
   external sidm_pair_probability
@@ -191,7 +626,7 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
 
   ! Local variables
   real(dp)::scale_nH,scale_T2,scale_l,scale_d,scale_t,scale_v
-  real(dp)::dx,dx_loc,scale,vol_phys,dt_phys,sigma_over_m
+  real(dp)::dx,dx_loc,scale,vol_phys,dt_phys,dt_interval_phys,sigma_over_m
   real(dp)::P_scatter,twopi
   real(dp)::cos_theta,sin_theta,phi_rand,v_rel_mag,v_rel_kms
   real(dp),dimension(1:3)::v1,v2,v_cm,v_rel_vec,nhat,v_rel_new
@@ -253,7 +688,8 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
   vol_phys = (dx_loc*scale_l)**3
 
   ! Physical timestep [s]
-  dt_phys = dtnew(ilevel)*scale_t
+  dt_phys = dt_step_code*scale_t
+  dt_interval_phys = dt_interval_code*scale_t
 
   ! (Multi-state energies are accessed directly as sidm_energy(:) [keV]
   !  and converted to erg inline: E [erg] = E [keV] * 1.602d-9)
@@ -446,8 +882,12 @@ subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
 #endif
               error stop 1
            end if
-           if(dt_phys>0.0d0) then
-              expected_rate_loc = expected_rate_loc + P_scatter/dt_phys
+           if(sidm_probability_guard) then
+              if(P_scatter>min(0.1d0,sidm_courant)) &
+                   call sidm_probability_guard_abort('sampled P exceeds guarded limit')
+           end if
+           if(dt_interval_phys>0.0d0) then
+              expected_rate_loc = expected_rate_loc + P_scatter/dt_interval_phys
            end if
 
            ! Track P_max for timestep constraint

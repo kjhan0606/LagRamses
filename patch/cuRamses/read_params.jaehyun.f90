@@ -1,5 +1,6 @@
 subroutine read_params
   use amr_commons
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use pm_parameters
   use poisson_parameters
   use hydro_parameters
@@ -71,7 +72,7 @@ subroutine read_params
   namelist/sgs_params/sgs_C_prod,sgs_C_diss,sgs_C_smag,sgs_floor,sgs_cap,sgs_e_init,sgs_hydro
   namelist/sidm_params/sidm,sidm_cross_section,sidm_npart_min, &
        & sidm_type,sidm_v0,sidm_power, &
-       & sidm_courant, &
+       & sidm_probability_guard,sidm_courant, &
        & sidm_estimator_diagnostics, &
        & sidm_angular,sidm_epsilon, &
        & sidm_inelastic,sidm_delta,sidm_frac_excited, &
@@ -478,6 +479,22 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
      if(.not. pic) then
         if(myid==1) write(*,*) 'ERROR: sidm=T requires pic=T'
         call clean_stop
+     end if
+     if(sidm_probability_guard) then
+        if(.not.ieee_is_finite(sidm_cross_section) .or. &
+             .not.ieee_is_finite(sidm_courant) .or. &
+             .not.ieee_is_finite(sidm_fdiss)) then
+           call sidm_probability_guard_abort('nonfinite guard parameter')
+        end if
+        if(sidm_cross_section<=0.0d0 .or. sidm_courant<=0.0d0 .or. &
+             sidm_courant>1.0d0 .or. sidm_npart_min<2 .or. &
+             trim(sidm_type)/='constant' .or. trim(sidm_a_type)/='none' .or. &
+             sidm_inelastic .or. sidm_fdiss/=0.0d0) then
+           call sidm_probability_guard_abort('unsupported mode or parameters')
+        end if
+#if NDIM != 3
+        call sidm_probability_guard_abort('guard requires 3D')
+#endif
      end if
      if(sidm_cross_section <= 0.0d0) then
         if(myid==1) write(*,*) 'ERROR: sidm=T but sidm_cross_section<=0'

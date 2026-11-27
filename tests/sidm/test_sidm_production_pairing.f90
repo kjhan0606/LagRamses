@@ -49,7 +49,8 @@ module amr_commons
   real(dp) :: sidm_vrel_max,sidm_cross_section,sidm_v0,sidm_power
   real(dp) :: sidm_a_transition,sidm_sigma_ratio,sidm_a_width
   real(dp) :: sidm_epsilon,sidm_fdiss,sidm_mchi,sidm_energy(0:9)
-  logical :: sidm_inelastic,sidm_excited_init
+  logical :: sidm_inelastic,sidm_excited_init,sidm_probability_guard=.false.
+  real(dp) :: sidm_courant=0.1d0
   character(len=32) :: sidm_type,sidm_a_type,sidm_angular
 end module amr_commons
 
@@ -231,7 +232,7 @@ contains
     integer,intent(inout)::thread_seeds(IRandNumSize,0:nthreads_in-1)
     production_calls=production_calls+1
     call sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds, &
-         mythread_loc,nthreads_in)
+         mythread_loc,nthreads_in,dtnew(ilevel),dtnew(ilevel))
   end subroutine run_production_scatter
 
   subroutine add_particle(grid,child,ptype,particle_id,mesh_position,eligible)
@@ -778,3 +779,12 @@ subroutine units(scale_l,scale_t,scale_d,scale_v,scale_nH,scale_T2)
   scale_l=unit_scale_l; scale_t=unit_scale_t; scale_d=unit_scale_d
   scale_v=unit_scale_v; scale_nH=unit_scale_nH; scale_T2=unit_scale_T2
 end subroutine units
+
+! The test isolates the real scatter routine from the wrapper.  Guarded
+! subcycling is exercised by the integrated tests, not this legacy fixture.
+subroutine sidm_probability_guard_abort(message)
+  implicit none
+  character(len=*),intent(in)::message
+  write(*,*) trim(message)
+  error stop 1
+end subroutine sidm_probability_guard_abort

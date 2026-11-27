@@ -2,7 +2,8 @@
 module amr_parameters
   implicit none
   integer,parameter :: twotondim=8,amr_block_size=64
-  logical :: sidm_estimator_diagnostics=.false.
+  logical :: sidm_estimator_diagnostics=.false.,sidm_probability_guard=.false.
+  real(kind(1.0d0)) :: sidm_rate_bound(1)=0.0d0
 end module amr_parameters
 
 module amr_commons
@@ -11,10 +12,11 @@ module amr_commons
   implicit none
   integer,parameter :: dp=kind(1.0d0)
   integer,parameter :: MPI_IN_PLACE=0,MPI_INTEGER=1,MPI_DOUBLE_PRECISION=2
-  integer,parameter :: MPI_SUM=1,MPI_MAX=2,MPI_COMM_WORLD=0
+  integer,parameter :: MPI_SUM=1,MPI_MAX=2,MPI_COMM_WORLD=0,MPI_INTEGER8=3
   integer :: ncpu=1,myid=1,numbtot(1,1)=2,headl(1,1)=1,numbl(1,1)=2,next(2)=(/2,0/)
   logical :: sidm=.true.,verbose=.false.,sidm_inelastic=.false.
-  real(dp) :: sidm_Pmax(1)=0.0d0,sidm_fdiss=0.0d0,sidm_vrel_max=0.0d0
+  real(dp) :: sidm_Pmax(1)=0.0d0,sidm_fdiss=0.0d0,sidm_vrel_max=0.0d0,dtnew(1)=1.0d0
+  integer :: npart=4,nstep_coarse=0
 end module amr_commons
 
 module pm_parameters

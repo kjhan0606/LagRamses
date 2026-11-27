@@ -38,6 +38,9 @@ subroutine newdt_fine(ilevel)
   real(dp)::aton_time_step,dt_aton,dt_rt
   real(dp)::dx_min,dx,scale,dt_fact,limiting_dt_fact
   logical::highest_level
+  integer::sidm_dt_invalid
+  real(dp)::sidm_scale_l,sidm_scale_t,sidm_scale_d,sidm_scale_v
+  real(dp)::sidm_scale_nH,sidm_scale_T2,sidm_dt_rate
 
   if(numbtot(1,ilevel)==0)return
   if(verbose)write(*,111)ilevel
@@ -170,8 +173,18 @@ subroutine newdt_fine(ilevel)
   if(hydro)call courant_fine(ilevel)
   if(use_adm .and. adm_hpm) call adm_hpm_timestep(ilevel)
 
-  ! SIDM timestep constraint: keep P_scatter < sidm_courant
-  if(sidm .and. sidm_Pmax(ilevel) > 0.0d0) then
+  ! The guard records a physical rate over the entire preceding interval;
+  ! its per-substep Pmax must never be treated as a whole-step probability.
+  if(sidm .and. sidm_probability_guard .and. sidm_rate_bound(ilevel)>0.0d0) then
+     call units(sidm_scale_l,sidm_scale_t,sidm_scale_d,sidm_scale_v, &
+          & sidm_scale_nH,sidm_scale_T2)
+     call sidm_probability_timestep(sidm_rate_bound(ilevel),sidm_scale_t, &
+          & sidm_courant,sidm_dt_rate,sidm_dt_invalid)
+     if(sidm_dt_invalid/=0) &
+          call sidm_probability_guard_abort('invalid probability timestep bound')
+     dtnew(ilevel)=min(dtnew(ilevel),sidm_dt_rate)
+  end if
+  if(sidm .and. .not.sidm_probability_guard .and. sidm_Pmax(ilevel) > 0.0d0) then
      dtnew(ilevel) = MIN(dtnew(ilevel), &
           sidm_courant / sidm_Pmax(ilevel) * dtold(ilevel))
   end if

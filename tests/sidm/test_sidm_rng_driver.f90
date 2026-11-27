@@ -18,13 +18,14 @@ program test_sidm_rng_driver
   print '(A)', 'Production SIDM wrapper serial stream: PASS'
 end program test_sidm_rng_driver
 
-subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds,thread_id,nthreads)
+subroutine sub_sidm_scatter(ilevel,icpu,kgrid,subnump,thread_seeds,thread_id,nthreads,dt_step,dt_interval)
   use omp_lib,only:omp_get_num_threads
   use amr_commons,only:next
   use random,only:IRandNumSize,ranf
   use sidm_test_capture
   implicit none
   integer,intent(in) :: ilevel,icpu,kgrid,subnump,thread_id,nthreads
+  real(kind(1.0d0)),intent(in) :: dt_step,dt_interval
   integer,intent(inout) :: thread_seeds(IRandNumSize,0:nthreads-1)
   integer :: i,grid,grid_index
   grid=kgrid
@@ -45,3 +46,21 @@ end subroutine sub_sidm_scatter
 subroutine sidm_init_excited()
   error stop 'unexpected excited-state initialization'
 end subroutine sidm_init_excited
+
+subroutine sidm_preflight_rate_gate(ilevel,remaining,dt_sub,rate,p_remaining,p_sub)
+  implicit none
+  integer :: ilevel
+  real(kind(1.0d0)) :: remaining,dt_sub,rate,p_remaining,p_sub
+  error stop 'unexpected probability preflight in legacy RNG fixture'
+end subroutine sidm_preflight_rate_gate
+subroutine sidm_probability_guard_abort(message)
+  implicit none
+  character(*) :: message
+  print *, message
+  error stop 'unexpected guard abort in legacy RNG fixture'
+end subroutine sidm_probability_guard_abort
+subroutine units(l,t,d,v,nh,t2)
+  implicit none
+  real(kind(1.0d0)) :: l,t,d,v,nh,t2
+  l=1d0; t=1d0; d=1d0; v=1d0; nh=1d0; t2=1d0
+end subroutine units
