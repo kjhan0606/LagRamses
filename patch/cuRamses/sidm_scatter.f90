@@ -22,9 +22,7 @@ subroutine sidm_scatter(ilevel)
 #endif
   integer,intent(in)::ilevel
 
-  integer::icpu,igrid,subnump,info,ith,ith2
-  integer::mythread,nthreads
-  integer,dimension(:),allocatable::nparticles,ptrhead
+  integer::icpu,info
   integer::sidm_n_scatter,sidm_n_pairs,sidm_n_up,sidm_n_down
   integer::sidm_n_vrel_reject
   integer::sidm_n_leaf_occupied,sidm_n_leaf_active,sidm_n_dm_leaf
@@ -34,10 +32,7 @@ subroutine sidm_scatter(ilevel)
   real(dp)::sidm_expected_rate
   real(dp)::R_dummy
   integer,dimension(1:ncpu,1:IRandNumSize)::allseed
-  ! Per-thread seed array (deterministic, avoids localseed race)
-  integer,dimension(:,:),allocatable::sidm_seeds
-  integer,dimension(IRandNumSize)::kjump,atothek
-  integer,dimension(IBinarySize)::kbin
+  integer,dimension(IRandNumSize,0:0)::sidm_seeds
   logical,save::sidm_excited_init = .false.
   common /sidm_diag/ sidm_n_scatter,sidm_n_pairs,sidm_n_up,sidm_n_down,sidm_n_vrel_reject
   common /sidm_cons/ sidm_dp,sidm_dEk,sidm_dp_max,sidm_dEk_max
@@ -57,31 +52,17 @@ subroutine sidm_scatter(ilevel)
      sidm_excited_init = .true.
   end if
 
-  nthreads = omp_get_max_threads()
-  allocate(ptrhead(0:nthreads-1), nparticles(0:nthreads-1))
-
   ! Initialize localseed if first call
   if(localseed(1)==-1) then
      call rans(ncpu,iseed,allseed)
      localseed = allseed(myid,1:IRandNumSize)
   end if
 
-  ! Initialize per-thread seeds from localseed (deterministic).
-  ! Threads 1..n-1 get streams offset by period/nthreads jumps of the
-  ! CRAY-ranf generator — the same construction rans() uses. rans()
-  ! itself must NOT be called here: its dummy array is hard-shaped
-  ! (ncpu,IRandNumSize) regardless of its N argument, so any buffer
-  ! with a different leading dimension is silently overrun.
-  allocate(sidm_seeds(IRandNumSize, 0:nthreads-1))
+  ! Only thread 0's RNG state is retained between calls.  Reconstructing
+  ! other thread streams from it repeats draws when their work is unequal.
+  ! Until every worker stream is persistent across calls and restarts, run
+  ! the local SIDM scatter serially, independently of other OpenMP regions.
   sidm_seeds(:,0) = localseed
-  if(nthreads>1) then
-     call ranfk( nthreads, kjump )
-     call ranfkbinary( kjump, kbin )
-     call ranfatok( Multiplier, kbin, atothek )
-     do ith=1,nthreads-1
-        call ranfmodmult( sidm_seeds(:,ith-1), atothek, sidm_seeds(:,ith) )
-     end do
-  end if
 
   ! Reset level-wide counters
   sidm_n_scatter  = 0
@@ -105,21 +86,8 @@ subroutine sidm_scatter(ilevel)
   ! grids owned by myid (virtual grids carry no particles here)
   icpu = myid
   if(numbl(icpu,ilevel)>0) then
-     call pthreadLinkedList(headl(icpu,ilevel),numbl(icpu,ilevel), &
-          nthreads,nparticles,ptrhead,next)
-     ! Thread id is re-read inside the region and passed explicitly:
-     ! threadprivate persistence across regions is not guaranteed if
-     ! the runtime rebuilds the worker team, and a stale id here
-     ! means an out-of-bounds seed write (heap corruption)
-!$omp parallel private(subnump,igrid,ith2)
-     ith2 = omp_get_thread_num()
-     if(ith2 < nthreads) then
-        subnump = nparticles(ith2)
-        igrid   = ptrhead(ith2)
-        call sub_sidm_scatter(ilevel,icpu,igrid,subnump,sidm_seeds, &
-             & ith2,nthreads)
-     end if
-!$omp end parallel
+     call sub_sidm_scatter(ilevel,icpu,headl(icpu,ilevel),numbl(icpu,ilevel), &
+          & sidm_seeds,0,1)
   end if
 #endif
 
@@ -127,8 +95,6 @@ subroutine sidm_scatter(ilevel)
   ! so the seed always moves even if no pairs were processed)
   localseed = sidm_seeds(:,0)
   call ranf(localseed, R_dummy)
-
-  deallocate(ptrhead, nparticles, sidm_seeds)
 
   ! MPI reduce all diagnostics
   call MPI_ALLREDUCE(MPI_IN_PLACE,sidm_n_scatter,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,info)
