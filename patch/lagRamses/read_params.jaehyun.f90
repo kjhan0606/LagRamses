@@ -798,8 +798,14 @@ namelist/adm_params/adm_alpha,adm_mp,adm_me_ratio,adm_xi, &
   !-------------------------------------------------
   if(sidm) then
      if(.not. pic) then
-        if(myid==1) write(*,*) 'ERROR: sidm=T requires pic=T'
-        call clean_stop
+        if(myid==1) then
+           write(*,*) 'ERROR: sidm=T requires pic=T'
+           flush(6)
+        end if
+#ifndef WITHOUTMPI
+        call MPI_ABORT(MPI_COMM_WORLD,1,ierr)
+#endif
+        error stop 1
      end if
      if(sidm_probability_guard) then
         if(.not.ieee_is_finite(sidm_cross_section) .or. &
